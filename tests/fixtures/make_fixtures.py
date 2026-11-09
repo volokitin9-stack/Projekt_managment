@@ -187,10 +187,24 @@ def month_tasks(variant: int = 1):
             t.append(_task(eng, "CIS", "ЗК ШО", 1, None, None, "Проверка, перевод штампованых защит", task, stage,
                            group, art="ЗАПОЛНИТЬ (T.OSN.1)" if task == "1С" and eng == "Иванов" else None))
     t.append(_task("Н", "CIS", "ЗК", 1, "AUDI ", "A5 long", "Комплект защит", "КД", "Серия", "Разработка"))
+    t.append(_task("Орлов/Соколов", "CIS", "ЗК", 3, "Tenet", "T4", "Защита картера", "Примерить", "Примерка",
+                   "Замеры"))                                    # fit only: no design engineer
+    t.append(_task("Сидоров", "CIS", "ЗК", 0, "Lynk & Co", "900", "Комплект защит", "КД", "Серия",
+                   "Разработка"))                                # priority 0 (undefined)
+    t.append(_task("Сидоров", "CIS", "ЗК", 2, "Tenet", "L4", "Комплект защит", "Расширение", "Серия перевод",
+                   "Перевод"))
+    t.append(_task("Сидоров", "CIS", "ЗК", 2, "Tenet", "L4", "Комплект защит", "1С", "Серия перевод", "Перевод"))
     t.append(_task("Иванов", "CIS", "Прочее", 1.1, None, None, "Техподдержка", None,
                    "Улучшения конструктивов (запрос пр-во, акты, рекламации)", "Изменения (запросы, акты, рекламации)"))
     if variant == 2:
         t.append(_task("Петров", "OEM", "ТСУ", 1, "Lada", "Azimut", "ТСУ", "Верификация", "Серия", "Тесты"))
+    if variant == 3:     # December: GAC S9 continues, Honda is finished/absent, a new project starts
+        t = [_task("Иванов", "CIS", "ЗК", 1, "GAC", "S9", "Комплект защит", "1С", "Серия", "Разработка", plan=6,
+                   fact=2, days={2: 2}),
+             _task("Иванов", "CIS", "ЗК", 1, "GAC", "S9", "Комплект защит", "Прочее", "Оформление",
+                   "Выгрузка в PDM", plan=1),
+             _task("Петров", "CIS", "ЗК", 2, "Chery", "Tiggo 4", "Защита картера", "Разработать", "Разработка",
+                   "Разработка", plan=16)]
     return t
 
 
@@ -217,6 +231,8 @@ def write_month_sheet(ws, tasks, filter_engineer=None):
     ws.cell(r, 2, "ДОП РАБОТЫ"); r += 1
     ws.cell(r, 2, "Иванов"); ws.cell(r, 4, "Доп"); ws.cell(r, col["Комментарии"], "Упаковка защит")
     ws.cell(r, col["Факт месяц"], 3); r += 1
+    ws.cell(r, 1, 900); ws.cell(r, 2, "Петров"); ws.cell(r, 4, "Доп"); ws.cell(r, col["Факт месяц"], 0)
+    r += 1                                                       # empty placeholder row
     ws.cell(r, 2, "БАНК ЗАДАЧ"); r += 1
     ws.cell(r, 7, "JETOUR"); ws.cell(r, 8, "X50"); ws.cell(r, 10, "Сетки"); ws.cell(r, 11, "Разработать")
     ws.cell(r, col["Комментарии"], "На Август"); r += 1
@@ -229,7 +245,8 @@ def write_month_sheet(ws, tasks, filter_engineer=None):
         ws.auto_filter.add_filter_column(1, [filter_engineer])
 
 
-def make_monthly_workbook(path: Path, variant: int = 1, duplicate_november: bool = False) -> None:
+def make_monthly_workbook(path: Path, variant: int = 1, duplicate_november: bool = False,
+                          december: bool = False) -> None:
     wb = openpyxl.Workbook()
     oct_ws = wb.active
     oct_ws.title = "Октябрь"
@@ -242,5 +259,7 @@ def make_monthly_workbook(path: Path, variant: int = 1, duplicate_november: bool
     summ["A15"], summ["B15"] = "ТГ", "Марка+Модель"
     if duplicate_november:
         write_month_sheet(wb.create_sheet("Ноябрь (2)"), month_tasks(variant))
+    if december:
+        write_month_sheet(wb.create_sheet("Декабрь"), month_tasks(3))
     wb.create_sheet("Приоритеты")["B5"] = "Месяц"
     wb.save(path)

@@ -129,14 +129,34 @@ class DashboardClient:
     def get_project(self, pid) -> dict:
         return self._request("GET", f"/api/projects/{pid}", auth=False)
 
-    def create_project(self, data: dict, sync: dict) -> dict:
-        self._check_fields(data)
-        return self._request("POST", "/api/agent/projects", {"project": data, "sync": sync})
+    def _check_activities(self, activities: Optional[list]) -> None:
+        if activities is None:
+            return
+        sch = self.schema()
+        if "activities" not in sch.get("supports", []):
+            raise ApiError("backend does not support project activities; refusing to send them")
+        allowed = set(sch.get("activity_fields") or [])
+        unsupported = {k for a in activities for k in a} - allowed
+        if unsupported:
+            raise ApiError(f"refusing to send activity fields the backend does not support: {sorted(unsupported)}")
 
-    def update_project(self, pid, changes: dict, expected_version: Optional[int], sync: dict) -> dict:
+    def create_project(self, data: dict, sync: dict, activities: Optional[list] = None,
+                       activity_scope: Optional[dict] = None) -> dict:
+        self._check_fields(data)
+        self._check_activities(activities)
+        body = {"project": data, "sync": sync}
+        if activities is not None:
+            body.update(activities=activities, activity_scope=activity_scope)
+        return self._request("POST", "/api/agent/projects", body)
+
+    def update_project(self, pid, changes: dict, expected_version: Optional[int], sync: dict,
+                       activities: Optional[list] = None, activity_scope: Optional[dict] = None) -> dict:
         self._check_fields(changes)
-        return self._request("PATCH", f"/api/agent/projects/{pid}",
-                             {"changes": changes, "expected_version": expected_version, "sync": sync})
+        self._check_activities(activities)
+        body = {"changes": changes, "expected_version": expected_version, "sync": sync}
+        if activities is not None:
+            body.update(activities=activities, activity_scope=activity_scope)
+        return self._request("PATCH", f"/api/agent/projects/{pid}", body)
 
     def save_sync_run(self, run: dict) -> None:
         self._request("POST", "/api/agent/sync-runs", run)

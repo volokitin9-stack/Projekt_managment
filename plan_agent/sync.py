@@ -7,7 +7,7 @@ from typing import Optional
 from .client import ApiError, AuthError, DashboardClient, DuplicateError, NetworkError, VersionConflict
 from .config import OwnershipPolicy
 from .matching import ProjectMatcher
-from .models import ChangePlan, ChangeType, ProjectRecord
+from .models import ChangePlan, ChangeType, Conflict, ProjectRecord
 from .ownership import plan_field_changes
 
 log = logging.getLogger("plan_agent.sync")
@@ -41,17 +41,28 @@ def build_plan(records: list[ProjectRecord], existing: list[dict], policy: Owner
                 continue
             claimed[pid] = f"{rec.source_sheet}!{rec.source_row}"
             changes, conflicts, identity = plan_field_changes(m.project, payload, policy, writable)
+            older = bool(rec.last_plan_month and m.project.get("last_plan_month")
+                         and rec.last_plan_month < m.project["last_plan_month"])
+            if older and changes:
+                conflicts.append(Conflict("*project fields*", m.project["last_plan_month"], rec.last_plan_month,
+                                          "kept_dashboard", "file is an older plan month than the dashboard; only "
+                                          "that month's activities are updated"))
+                changes = []
+            act_changes, act_conflicts = diff_activities(m.project, rec)
+            conflicts.extend(act_conflicts)
             if identity:
                 plans.append(ChangePlan(rec, ChangeType.REVIEW, pid, m.project.get("version"), changes, conflicts,
-                                        reason="identifier change: " + "; ".join(identity)))
+                                        reason="identifier change: " + "; ".join(identity),
+                                        activity_changes=act_changes))
                 continue
             if rec.needs_review():
                 plans.append(ChangePlan(rec, ChangeType.REVIEW, pid, m.project.get("version"), changes, conflicts,
-                                        reason="record has ambiguities that need review (see issues)"))
+                                        reason="record has ambiguities that need review (see issues)",
+                                        activity_changes=act_changes))
                 continue
-            ctype = ChangeType.UPDATE if changes else ChangeType.UNCHANGED
+            ctype = ChangeType.UPDATE if (changes or act_changes) else ChangeType.UNCHANGED
             plans.append(ChangePlan(rec, ctype, pid, m.project.get("version"), changes, conflicts,
-                                    reason=f"matched by {m.method}"))
+                                    reason=f"matched by {m.method}", activity_changes=act_changes))
             continue
         # new
         if rec.needs_review():
@@ -59,6 +70,39 @@ def build_plan(records: list[ProjectRecord], existing: list[dict], policy: Owner
             continue
         plans.append(ChangePlan(rec, ChangeType.NEW, reason=m.reason))
     return plans
+
+
+def diff_activities(existing: dict, rec: ProjectRecord) -> tuple[list[str], list[Conflict]]:
+    """Compare the record's activities of its plan month with the dashboard's.
+    Other months are never compared (their history is kept as is)."""
+    if rec.activity_payload is None:
+        return [], []
+    month = rec.activity_month
+    current = {a["activity_key"]: a for a in existing.get("activities") or [] if a.get("plan_month") == month}
+    changes, conflicts = [], []
+    keys = set()
+    for a in rec.activity_payload:
+        key = a["activity_key"]
+        keys.add(key)
+        cur = current.get(key)
+        if cur is None:
+            changes.append(f"+{key}")
+            continue
+        sources = cur.get("field_sources") or {}
+        for f, v in a.items():
+            if cur.get(f) == v:
+                continue
+            if sources.get(f) == "manual":
+                conflicts.append(Conflict(f"activity[{key}].{f}", cur.get(f), v, "kept_dashboard",
+                                          "activity field was edited manually in the dashboard"))
+                continue
+            changes.append(f"~{key}.{f}")
+        if cur.get("removed_from_source"):
+            changes.append(f"~{key}.removed_from_source")
+    for key, cur in current.items():
+        if key not in keys and not cur.get("removed_from_source"):
+            changes.append(f"-{key}")
+    return changes, conflicts
 
 
 class SyncExecutor:
@@ -105,8 +149,9 @@ class SyncExecutor:
     # ------------------------------------------------------------------ #
     def _create(self, p: ChangePlan) -> None:
         data = {k: v for k, v in p.record.to_payload().items() if k in self.writable and v not in (None, [], {})}
+        acts, scope = self._activities(p)
         try:
-            created = self.c.create_project(data, self.sync_meta)
+            created = self.c.create_project(data, self.sync_meta, acts, scope)
             p.dashboard_id = created.get("id")
             p.result = "ok"
         except DuplicateError as e:
@@ -123,10 +168,17 @@ class SyncExecutor:
             p.candidates = [{"id": i} for i in ids]
             p.result, p.error = "skipped", "backend reported an existing project with the same identity"
 
+    @staticmethod
+    def _activities(p: ChangePlan):
+        if p.record.activity_payload is None:
+            return None, None
+        return p.record.activity_payload, {"plan_month": p.record.activity_month}
+
     def _update(self, p: ChangePlan) -> None:
         changes = {c.field: c.new for c in p.changes}
+        acts, scope = self._activities(p) if p.activity_changes else (None, None)
         try:
-            self.c.update_project(p.dashboard_id, changes, p.dashboard_version, self.sync_meta)
+            self.c.update_project(p.dashboard_id, changes, p.dashboard_version, self.sync_meta, acts, scope)
             p.result = "ok"
         except VersionConflict:
             current = self.c.get_project(p.dashboard_id)

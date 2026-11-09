@@ -32,7 +32,9 @@ def _cmp_key(p) -> Optional[str]:
     get = p.get if isinstance(p, dict) else lambda k: getattr(p, k)
     vals = [get("manufacturer"), get("vehicle_model"), get("product_type")]
     if all(vals):
-        return "|".join(norm_key(v) for v in vals)
+        cat = (get("record_category") if isinstance(p, dict) else getattr(p, "record_category", None)) \
+            or "main_project"
+        return cat + ":" + "|".join(norm_key(v) for v in vals)
     return None
 
 
@@ -102,10 +104,16 @@ class ProjectMatcher:
                                    "separate project or duplicate?")
             return MatchResult("matched", target, method="manufacturer+model+product")
 
-        # Fuzzy: candidates only.
+        # Fuzzy: candidates only.  Two records that both have a complete
+        # identity (manufacturer + model + product) which differs are different
+        # projects by definition (e.g. "AUDI A5 long kit" vs "AUDI Q5 kit"), so
+        # name similarity is only used when one side lacks a complete identity.
         cands = []
         name = norm_key(rec.project_name)
+        rec_full = _cmp_key(rec) is not None
         for p in self.existing:
+            if rec_full and _cmp_key(p) is not None:
+                continue
             score = SequenceMatcher(None, name, norm_key(p.get("project_name"))).ratio() if name else 0
             if score >= FUZZY_THRESHOLD:
                 cands.append({**_brief(p), "similarity": round(score, 2)})

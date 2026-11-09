@@ -101,7 +101,8 @@ python -m plan_agent analyze plan.xlsx --month 2026-11
 
 * A project is Марка + Модель + Продукт/Задача, made of the month's task rows.
 * Rows hidden by an AutoFilter are still read.
-* The ad-hoc work and backlog sections, totals, the resource table and the dropdown lists are not imported as projects.
+* The sheet becomes three dashboard categories: main engineering projects, additional work (ДОП РАБОТЫ) and task backlog (БАНК ЗАДАЧ). Totals, the resource table and the dropdown lists are accounted for but not imported.
+* Every task row is an activity with its own assignee, hours, progress and source reference. Activities are stored per month, so December adds to November's history instead of replacing it.
 * Summary or pivot sheets of the month are reported but never imported.
 * Two plan sheets for the same month stop the run for verification.
 

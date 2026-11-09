@@ -55,9 +55,12 @@ Some planning files belong to a known family, and an explicit profile reads them
   * **Two plan sheets for the same month** stop the run with *Verification required* until `sheet_override: {"2026-11": "<sheet>"}` is set.
   * If the file name names a different year than the target month, the run also stops for verification.
 * **Columns** are found by header text, never by letter.
-* **Sections and row structure:** `section_markers` and `import_sections` split the sheet into sections (ДОП РАБОТЫ / БАНК ЗАДАЧ are not imported by default). Task rows end at `end_of_tasks_prefixes`. `cycle_closing_task_groups` defines task-cycle boundaries.
-* **Workflow:** `activity_rules` is an ordered, first-match rule list over (*План на месяц*, *Стадия проекта*, *Группа задач*) that assigns each task to a dashboard stage.
-* **Status, priority and engineer:** `status_rules` derive status from evidence only, `priority_map` translates priorities, and `unassigned_engineer_markers` lists engineer values that are not a person.
+* **Sections and categories:** `section_markers` split the sheet into sections, and `section_categories` turns each section into a dashboard category: main section → *main_project*, ДОП РАБОТЫ → *additional_work*, БАНК ЗАДАЧ → *backlog*. Task rows end at `end_of_tasks_prefixes`. `cycle_closing_task_groups` defines engineering-cycle boundaries.
+* **Accounting:** every non-empty row of the sheet is put into a ledger: a record, a header, a section marker, an empty placeholder, totals, the resource table or the dropdown lists. The dry run proves that no row is unaccounted for or counted twice, and compares actual hours with the sheet's own «Итого факт в день» totals.
+* **Identity:** `id_prefixes` set the stable identifiers (`PRJ-`, `AW-`, `BL-` + a hash of the identity fields). Kits and individual products are separate projects, and ambiguous records stay in the review queue.
+* **Workflow:** `activity_rules` is an ordered, first-match rule list over (*План на месяц*, *Стадия проекта*, *Группа задач*) that assigns each task an activity `type`. The five main stages define the project's current stage; `testing`, `transfer_extension` and `engineering_change` are additional types.
+* **Engineers:** only assignees of `design_activity_types` become the project's responsible engineer, so scanning and fitment people stay on their activities. `unknown_engineer_values` (e.g. «Н») are kept as original values and sent to review.
+* **Progress and priority:** `status_rules` give *planned* / *in progress* from hours only, and never *done*. `priority_map` translates priorities; `undefined_priority_values` (e.g. 0) are kept as original values with an empty dashboard priority.
 * **Re-validation:** `strict_value_kinds` lists value kinds where a value never seen at approval sends the project to review.
 
 The first dry run copies these rules, together with every observed value combination, into `state/mapping.proposed.yaml`. Approving it makes the approved copy the permanent configuration for later files. A new column structure (fingerprint) triggers a new validation.

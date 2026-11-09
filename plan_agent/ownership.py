@@ -14,7 +14,7 @@ from .config import OwnershipPolicy
 from .models import Conflict, FieldChange
 from .normalize import norm_key
 
-TRACKING_FIELDS = {"source_file", "source_row"}
+TRACKING_FIELDS = {"source_file", "source_row", "last_plan_month"}
 
 
 def _empty(v: Any) -> bool:

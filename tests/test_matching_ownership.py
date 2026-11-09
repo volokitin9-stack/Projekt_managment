@@ -88,3 +88,12 @@ def test_row_move_alone_is_not_an_update(policy):
     ch, _, _ = plan_field_changes({"source_row": 9, "source_file": "a.xlsx"},
                                   {"source_row": 8, "source_file": "b.xlsx"}, policy, {"source_row", "source_file"})
     assert ch == []
+
+
+def test_similar_names_with_different_complete_identity_are_not_candidates():
+    m = ProjectMatcher([{"id": 9, "external_project_id": "PRJ-1", "article_number": None, "manufacturer": "AUDI",
+                         "vehicle_model": "Q5", "product_type": "Комплект защит",
+                         "project_name": "AUDI Q5 Комплект защит"}])
+    r = m.match(R(manufacturer="AUDI", vehicle_model="A5 long", product_type="Комплект защит",
+                  project_name="AUDI A5 long Комплект защит"))
+    assert r.kind == "new"

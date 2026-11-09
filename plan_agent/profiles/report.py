@@ -1,48 +1,39 @@
-"""Initial-analysis / dry-run report for the monthly work-plan profile."""
+"""Dry-run report for the monthly work-plan profile."""
 from __future__ import annotations
 
 from collections import Counter, defaultdict
 
 from ..models import ChangeType, Severity
 
-STAGE_LABEL = {"scanning": "Scanning", "development": "Development", "test_prototype": "Test Prototype",
-               "measurement": "Measurement", "documentation": "Documentation",
-               "extra:series_transfer": "Series transfer (extra)", "extra:testing": "Testing (extra)",
-               "extra:engineering_change": "Engineering change (extra)", None: "— unknown —"}
-BOARD = ["scanning", "development", "test_prototype", "measurement", "documentation",
-         "extra:series_transfer", "extra:testing", "extra:engineering_change", None]
-
-FIELD_MAP = [
-    ("Марка", "manufacturer", "dashboard field (identity)"),
-    ("Модель", "vehicle_model", "dashboard field (identity)"),
-    ("Продукт/Задача", "product_type", "dashboard field (identity)"),
-    ("Марка + Модель + Продукт", "project_name", "composed display name"),
-    ("Артикул", "article_number", "only when it is one valid article; otherwise extra_attributes.article_original"),
-    ("КО", "assigned_engineer", "designer of the development/КД/1С tasks; all names in extra_attributes.engineers "
-                                "and per task in stages[].engineer"),
-    ("Приоритет", "priority", "1, 1.1–1.3 → high · 2 → medium · 3 → low · other values kept unknown; "
-                              "original in extra_attributes.priority_original"),
-    ("План на месяц + Стадия проекта + Группа задач", "stages[] / current_stage",
-     "each task row → one activity; mapped by the ordered activity rules"),
-    ("Факт месяц / ОК", "stages[].status → project_status",
-     "hours logged → in_progress · 'ОК' > 0 → done (to confirm) · planned only → pending"),
-    ("План месяц, Факт месяц, days 1–31", "stages[].details",
-     "planned/actual hours and hours per calendar date"),
-    ("Канал продаж", "extra_attributes.sales_channel", "not a dashboard field"),
-    ("ТГ", "extra_attributes.product_group", "not a dashboard field"),
-    ("Комментарии", "extra_attributes.plan_comment + stages[].comment", "never written to dashboard comments"),
-    ("Номер заказа, NOK, ОК, Факт, Вероятность, Шанс, Выполнимо", "stages[].details", "preserved as is"),
-    ("Вероятность2", "stages[].details.unmapped_columns", "duplicate of 'Вероятность'; preserved"),
-    ("Марка+Модель", "— (cross-check only)", "formula column; mismatches are reported"),
-    ("№", "— (not imported)", "running row counter, changes every month; not an identifier"),
-    ("—", "planned_start_date / planned_end_date", "NOT in the file; left empty (no deadlines are invented)"),
-    ("—", "actual_completion_date", "NOT in the file; left empty"),
-    ("—", "description, comments, photos", "dashboard-owned; never written"),
-]
+TYPE_LABEL = {"scanning": "Scanning", "development": "Development", "test_prototype": "Test Prototype",
+              "measurement": "Measurement", "documentation": "Documentation", "testing": "Testing (additional)",
+              "transfer_extension": "Transfer/Extension (additional)",
+              "engineering_change": "Engineering change (additional)", None: "— no activity type —"}
+MAIN = ["scanning", "development", "test_prototype", "measurement", "documentation"]
+TYPES = MAIN + ["testing", "transfer_extension", "engineering_change", None]
+CAT_LABEL = {"main_project": "A. Main engineering projects", "additional_work": "B. Additional work",
+             "backlog": "C. Task backlog"}
+LEDGER_LABEL = {"header": "header row", "above_header": "rows above the header", "section_marker": "section marker",
+                "empty_placeholder": "empty placeholder row (no description, no hours)",
+                "totals": "totals rows", "resource_table": "resource table", "dropdown_lists": "dropdown source lists",
+                "summary_area_other": "other summary-area row"}
 
 
-def _cell(v) -> str:
-    return str(v if v not in (None, "", []) else "—").replace("|", "/").replace("\n", " ")
+def _c(v) -> str:
+    if v in (None, "", []):
+        return "—"
+    if isinstance(v, float):
+        v = f"{v:g}"
+    return str(v).replace("|", "/").replace("\n", " ")
+
+
+def _h(x) -> str:
+    return f"{x:g}" if x else "0"
+
+
+def _rows(r) -> str:
+    rs = r.source_rows
+    return f"{rs[0]}–{rs[-1]}" if len(rs) > 1 else str(rs[0])
 
 
 def render_profile_analysis(a, plans, report) -> str:
@@ -52,247 +43,292 @@ def render_profile_analysis(a, plans, report) -> str:
     plan_of = {id(x.record): x for x in plans}
     L: list[str] = []
     w = L.append
-    w(f"# Dry run: {a.file_name} → Projekt_managment")
-    w("")
-    w(f"*Profile:* `{an['profile']}` · *target month:* **{an['target_month']}** · *source worksheet:* "
-      f"**{an.get('source_sheet')}** · *fingerprint:* `{a.fingerprint}` · *mode:* dry run (nothing written)")
-    w("")
-    w("> Only the worksheet of the target month is imported. Other worksheets were inspected for structure only.")
-    w("")
 
-    # ---------------------------------------------------------------- 1
-    reviews = [r for r in recs if r.needs_review()]
-    ex = an.get("excluded", {})
-    w("## 1. Detected projects")
-    w("")
-    w(f"* **{len(recs)} project records** from {an['task_rows']} task rows of '{an.get('source_sheet')}' "
-      f"(of which {an['hidden_task_rows']} rows are hidden by the sheet's AutoFilter; all were read)")
-    w(f"* **{len(recs) - len(reviews)}** can be identified reliably, **{len(reviews)}** need verification")
-    w(f"* Not imported as projects: {len(ex.get('extra_work', []))} ad-hoc work rows (section ДОП РАБОТЫ), "
-      f"{len(ex.get('backlog', []))} backlog rows (section БАНК ЗАДАЧ), {len(ex.get('operational', []))} "
-      "operational items without a vehicle")
-    w("")
-
-    # ---------------------------------------------------------------- 2
-    lay = an["layout"]
-    w("## 2. Identified structure")
-    w("")
-    w("**Worksheets mentioning the target month**")
-    w("")
-    w("| Worksheet | Classification |")
-    w("|---|---|")
-    month_no = int(an["target_month"][-2:])
-    for s in an["sheets"]:
-        if month_no in s["months"]:
-            w(f"| {s['name']} | {s['role']} |")
-    others = Counter(s["role"] for s in an["sheets"] if month_no not in s["months"])
-    w("")
-    w(f"Other worksheets (not imported): {dict(others)}")
-    w("")
-    w(f"**'{an.get('source_sheet')}' layout:** header on row {lay['header_row']}; task rows "
-      f"{lay['section_rows']['main'][0]}–{lay['section_rows']['main'][1]} (projects); section **ДОП РАБОТЫ** rows "
-      f"{_range(lay['section_rows'].get('extra_work'))}; section **БАНК ЗАДАЧ** rows "
-      f"{_range(lay['section_rows'].get('backlog'))}; totals from row {lay['end_of_tasks_row']}; below them the "
-      f"resource table and the dropdown source lists. {lay['day_columns']} day columns (hours per day). "
-      f"Merged ranges: {len(an.get('merged_ranges', []))}. AutoFilter: {an.get('autofilter') or 'none'}.")
-    w("")
-    w("**Project = vehicle (Марка + Модель) + product (Продукт/Задача).** Each project has one or more task "
-      "cycles in the month, e.g. *Примерить → КД → 1С → Прочее (Выгрузка в PDM)*. Column № is a running "
-      "counter and is not used as an identifier. A single valid Артикул is used as the strongest identifier.")
-    w("")
-    sizes = Counter(len(r.activities) for r in recs)
-    w(f"Tasks per project: {dict(sorted(sizes.items()))}")
-    w("")
-
-    # ---------------------------------------------------------------- 3
-    w("## 3. Engineering workflow and stage mapping")
-    w("")
-    w("Department workflow found in the file (column *Стадия проекта*, tasks *План на месяц*, "
-      "groups *Группа задач*):")
-    w("")
-    w("* **New product:** Сканирование (Отсканировать) → Разработка (Разработать / Доработать) → "
-      "Заказать опытник → Лаборатория, разбор опытников → Примерка (Примерить, «Замеры») → "
-      "Серия (КД, 1С) → Оформление (Выгрузка в PDM)")
-    w("* **Transfer/extension of an existing product:** Серия перевод (Перевод / Расширение → 1С → PDM)")
-    w("* **Other:** Тесты, Улучшения конструктивов / Изменения (change requests), Операционка")
-    w("")
-    w("| Task \\| Project stage \\| Task group (from the file) | Dashboard stage | Rows |")
-    w("|---|---|---|")
-    for combo, info in a.proposal["value_mappings"]["activity_combinations"].items():
-        w(f"| {combo.replace('|', '·')} | {STAGE_LABEL.get(info['stage'], info['stage'])} | {info['rows']} |")
-    w("")
-    w("The dashboard's current stage of a project = the furthest stage with hours logged this month, "
-      "otherwise the earliest planned stage that is not done. A passed date never marks anything complete.")
-    w("")
-
-    # ---------------------------------------------------------------- 4
-    w("## 4. Excel → dashboard field mapping")
-    w("")
-    w("| Excel column | Dashboard field | Rule |")
-    w("|---|---|---|")
-    for col, fld, rule in FIELD_MAP:
-        w(f"| {col} | `{fld}` | {rule} |")
-    w("")
-
-    # ---------------------------------------------------------------- 5
-    w("## 5. Projects and their stages")
-    w("")
-    w("| # | Project | Rows | ТГ | Stage | Status | Engineer | Priority | Tasks this month | Action |")
-    w("|---|---|---|---|---|---|---|---|---|---|")
-    for i, r in enumerate(recs, 1):
-        tasks = ", ".join(f"{x.name}→{(x.stage or '?').replace('extra:', '+')}" for x in r.activities)
+    def action(r):
         pl = plan_of.get(id(r))
-        rows = f"{r.source_rows[0]}–{r.source_rows[-1]}" if len(r.source_rows) > 1 else str(r.source_row)
-        w(f"| {i} | {_cell(r.project_name)} | {rows} | {_cell(r.extra_attributes.get('product_group'))} | "
-          f"{STAGE_LABEL.get(r.current_stage, r.current_stage)} | {_cell(r.project_status)} | "
-          f"{_cell(r.assigned_engineer)} | {_cell(r.priority)} ({_cell(r.extra_attributes.get('priority_original'))}) "
-          f"| {tasks} | {pl.change_type.value if pl else '?'} |")
+        return pl.change_type.value if pl else "?"
+
+    review = [r for r in recs if r.needs_review()]
+    ok = {c: [r for r in recs if r.record_category == c and not r.needs_review()] for c in CAT_LABEL}
+    acts = [(r, x) for r in recs for x in r.activities]
+
+    w(f"# November dry run (v2): {a.file_name} → Projekt_managment")
+    w("")
+    w(f"*Target month:* **{an['target_month']}** · *source worksheet:* **{an.get('source_sheet')}** "
+      f"(confirmed) · *fingerprint:* `{a.fingerprint}` · **dry run, nothing written**")
     w("")
 
-    # ---------------------------------------------------------------- 6
-    w("## 6. Responsible engineers")
+    # ------------------------------------------------------------------ 1
+    w("## 1. Record counts by category")
     w("")
-    eng_proj = defaultdict(list)
-    for r in recs:
-        eng_proj[r.assigned_engineer or "— not assigned —"].append(r)
-    task_eng = Counter(x.engineer or "— none —" for r in recs for x in r.activities)
-    w("| Engineer (КО) | Projects as responsible | Task rows (all projects) |")
-    w("|---|---|---|")
-    for e in sorted(set(eng_proj) | set(task_eng), key=lambda k: -len(eng_proj.get(k, []))):
-        w(f"| {e} | {len(eng_proj.get(e, []))} | {task_eng.get(e, 0)} |")
+    w("| Category | Importable | In review queue | Activities | Planned h | Actual h |")
+    w("|---|---|---|---|---|---|")
+    for c, label in CAT_LABEL.items():
+        rs = [r for r in recs if r.record_category == c]
+        rv = [r for r in rs if r.needs_review()]
+        na = sum(len(r.activities) for r in rs)
+        ph = sum(x.details["planned_hours"] or 0 for r in rs for x in r.activities)
+        ah = sum(x.details["actual_hours"] or 0 for r in rs for x in r.activities)
+        w(f"| {label} | **{len(rs) - len(rv)}** | {len(rv)} | {na} | {_h(ph)} | {_h(ah)} |")
+    tot_p = sum(x.details["planned_hours"] or 0 for _, x in acts)
+    tot_a = sum(x.details["actual_hours"] or 0 for _, x in acts)
+    w(f"| **Total** | **{len(recs) - len(review)}** | **{len(review)}** | **{len(acts)}** | {_h(tot_p)} | {_h(tot_a)} |")
     w("")
-    vocab = an.get("department_vocabulary", {})
-    if vocab.get("engineer"):
-        w(f"Engineer list in the sheet's dropdown: {vocab['engineer']}. Values with '/' are two-person teams "
-          "(scanning and trial fits). Values in unassigned_engineer_markers are treated as *unassigned* (to confirm).")
-        w("")
-
-    # ---------------------------------------------------------------- 7
-    w("## 7. Deadlines and priorities")
-    w("")
-    w("* **Deadlines: the November worksheet contains no date columns and no deadlines.** Planned start/end "
-      "and completion dates stay empty. The tasks are planned *within* the month "
-      f"({an['target_month']}); this is stored as `plan_month`, not as a deadline. Dates mentioned in "
-      "comments (e.g. «ЖДЕМ ОПЫТНИК 06.11») are kept as text only.")
-    w("* Hours booked per calendar day (columns 1–31) are kept per task as `hours_by_date` (actual work log).")
-    pr = Counter((r.priority, str(r.extra_attributes.get("priority_original"))) for r in recs)
-    w("* Priorities found: " + ", ".join(f"{orig} → {mapped or 'unknown'} ({n})" for (mapped, orig), n in
-                                         sorted(pr.items(), key=lambda x: str(x[0]))))
-    w("")
-
-    # ---------------------------------------------------------------- 8
-    w("## 8. Potential duplicates and ambiguous records")
-    w("")
-    for title, codes in (("Cannot be identified (no vehicle / incomplete)", ("no_vehicle", "incomplete_identity")),
-                         ("Possible duplicates / related records", ("related_projects_same_vehicle",
-                                                                    "multiple_work_cycles",
-                                                                    "possible_separate_projects")),
-                         ("Conflicting or inconsistent values", ("priority_conflict", "vehicle_full_mismatch",
-                                                                 "invalid_article", "engineer_placeholder",
-                                                                 "unmapped_priority", "unmapped_activity"))):
-        items = [(r, i) for r in recs for i in r.issues if i.code in codes]
-        w(f"**{title}** ({len(items)})")
-        w("")
-        for r, i in items:
-            w(f"* {_cell(r.project_name)} (rows {r.source_rows[0]}–{r.source_rows[-1]}): {i.message}")
-        w("")
-    spell = [r for r in recs if r.extra_attributes.get("spelling_variants")]
-    names = defaultdict(set)
-    for r in recs:
-        if r.manufacturer:
-            names[r.manufacturer.strip().lower()].add(r.manufacturer.strip())
-    variants = {k: sorted(v) for k, v in names.items() if len(v) > 1}
-    if variants or spell:
-        w(f"**Spelling variants** (matched as the same value, displayed as written): {list(variants.values())}")
-        w("")
-
-    # ---------------------------------------------------------------- 9
     c = report["counts"]
-    w("## 9. Proposed dashboard changes (dry run)")
+    w(f"Proposed dashboard changes: **create {c['new']}**, update {c['updated']}, unchanged {c['unchanged']}, "
+      f"held in review {c['review']}. Nothing is deleted; dashboard comments, photos and attachments are not touched.")
     w("")
-    if not report.get("dashboard_comparison"):
-        w("> Dashboard could not be queried; counts assume an empty dashboard.")
+
+    # ------------------------------------------------------------------ 2
+    ledger = an["ledger"]
+    in_records = defaultdict(list)
+    for r in recs:
+        for row in r.source_rows:
+            in_records[row].append(r)
+    unaccounted = [row for row in an["nonempty_rows"] if row not in in_records and row not in ledger]
+    double = [row for row, rs in in_records.items() if len(rs) > 1]
+    w("## 2. Verification: no task silently discarded")
+    w("")
+    w(f"Every non-empty row of '{an.get('source_sheet')}' is assigned to exactly one place:")
+    w("")
+    w("| Rows | Count |")
+    w("|---|---|")
+    for cat, label in CAT_LABEL.items():
+        w(f"| task rows → {label} | {sum(len(r.source_rows) for r in recs if r.record_category == cat)} |")
+    for kind, n in Counter(v["kind"] for v in ledger.values()).most_common():
+        w(f"| {LEDGER_LABEL.get(kind, kind)} | {n} |")
+    w(f"| **total non-empty rows** | **{len(an['nonempty_rows'])}** |")
+    w("")
+    w(f"* Unaccounted rows: **{len(unaccounted)}** {unaccounted if unaccounted else ''}")
+    w(f"* Rows counted twice: **{len(double)}** {double if double else ''}")
+    w(f"* Rows hidden by the sheet's AutoFilter ({an.get('autofilter', {}).get('filters')}): "
+      f"{an['hidden_task_rows']} task rows - all read")
+    empties = [(row, v) for row, v in sorted(ledger.items()) if v["kind"] == "empty_placeholder"]
+    if empties:
+        w("* Empty placeholder rows (no description, no task, 0 hours) - not imported, listed for completeness: " +
+          "; ".join(f"row {row} ({', '.join(f'{k}={x}' for k, x in v['values'].items()) or 'blank'})"
+                    for row, v in empties))
+    w("")
+
+    # ------------------------------------------------------------------ 3
+    ids = [r.external_project_id for r in recs if r.external_project_id]
+    idc = Counter(ids)
+    w("## 3. Verification: no duplicate projects")
+    w("")
+    w(f"* Stable identifiers generated: {len(ids)}; **unique: {len(set(ids))}**; collisions: "
+      f"{[k for k, n in idc.items() if n > 1] or 'none'}")
+    w(f"* Dashboard projects matched by identifier/article/identity: {c['updated'] + c['unchanged']} "
+      f"(the dashboard is currently empty); duplicate candidates from the dashboard: {c['duplicate_candidates']}")
+    w("* Identity: main project = manufacturer + model + product type (+ article when it is one valid number); "
+      "additional work = month + engineer + description (+ vehicle/product); backlog = vehicle + product + task. "
+      "The same work appearing in a later month gets the **same identifier** and updates the project.")
+    rel = [(r, i) for r in recs for i in r.issues if i.code in ("related_projects_same_vehicle",
+                                                                 "backlog_matches_active_project")]
+    w(f"* Related records kept **separate** (not merged), for your information ({len(rel)}):")
+    for r, i in rel:
+        w(f"  * {_c(r.project_name)} [{CAT_LABEL[r.record_category][:2].strip('.')}, rows {_rows(r)}]: {i.message}")
+    cyc = [r for r in recs if r.extra_attributes.get("cycles")]
+    w(f"* Projects with several engineering cycles this month, kept as **one** project with numbered activities "
+      f"({len(cyc)}): " + "; ".join(f"{r.project_name} {r.extra_attributes['cycles']}" for r in cyc))
+    w("")
+
+    # ------------------------------------------------------------------ 4
+    w("## 4. A. Main engineering projects")
+    w("")
+    w("| ID | Project | Rows | ТГ | Current stage | Status | Design engineer | Priority (orig → dashboard) | "
+      "Activities: type · assignee · plan/fact h | Action |")
+    w("|---|---|---|---|---|---|---|---|---|---|")
+    for r in ok["main_project"]:
+        po = r.extra_attributes.get("priority_original")
+        al = "; ".join(f"{_c(x.name)}→{TYPE_LABEL.get(x.details['activity_type'], '?').split(' ')[0]} · "
+                       f"{_c(x.details['assignee'] or x.details['assignee_original'])} · "
+                       f"{_h(x.details['planned_hours'])}/{_h(x.details['actual_hours'])}" for x in r.activities)
+        w(f"| {r.external_project_id} | {_c(r.project_name)} | {_rows(r)} | {_c(r.extra_attributes.get('product_group'))} "
+          f"| {TYPE_LABEL.get(r.current_stage, '—') if r.current_stage else '—'} | {_c(r.project_status)} | "
+          f"{_c(r.assigned_engineer)} | {_c(po)} → {_c(r.priority)} | {al} | {action(r)} |")
+    w("")
+
+    # ------------------------------------------------------------------ 5
+    w("## 5. B. Additional work (section ДОП РАБОТЫ)")
+    w("")
+    w("Unplanned assignments: shown separately, counted in the workload.")
+    w("")
+    w("| ID | Engineer | Description | Vehicle / product | Fact h | Planned h | Row | Action |")
+    w("|---|---|---|---|---|---|---|---|")
+    for r in ok["additional_work"]:
+        x = r.activities[0]
+        vp = " / ".join(v for v in (" ".join(p for p in (r.manufacturer, r.vehicle_model) if p), r.product_type) if v)
+        w(f"| {r.external_project_id} | {_c(r.assigned_engineer)} | {_c(r.project_name)} | {_c(vp)} | "
+          f"{_h(x.details['actual_hours'])} | {_h(x.details['planned_hours'])} | {r.source_row} | {action(r)} |")
+    w("")
+
+    # ------------------------------------------------------------------ 6
+    w("## 6. C. Task backlog (section БАНК ЗАДАЧ)")
+    w("")
+    w("Future / pending work, separate from active projects. Scheduling notes are kept verbatim; "
+      "a historical label such as «На Июнь» is **not** interpreted as done or overdue.")
+    w("")
+    w("| ID | Item | Task | Assignee | Scheduling note (original) | Feasibility | Planned h | Related active project | Row |")
+    w("|---|---|---|---|---|---|---|---|---|")
+    for r in ok["backlog"]:
+        x = r.activities[0]
+        w(f"| {r.external_project_id} | {_c(r.project_name)} | {_c(x.details['task_type'])} | "
+          f"{_c(x.details['assignee'])} | {_c(r.extra_attributes.get('scheduling_note'))} | "
+          f"{_c(r.extra_attributes.get('feasibility'))} | {_h(x.details['planned_hours'])} | "
+          f"{_c(r.extra_attributes.get('related_main_project'))} | {r.source_row} |")
+    w("")
+
+    # ------------------------------------------------------------------ 7
+    w("## 7. Review queue (not synchronised)")
+    w("")
+    w("| Record | Category | Rows | Reason(s) | Hours plan/fact |")
+    w("|---|---|---|---|---|")
+    for r in review:
+        reasons = "; ".join(i.message for i in r.issues if i.severity in (Severity.REVIEW, Severity.ERROR))
+        ph = sum(x.details["planned_hours"] or 0 for x in r.activities)
+        ah = sum(x.details["actual_hours"] or 0 for x in r.activities)
+        w(f"| {_c(r.project_name)} | {CAT_LABEL[r.record_category]} | {_rows(r)} | {reasons} | {_h(ph)}/{_h(ah)} |")
+    w("")
+    warn = [(r, i) for r in recs for i in r.issues if i.severity == Severity.WARNING
+            and i.code not in ("related_projects_same_vehicle", "backlog_matches_active_project")]
+    if warn:
+        w("Warnings on importable records (imported, values preserved as original):")
         w("")
-    w(f"* Create **{c['new']}** projects · update **{c['updated']}** · unchanged {c['unchanged']} · "
-      f"held for review **{c['review']}** · invalid {c['invalid_records']}")
-    w("* Nothing is deleted. Dashboard comments, description, photos and attachments are never sent.")
-    w("* Each created project gets: identity fields, name, engineer, priority, current stage, status (when there "
-      "is evidence), `stages` (every November task with hours, status and source row) and `extra_attributes` "
-      "(channel, product group, comments, original values, plan month, derived-field list).")
+        for r, i in warn:
+            w(f"* {_c(r.project_name)} (rows {_rows(r)}): {i.message}")
+        w("")
+
+    # ------------------------------------------------------------------ 8
+    w("## 8. Engineering workload by employee (November, all categories)")
+    w("")
+    w("Hours are effort, not completion. Activity-level assignees are used, so scanning/fitment work is counted "
+      "for the people who do it. Backlog hours are future work and shown separately.")
+    w("")
+    rows = defaultdict(lambda: defaultdict(float))
+    for r, x in acts:
+        who = x.details["assignee"] or (f"'{x.details['assignee_original']}' (unverified)"
+                                        if x.details["assignee_original"] else "— not assigned —")
+        col = "review" if r.needs_review() else r.record_category
+        rows[who][f"{col}_plan"] += x.details["planned_hours"] or 0
+        rows[who][f"{col}_fact"] += x.details["actual_hours"] or 0
+        rows[who][f"{col}_n"] += 1
+        if r.record_category != "backlog":
+            rows[who]["fact_total"] += x.details["actual_hours"] or 0
+    resp = Counter(r.assigned_engineer for r in ok["main_project"] if r.assigned_engineer)
+    totals = an.get("sheet_totals", {})
+    daily, res = totals.get("daily_fact", {}), totals.get("resource_table", {})
+    w("| Employee | Responsible for (main) | Main: tasks · plan/fact h | Additional: items · fact h | "
+      "Review items: tasks · plan/fact h | Backlog: items · plan h | Fact h total | Sheet's own fact total | "
+      "Sheet: resource / plan |")
+    w("|---|---|---|---|---|---|---|---|---|")
+    for who in sorted(rows, key=lambda k: -rows[k]["main_project_plan"]):
+        d = rows[who]
+        sheet_fact = daily.get(who)
+        diff = ""
+        if sheet_fact is not None and abs(sheet_fact - d["fact_total"]) > 0.01:
+            diff = f" (Δ {d['fact_total'] - sheet_fact:+g})"
+        rt = res.get(who) or next((v for k, v in res.items() if k.split()[0] == who.split()[0]), None)
+        w(f"| {who} | {resp.get(who, 0)} | {int(d['main_project_n'])} · {_h(d['main_project_plan'])}/"
+          f"{_h(d['main_project_fact'])} | {int(d['additional_work_n'])} · {_h(d['additional_work_fact'])} | "
+          f"{int(d['review_n'])} · {_h(d['review_plan'])}/{_h(d['review_fact'])} | {int(d['backlog_n'])} · "
+          f"{_h(d['backlog_plan'])} | **{_h(d['fact_total'])}**{diff} | {_c(sheet_fact)} | "
+          f"{_c(rt and rt['resource'])} / {_c(rt and rt['plan'])} |")
+    w("")
+    w("*Sheet's own fact total* = the row «Итого факт в день <name>» of the worksheet (independent cross-check); "
+      "Δ shows a difference between the sum of the task rows and that total.")
     w("")
 
-    # ---------------------------------------------------------------- 10
-    w("## 10. Decisions requiring your verification")
+    # ------------------------------------------------------------------ 9
+    w("## 9. Activities by development stage / activity type")
     w("")
-    qs = [
-        f"**Source worksheet:** '{an.get('source_sheet')}' is the November plan; 'Сводная Ноябрь' is treated as a "
-        "derived pivot summary and not imported. Correct?",
-        "**Year:** worksheet names carry no year; the target is taken as **"
-        f"{an['target_month']}** (file name mentions 2026). Correct?",
-        "**Sections:** ДОП РАБОТЫ (ad-hoc work) and БАНК ЗАДАЧ (backlog: items marked «На Июнь/Июль/Август», "
-        "«На согласовании») are **not** imported as projects. Import any of them?",
-        "**Priority scale:** 1/1.x = high, 2 = medium, 3 = low; value 0 (Lynk & Co 900) left unknown. Correct?",
-        "**Status from 'ОК':** 'ОК' > 0 on a task = task done (from 'Факт ОК' in the summary pivot). "
-        "Correct? (Only 3 rows are affected; no project becomes 'completed'.)",
-        "**Engineer 'Н':** treated as *not assigned* (AUDI A5 long). What does it mean?",
-        "**Responsible engineer:** the designer doing development/КД/1С; when only scanning/fitting is planned this "
-        "month, the scan/fit team is shown. Acceptable?",
-        "**Series transfer (Перевод / Расширение)** is shown as an extra stage *Series transfer* instead of one of "
-        "the five main stages. Or should it count as *Documentation*?",
-        "**Records without vehicle** (section 8) are held back. Provide the vehicle, or keep them out?",
-        "**Multiple task cycles** (Honda CR-V, Jeland C4 бампер, Jeland C4 сетки) are merged into one project each. "
-        "Correct, or are they separate variants?",
-    ]
-    for q in qs:
-        w(f"1. {q}")
+    w("| Activity type | Main projects: activities · plan/fact h | Review items | Backlog | Main projects currently at this stage |")
+    w("|---|---|---|---|---|")
+    stage_n = Counter(r.current_stage for r in ok["main_project"])
+    for t in TYPES:
+        m = [x for r, x in acts if x.details["activity_type"] == t and r.record_category == "main_project"
+             and not r.needs_review()]
+        rv = [x for r, x in acts if x.details["activity_type"] == t and r.needs_review()]
+        bl = [x for r, x in acts if x.details["activity_type"] == t and r.record_category == "backlog"]
+        if not (m or rv or bl or stage_n.get(t)):
+            continue
+        w(f"| {TYPE_LABEL[t]} | {len(m)} · {_h(sum(x.details['planned_hours'] or 0 for x in m))}/"
+          f"{_h(sum(x.details['actual_hours'] or 0 for x in m))} | {len(rv)} | {len(bl)} | "
+          f"{stage_n.get(t, 0) if t in MAIN else '—'} |")
+    w(f"| — main projects without a main-stage activity | | | | {stage_n.get(None, 0)} |")
+    w("")
+    tr = [x for r, x in acts if x.details["project_stage"] == "Серия перевод"]
+    w(f"Note: {len(tr)} activities belong to projects in stage «Серия перевод». Their **Перевод/Расширение** tasks "
+      f"are typed *Transfer/Extension* ({sum(1 for x in tr if x.details['activity_type'] == 'transfer_extension')}); "
+      f"their КД / 1С / PDM tasks are typed by the task itself as *Documentation* "
+      f"({sum(1 for x in tr if x.details['activity_type'] == 'documentation')}). The original stage is kept on "
+      "every activity (`project_stage_original`).")
     w("")
 
-    # ---------------------------------------------------------------- board
+    # ------------------------------------------------------------------ 10
+    w("## 10. Proposed dashboard data model changes")
+    w("")
+    w("Existing tables and endpoints are unchanged; additions only:")
+    w("")
+    w("| Change | Purpose |")
+    w("|---|---|")
+    w("| `projects.record_category` (`main_project` / `additional_work` / `backlog`) | three separate dashboard views; "
+      "duplicate checks never cross categories |")
+    w("| `projects.last_plan_month` | latest monthly plan that set the project fields; an older month never "
+      "overwrites a newer one |")
+    w("| new table `project_activities` | many activities per project and per month: activity type & stage, "
+      "assignee (+ original value), planned/actual hours, hours per date, progress, effort ratio, original ОК/NOK/Факт, "
+      "comment, source file/sheet/row |")
+    w("| activities are month-scoped | December updates only December activities; November activities stay as "
+      "history; a task that disappears from its month is flagged `removed_from_source`, not deleted |")
+    w("| activity history in `project_history` (`activity_added`, `activity_updated`, `activity_removed_from_source`) "
+      "| full trace of agent vs manual changes |")
+    w("| manual activity edits (`PATCH /api/projects/:id/activities/:aid`: progress, note, assignee) | protected: "
+      "the agent never overwrites a manually edited activity field, it reports a conflict |")
+    w("| `GET /api/projects?category=…&include=activities` | dashboard views per category with activities |")
+    w("")
+
+    # ------------------------------------------------------------------ 11
+    w("## 11. Rules applied (your decisions) and open points")
+    w("")
+    w("* Source: «Ноябрь» only; «Сводная Ноябрь» not imported. Other months untouched.")
+    w("* Main stages: Scanning, Development, Test Prototype, Measurement, Documentation. Testing, "
+      "Transfer/Extension and Engineering change are additional activity types and never a project's current stage.")
+    w("* Kits and individual products are separate projects; ambiguous identities stay in the review queue.")
+    w("* Project engineer = design engineer from the file; scanning/fitment people only on their activities; "
+      "empty when no design engineer is found. «Н» kept as original value and sent to review.")
+    w("* Priority: 1/1.1/1.2/1.3 → high, 2 → medium, 3 → low; 0 undefined (dashboard value empty, original kept).")
+    w("* No completion is derived: not from hours, not from ОК > 0. Progress is only *planned* (hours planned) or "
+      "*in progress* (hours logged). ОК/NOK kept as original values.")
+    w("* Open: meaning of «Н», priority 0 and ОК/NOK; category of the 3 operational items; vehicles of the "
+      "records without vehicle.")
+    w("")
+
+    # ------------------------------------------------------------------ board
     w("## Dashboard distribution preview")
     w("")
-    w("How the importable projects will appear on the dashboard (by current stage):")
+    w("**Tab A - Main engineering projects (board by current stage)**")
     w("")
-    board = defaultdict(list)
-    for r in recs:
-        if not r.needs_review():
-            board[r.current_stage].append(r)
-    for st in BOARD:
-        items = board.get(st, [])
+    for t in MAIN + [None]:
+        items = [r for r in ok["main_project"] if r.current_stage == t]
         if not items:
             continue
-        w(f"**{STAGE_LABEL[st]} ({len(items)})**")
-        w("")
-        for r in items:
-            flag = " · *in progress*" if r.project_status == "in_progress" else ""
-            w(f"* {r.project_name} — {r.assigned_engineer or 'no engineer'} · prio {r.priority or '—'}{flag}")
-        w("")
-    by_group = Counter(r.extra_attributes.get("product_group") if isinstance(r.extra_attributes.get("product_group"), str)
-                       else "mixed" for r in recs if not r.needs_review())
-    by_status = Counter(r.project_status or "unknown (no hours logged yet)" for r in recs if not r.needs_review())
-    w(f"By product group: {dict(by_group)}")
+        w(f"* **{TYPE_LABEL[t] if t else 'No main-stage activity this month'} ({len(items)}):** " +
+          ", ".join(f"{r.project_name}{' ▶' if r.project_status == 'in_progress' else ''}" for r in items))
     w("")
-    w(f"By status: {dict(by_status)}")
+    w("▶ = hours logged this month.")
     w("")
-    w("## Appendix: rows of the month sheet that are not imported as projects")
+    aw = Counter(r.assigned_engineer or "—" for r in ok["additional_work"])
+    w(f"**Tab B - Additional work ({len(ok['additional_work'])} items, "
+      f"{_h(sum(r.extra_attributes['actual_hours'] for r in ok['additional_work']))} h):** "
+      + ", ".join(f"{k} {n}" for k, n in aw.most_common()))
     w("")
-    for key, title in (("backlog", "БАНК ЗАДАЧ (backlog)"), ("operational", "Operational work without a vehicle"),
-                       ("extra_work", "ДОП РАБОТЫ (ad-hoc work)")):
-        items = ex.get(key, [])
-        w(f"**{title}: {len(items)} rows**")
-        w("")
-        for it in items:
-            label = " · ".join(_cell(x) for x in (it.get("vehicle"), it.get("product"), it.get("task")) if x) or "—"
-            w(f"* row {it['row']}: {label} — {_cell(it.get('engineer'))}; {_cell(it.get('comment'))}"
-              + (f"; {it['actual_hours']:g} h logged" if it.get("actual_hours") else ""))
-        w("")
+    w(f"**Tab C - Task backlog ({len(ok['backlog'])} items):** " +
+      ", ".join(f"{r.project_name} ({_c(r.extra_attributes.get('scheduling_note'))})" for r in ok["backlog"]))
+    w("")
+    w(f"**Review queue ({len(review)})** - shown to the reviewer, not on the dashboard until resolved.")
+    w("")
     w("## Next step")
     w("")
-    w("Answer the questions in section 10. Then the mapping in `state/mapping.proposed.yaml` (adjusted to your "
-      "answers) is approved with `python -m plan_agent approve`, and the first synchronisation runs only after "
-      "that. Later monthly files sync automatically with the approved rules; a changed column structure, a "
-      "second plan sheet for the month or unseen task/stage values stop the run for verification.")
+    w("Nothing has been written. After your approval the mapping (`mapping.proposed.yaml`) is approved and the "
+      "first synchronisation creates the importable records above; the review queue stays out until resolved.")
     return "\n".join(L) + "\n"
-
-
-def _range(v):
-    return f"{v[0]}–{v[1]}" if v else "—"

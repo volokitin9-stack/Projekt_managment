@@ -161,8 +161,9 @@ PROJECT_FIELDS = [
     "product_type", "article_number", "assigned_engineer", "priority",
     "current_stage", "project_status", "planned_start_date", "planned_end_date",
     "actual_completion_date", "description", "stages", "dependencies",
-    "extra_attributes", "source_file", "source_row",
+    "extra_attributes", "source_file", "source_row", "record_category", "last_plan_month",
 ]
+RECORD_CATEGORIES = ["main_project", "additional_work", "backlog"]
 
 
 @dataclass
@@ -190,6 +191,12 @@ class ProjectRecord:
     source_rows: list[int] = field(default_factory=list)
     raw_values: dict[str, Any] = field(default_factory=dict)
     issues: list[Issue] = field(default_factory=list)
+    record_category: str = "main_project"          # main_project | additional_work | backlog
+    last_plan_month: Optional[str] = None          # YYYY-MM of a monthly plan
+    # Month-scoped activities for the backend's project_activities table.  When
+    # set, the legacy "stages" JSON is not written.
+    activity_payload: Optional[list[dict]] = None
+    activity_month: Optional[str] = None
 
     # ------------------------------------------------------------------ #
     def identity_key(self) -> Optional[str]:
@@ -234,12 +241,14 @@ class ProjectRecord:
             "description": self.description,
             # activity source rows are left out so that moving rows in the
             # file is not mistaken for a change of the project's stages
-            "stages": [{k: v for k, v in a.to_dict().items() if k != "source_row"}
-                       for a in self.activities] or None,
+            "stages": None if self.activity_payload is not None else
+                      ([{k: v for k, v in a.to_dict().items() if k != "source_row"} for a in self.activities] or None),
             "dependencies": self.dependencies or None,
             "extra_attributes": self.extra_attributes or None,
             "source_file": self.source_file,
             "source_row": self.source_row,
+            "record_category": self.record_category,
+            "last_plan_month": self.last_plan_month,
         }
         return payload
 
@@ -288,6 +297,7 @@ class ChangePlan:
     changes: list[FieldChange] = field(default_factory=list)
     conflicts: list[Conflict] = field(default_factory=list)
     candidates: list[dict] = field(default_factory=list)   # duplicate candidates
+    activity_changes: list[str] = field(default_factory=list)  # "+key", "~key.field", "-key"
     reason: str = ""
     result: Optional[str] = None     # filled after execution: ok / failed / skipped
     error: Optional[str] = None
@@ -297,7 +307,10 @@ class ChangePlan:
             "project": self.record.project_name,
             "identity": self.record.identity_key(),
             "source": f"{self.record.source_sheet}!{self.record.source_row}",
+            "category": self.record.record_category,
+            "external_project_id": self.record.external_project_id,
             "change_type": self.change_type.value,
+            "activity_changes": self.activity_changes,
             "dashboard_id": self.dashboard_id,
             "changes": [asdict(c) for c in self.changes],
             "conflicts": [asdict(c) for c in self.conflicts],

@@ -68,81 +68,97 @@ columns:
   # columns whose header is a day number 1..31 hold hours worked on that day
 day_columns: true
 
-# --- row structure -----------------------------------------------------------
+# --- row structure and categories ---------------------------------------------
 # A value in the engineer column that starts a new section.
 section_markers:
-  "ДОП РАБОТЫ": extra_work      # ad-hoc work (free text, mostly no vehicle)
-  "БАНК ЗАДАЧ": backlog         # task bank (items for later months)
-# Only these sections produce dashboard projects.
-import_sections: [main]
+  "ДОП РАБОТЫ": extra_work      # unplanned assignments (free text, mostly no vehicle)
+  "БАНК ЗАДАЧ": backlog         # task bank: future / pending work
+# Dashboard category of each section (record_category).  Nothing is discarded:
+# every section becomes its own category.
+section_categories:
+  main: main_project
+  extra_work: additional_work
+  backlog: backlog
+# Stable dashboard identifiers: <prefix>-<hash of the identity fields>.
+id_prefixes: {main_project: PRJ, additional_work: AW, backlog: BL}
 # Task rows end at the first totals row; below it are totals, the resource
 # table and the dropdown source lists (department vocabulary).
 end_of_tasks_prefixes: ["Итого", "Запас часов"]
-# Engineer-column values that do not name a person.
-unassigned_engineer_markers: ["Н"]
+# Engineer-column values whose meaning is unknown: kept as original value,
+# not used as a person, and the record is sent to review.
+unknown_engineer_values: ["Н"]
 # Engineer values that are teams of two people.
 team_separator: "/"
+# Only engineers of these activity types count as the project's responsible
+# DESIGN engineer.  Scanning and fitment people stay activity-level assignees.
+design_activity_types: [development, test_prototype, documentation, testing, transfer_extension,
+                        engineering_change]
 
 # --- project identity ----------------------------------------------------------
-# A project = Марка + Модель + Продукт/Задача (normalised for matching only;
-# the file's own spelling is kept for display).  A valid single article number
-# is used as the strongest identifier when present.  The row number "№" is a
-# running counter and is NOT an identifier.
+# Main project = Марка + Модель + Продукт/Задача (+ Артикул when it is one valid
+# number).  Different products of one vehicle (e.g. engine protection,
+# transmission protection, complete kit) are DIFFERENT projects and are never
+# merged.  Matching is on normalised text; the file's spelling is displayed.
+# The row number "№" is a running counter and is NOT an identifier.
 identity: [manufacturer, vehicle_model, product_type]
 article_pattern: "^[A-Za-z0-9][A-Za-z0-9.\\-/_]{2,40}$"
 article_invalid_markers: ["ЗАПОЛНИТЬ"]
 # A task cycle ends after one of these task groups (PDM upload closes the
 # series cycle, the prototype-lab task closes the development cycle).  Several
-# cycles of the same vehicle+product are merged into one project; several
-# cycles WITHOUT a vehicle become separate records for review.
+# cycles of the same vehicle+product stay ONE project with numbered cycles;
+# cycles WITHOUT a vehicle are not merged and go to review.
 cycle_closing_task_groups: ["Выгрузка в PDM", "Лабаратория, разбор опытников, фотоконтент"]
-# Rows without a vehicle that are operational work, not projects.
+# Planned rows of the main section without a vehicle that look like
+# operational work: kept, sent to review so their category can be decided.
 operational_product_groups: ["Прочее", "Доп", "Доп."]
 operational_stages: ["Операционка", "Не профильная работа", "Административка",
                      "Работа по новым проектам компании"]
 
-# --- workflow: activity -> dashboard stage --------------------------------------
+# --- workflow: task -> activity type -------------------------------------------
 # Ordered rules, first match wins.  Conditions compare normalised text of the
 # task ("План на месяц"), project stage ("Стадия проекта") and task group
-# ("Группа задач").  Stage codes: scanning, development, test_prototype,
-# measurement, documentation, or extra:<code> for additional stages.
+# ("Группа задач").  Main stages: scanning, development, test_prototype,
+# measurement, documentation.  Additional activity types (never counted as a
+# main stage): testing, transfer_extension, engineering_change.
 activity_rules:
-  - {when: {project_stage: ["Тесты"]}, stage: "extra:testing",
-     why: "tooling/product tests - not one of the five main stages"}
+  - {when: {project_stage: ["Тесты"]}, type: testing, why: "tooling/product tests"}
   - {when: {project_stage: ["Улучшения конструктивов (запрос пр-во, акты, рекламации)",
                             "Изменения (запросы, акты, рекламации)"]},
-     stage: "extra:engineering_change", why: "change requests / design improvements of serial products"}
+     type: engineering_change, why: "change requests / design improvements of serial products"}
   - {when: {task_type: ["Улучшения конструктивов (запрос пр-во, акты, рекламации)"]},
-     stage: "extra:engineering_change", why: "change request task"}
-  - {when: {task_type: ["Отсканировать"]}, stage: scanning, why: "vehicle scanning"}
+     type: engineering_change, why: "change request task"}
+  - {when: {task_type: ["Отсканировать"]}, type: scanning, why: "vehicle scanning"}
   - {when: {task_type: ["Разработать", "Доработать", "Доработать (GEN 2)", "Доработать (GEN 3)"]},
-     stage: development, why: "CAD design / redesign"}
-  - {when: {task_type: ["Заказать"]}, stage: test_prototype, why: "ordering the test prototype"}
-  - {when: {task_group: ["Лабаратория, разбор опытников, фотоконтент"]}, stage: test_prototype,
+     type: development, why: "CAD design / redesign"}
+  - {when: {task_type: ["Заказать"]}, type: test_prototype, why: "ordering the test prototype"}
+  - {when: {task_group: ["Лабаратория, разбор опытников, фотоконтент"]}, type: test_prototype,
      why: "laboratory analysis of prototypes"}
-  - {when: {task_type: ["Примерить"]}, stage: measurement, why: "trial fit on the vehicle (task group 'Замеры')"}
-  - {when: {task_group: ["Замеры"]}, stage: measurement, why: "measurements"}
-  - {when: {task_type: ["Перевод", "Перевод из OEM", "Расширение"]}, stage: "extra:series_transfer",
-     why: "transfer/extension of an existing product to the series ('Серия перевод')"}
-  - {when: {task_type: ["КД", "1С"]}, stage: documentation, why: "design documentation (КД) and 1C registration"}
-  - {when: {task_group: ["Выгрузка в PDM"]}, stage: documentation, why: "PDM upload ('Оформление')"}
-  - {when: {project_stage: ["Сканирование"]}, stage: scanning, why: "project stage"}
-  - {when: {project_stage: ["Разработка"]}, stage: development, why: "project stage"}
-  - {when: {project_stage: ["Примерка"]}, stage: measurement, why: "project stage"}
-  - {when: {project_stage: ["Серия", "Оформление", "Серия перевод"]}, stage: documentation, why: "project stage"}
+  - {when: {task_type: ["Примерить"]}, type: measurement, why: "trial fit on the vehicle (task group 'Замеры')"}
+  - {when: {task_group: ["Замеры"]}, type: measurement, why: "measurements"}
+  - {when: {task_type: ["Перевод", "Перевод из OEM", "Расширение"]}, type: transfer_extension,
+     why: "transfer/extension of an existing product ('Серия перевод')"}
+  - {when: {task_type: ["КД", "1С"]}, type: documentation,
+     why: "design documentation (КД) / 1C registration task - also inside 'Серия перевод' projects"}
+  - {when: {task_group: ["Выгрузка в PDM"]}, type: documentation, why: "PDM upload ('Оформление')"}
+  - {when: {project_stage: ["Сканирование"]}, type: scanning, why: "project stage"}
+  - {when: {project_stage: ["Разработка"]}, type: development, why: "project stage"}
+  - {when: {project_stage: ["Примерка"]}, type: measurement, why: "project stage"}
+  - {when: {project_stage: ["Серия", "Оформление"]}, type: documentation, why: "project stage"}
+  - {when: {project_stage: ["Серия перевод"]}, type: transfer_extension, why: "project stage"}
 
-# --- statuses (no status column exists; evidence-based only) --------------------
-# Evaluated per activity in this order.  A planned date never marks completion.
+# --- activity progress (evidence-based only) ------------------------------------
+# Hours are EFFORT, not completion: nothing is ever marked done automatically.
+# 'ОК' / 'NOK' are preserved as original values (meaning not verified).
 status_rules:
-  - {if: items_delivered_positive, status: done, needs_confirmation: true,
-     why: "'ОК' column counts delivered items ('Факт ОК' in the summary pivot)"}
-  - {if: actual_hours_positive, status: in_progress, why: "hours were logged this month"}
-  - {if: planned_hours_positive, status: pending, why: "planned this month, no hours logged yet"}
+  - {if: actual_hours_positive, status: in_progress, why: "hours were logged this month (effort, not completion)"}
+  - {if: planned_hours_positive, status: planned, why: "planned this month, no hours logged yet"}
 
 # --- priorities ------------------------------------------------------------------
 # Scale from the 'Приоритеты' sheet: 1 highest (sub-levels 1.1-1.3), 2, 3.
-# Unlisted values (e.g. 0) are kept as unknown and flagged.
+# Original value is always kept in extra_attributes.priority_original.
 priority_map: {"1": high, "1.1": high, "1.2": high, "1.3": high, "2": medium, "3": low}
+# Values whose meaning is not verified: dashboard priority stays empty, flagged.
+undefined_priority_values: ["0"]
 
-# Value kinds for which an unseen value after approval sends the project to review.
+# Value kinds for which an unseen value after approval sends the record to review.
 strict_value_kinds: [task_type, project_stage, task_group, priority]

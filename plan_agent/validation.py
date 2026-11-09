@@ -19,7 +19,7 @@ def validate(rec: ProjectRecord, stage_codes: list[str]) -> ProjectRecord:
     if not rec.project_name:
         rec.add_issue(Severity.ERROR, "missing_name", "project has no name and none could be composed",
                       "project_name")
-    already = any(i.code in ("no_vehicle", "incomplete_identity") for i in rec.issues)
+    already = any(i.code in ("no_vehicle", "incomplete_identity", "operational_work") for i in rec.issues)
     if not already and not (rec.external_project_id or rec.article_number or
                             (rec.manufacturer and rec.vehicle_model and rec.product_type)):
         rec.add_issue(Severity.REVIEW, "weak_identity",

@@ -7,10 +7,12 @@ Implemented in `backend/server.py` (SQLite schema: `backend/schema.sql`). All bo
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/health` | |
-| GET | `/api/projects` | Optional `?external_project_id=` / `?article_number=` |
+| GET | `/api/projects` | Optional `?external_project_id=`, `?article_number=`, `?category=main_project\|additional_work\|backlog`, `?include=activities` |
 | GET | `/api/projects/:id` | Includes `attachments` |
 | PATCH | `/api/projects/:id` | Manual edit: `{"changes": {...}, "actor": "user", "expected_version": n}`. Recorded with `source_type = manual`. **Protect with the dashboard's user authentication in production.** |
-| GET | `/api/projects/:id/history` | Per-field history from both the agent and manual edits |
+| GET | `/api/projects/:id/history` | Per-field history from both the agent and manual edits, including activity events |
+| GET | `/api/projects/:id/activities` | All activities of all months |
+| PATCH | `/api/projects/:id/activities/:aid` | Manual activity edit: `progress_status`, `manual_note`, `assignee`. The agent never overwrites these afterwards |
 | POST | `/api/projects/:id/attachments` | `{"kind": "photo", "url": "...", "uploaded_by": "image_agent"}` |
 
 ## Agent (requires `Authorization: Bearer $PM_AGENT_API_KEY`)
@@ -19,13 +21,33 @@ Implemented in `backend/server.py` (SQLite schema: `backend/schema.sql`). All bo
 |---|---|---|
 | GET | `/api/agent/schema` | `writable_fields`, allowed stages, priorities and statuses. The agent never sends a field missing from this list |
 | GET | `/api/agent/projects` | All projects, including `version` and `field_sources` |
-| POST | `/api/agent/projects` | `{"project": {...}, "sync": {"run_id", "source_file"}}` → `201`. **`409 duplicate`** with `existing_ids` if the id, article or make+model+product already exists |
-| PATCH | `/api/agent/projects/:id` | `{"changes": {...}, "expected_version": n, "sync": {...}}`. `409 version_conflict` if the project changed since it was read |
+| POST | `/api/agent/projects` | `{"project": {...}, "activities": [...], "activity_scope": {"plan_month": "2026-11"}, "sync": {"run_id", "source_file"}}` → `201`. **`409 duplicate`** with `existing_ids` if the id, the article, or make+model+product *within the same category* already exists |
+| PATCH | `/api/agent/projects/:id` | `{"changes": {...}, "activities": [...], "activity_scope": {...}, "expected_version": n, "sync": {...}}`. `409 version_conflict` if the project changed since it was read |
 | POST / GET | `/api/agent/sync-runs` | Store and list synchronization reports |
 
 Status codes: `400` unsupported fields or bad JSON, `401` bad key, `404`, `409` duplicate or version conflict, `422` invalid value, `503` agent API disabled (no key configured).
 
-Each create or update runs in **one SQLite transaction** that writes the project row and its history rows together, so a project can never be left half-updated.
+Each create or update runs in **one SQLite transaction** that writes the project row, its activities and its history rows together, so a project can never be left half-updated.
+
+### Activities (`project_activities`)
+
+Activities are **month-scoped**. A request with `activity_scope.plan_month = 2026-12` inserts or updates only December activities (matched by `activity_key`) and leaves every other month untouched. A December activity that is missing from a later December file is flagged `removed_from_source` and is never deleted. A field last edited manually is kept, and the response reports it under `activity_summary.kept_manual`.
+
+| Field | Meaning |
+|---|---|
+| `activity_key` | stable key inside the project, e.g. `2026-11#c1#кд#1` (month, cycle, task, occurrence) |
+| `plan_month`, `sequence`, `cycle` | month, order inside the month, engineering cycle number |
+| `activity_type` / `stage` | one of the 5 main stages (`stage` set), or `testing` / `transfer_extension` / `engineering_change` (`stage` empty) |
+| `task_type`, `project_stage_original`, `task_group` | original values from the plan |
+| `assignee`, `assignee_original` | person or team doing the activity; the original value when it is not a verified person (e.g. «Н») |
+| `planned_hours`, `actual_hours`, `hours_by_date`, `effort_ratio` | effort: hours, hours per date, actual/planned |
+| `progress_status` | `planned` / `in_progress`, set from evidence only; `done` / `blocked` / `cancelled` are set manually only |
+| `items_ok`, `items_nok`, `result_raw` | original «ОК», «NOK», «Факт» values (meaning not interpreted) |
+| `source_file`, `source_sheet`, `source_row` | original Excel reference |
+
+### Categories
+
+`record_category` is `main_project` (engineering projects), `additional_work` (unplanned assignments) or `backlog` (future or pending work). Duplicate detection never crosses categories. `last_plan_month` is the latest monthly plan that set the project fields; an older month only updates its own activities.
 
 ## Project fields
 
