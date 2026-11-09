@@ -143,7 +143,7 @@ def test_transfer_extension_is_additional_type(wb):
 
 # --------------------------------------------------------------------------- dashboard flow
 def projects(url):
-    return requests.get(url + "/api/projects?include=activities").json()["projects"]
+    return requests.get(url + "/api/projects").json()
 
 
 def test_dry_run_sync_idempotency_and_updates(wb, backend, make_agent):
@@ -165,7 +165,10 @@ def test_dry_run_sync_idempotency_and_updates(wb, backend, make_agent):
     gac = next(p for p in db if p["project_name"] == "GAC S9 Комплект защит")
     assert [x["task_type"] for x in gac["activities"]] == ["Примерить", "КД", "1С", "Прочее"]
     assert gac["activities"][0]["assignee"] == "Орлов/Соколов" and gac["activities"][0]["source_sheet"] == "Ноябрь"
-    assert gac["stages"] is None                                                  # activities live in their table
+    assert gac["activities"][0]["stage"] == "measurement" and gac["activities"][2]["stage"] == "documentation"
+    assert gac.get("stages") is None                                              # activities live in their table
+    assert gac["status"] is None and gac["planned_stage"] == "measurement"       # not placed on the board yet
+    assert gac["workload"]["planned_hours"] == 32 and gac["workload"]["by_employee"]["Орлов/Соколов"]["activities"] == 1
 
     again = agent.receive(src, "cli", src.name, target_month="2026-11")
     assert (again.report["counts"]["new"], again.report["counts"]["updated"]) == (0, 0)
@@ -186,8 +189,11 @@ def test_dry_run_sync_idempotency_and_updates(wb, backend, make_agent):
     assert kd["actual_hours"] == 5 and kd["progress_status"] == "done" and kd["manual_note"] == "КД сдана"
     assert any(cf["field"].endswith(".progress_status") and cf["resolution"] == "kept_dashboard"
                for p in v2.report["projects"] for cf in p["conflicts"])
-    hist = requests.get(f"{backend}/api/projects/{gac['id']}/history").json()["history"]
-    assert {h["event_type"] for h in hist} >= {"project_created", "activity_added", "activity_updated"}
+    hist = requests.get(f"{backend}/api/projects/{gac['id']}/history").json()
+    actions = {h["action"].split(":")[0] for h in hist}
+    assert actions >= {"created", "activity_added", "activity_updated", "agent_sync"}
+    rq = requests.get(f"{backend}/api/review-queue?kind=plan_record").json()
+    assert rq and all(item["payload"]["source_sheet"] == "Ноябрь" for item in rq)  # ambiguous records queued
     assert hashlib.sha256(src.read_bytes()).hexdigest() == before
 
 
@@ -209,12 +215,13 @@ def test_december_keeps_november_history(wb, backend, make_agent):
     months = [x["plan_month"] for x in gac["activities"]]
     assert months.count("2026-11") == 4 and months.count("2026-12") == 2
     assert gac["last_plan_month"] == "2026-12"
+    assert gac["workload"]["by_month"]["2026-11"]["activities"] == 4 and "2026-12" in gac["workload"]["by_month"]
     assert any(p["project_name"].startswith("Honda CR-V") for p in db)       # absent in December, kept
     assert len(db) == n_nov + dec.report["counts"]["new"]
     # re-processing November afterwards must not overwrite December's project fields
     late = agent.receive(src, "cli", src.name, target_month="2026-11")
     gac2 = requests.get(f"{backend}/api/projects/{gac['id']}").json()
-    assert gac2["last_plan_month"] == "2026-12" and gac2["current_stage"] == gac["current_stage"]
+    assert gac2["last_plan_month"] == "2026-12" and gac2["planned_stage"] == gac["planned_stage"]
     assert late.report["counts"]["new"] == 0
 
 

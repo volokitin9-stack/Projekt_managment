@@ -26,8 +26,11 @@ from urllib.parse import urlparse
 import requests
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
-# Gaps measured against the Штурман API of the 'main' branch (local test copy,
-# synthetic probe records).  They make a lossless sync impossible today.
+# Gaps of a Штурман build WITHOUT the planning integration (the original 'main'
+# branch, measured on a local test copy with synthetic probe records).  The
+# integrated application closes all of them and advertises that through
+# GET /api/agent/schema.
+REQUIRED_SUPPORT = {"activities", "create_only", "review_queue", "sync_runs", "field_sources"}
 SHTURMAN_GAPS = [
     "no record categories: additional work and backlog would appear as Kanban projects",
     "no activities: per-task assignee, hours, hours per date, progress and source rows would be lost",
@@ -112,7 +115,7 @@ def verify(api_url: Optional[str], api_key: Optional[str], state_dir: Path, dash
     if c.status == "fail":
         return _finish(result, state_dir, base)
 
-    # 3. detect API flavour
+    # 3. detect API flavour (Штурман serves the configurable workflow stages)
     flavor = None
     try:
         r = get("/api/stages")
@@ -121,13 +124,6 @@ def verify(api_url: Optional[str], api_key: Optional[str], state_dir: Path, dash
             result["stages"] = [x.get("key") for x in r.json()]
     except (requests.RequestException, ValueError):
         pass
-    if flavor is None:
-        try:
-            r = get("/api/agent/schema", headers={"Authorization": f"Bearer {api_key or ''}"})
-            if r.status_code in (200, 401) and "json" in r.headers.get("Content-Type", ""):
-                flavor = "reference"
-        except requests.RequestException:
-            pass
     result["flavor"] = flavor
 
     # 4. agent authentication (no write)
@@ -144,11 +140,8 @@ def verify(api_url: Optional[str], api_key: Optional[str], state_dir: Path, dash
                 c.set("fail", "the server has no AGENT_API_KEY configured (501)")
             else:
                 c.set("fail", f"unexpected HTTP {r.status_code} - the probe may have been accepted; check the server")
-        elif flavor == "reference":
-            r = get("/api/agent/schema", headers=hdr)
-            c.set("pass" if r.status_code == 200 else "fail", f"GET /api/agent/schema → HTTP {r.status_code}")
         else:
-            c.set("fail", "unknown API: neither the Штурман nor the reference API was detected")
+            c.set("fail", "unknown API: the Штурман dashboard API was not detected")
     except requests.RequestException as exc:
         c.set("fail", f"request failed ({type(exc).__name__})")
     checks.append(c)
@@ -206,13 +199,21 @@ def verify(api_url: Optional[str], api_key: Optional[str], state_dir: Path, dash
         c.set("pass", f"remote host {host}")
     checks.append(c)
 
-    # 7. agent ↔ API compatibility
+    # 7. agent <-> API compatibility
     c = Check("agent payload compatibility")
-    if flavor == "reference":
-        c.set("warn", "reference API of this repository (no dashboard UI) - compatible, but it is not the Штурман "
-                      "dashboard")
-    elif flavor == "shturman":
-        c.set("fail", "the Штурман API cannot store what the agent produces without loss: " + "; ".join(SHTURMAN_GAPS))
+    if flavor == "shturman":
+        try:
+            r = get("/api/agent/schema", headers={"Authorization": f"Bearer {api_key or ''}"})
+            sch = r.json() if r.status_code == 200 else {}
+        except (requests.RequestException, ValueError):
+            sch = {}
+        missing = REQUIRED_SUPPORT - set(sch.get("supports") or [])
+        if sch and not missing:
+            c.set("pass", f"integrated Штурман API (schema v{sch.get('schema_version')}): categories, activities, "
+                          "history, review queue and sync runs supported")
+        else:
+            c.set("fail", "this Штурман build has no planning integration; it cannot store the import without loss: "
+                          + "; ".join(SHTURMAN_GAPS))
     else:
         c.set("fail", "API not identified")
     checks.append(c)

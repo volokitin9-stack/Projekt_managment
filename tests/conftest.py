@@ -1,8 +1,12 @@
+import os
+import socket
+import subprocess
 import sys
-import threading
+import time
 from pathlib import Path
 
 import pytest
+import requests
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -31,16 +35,74 @@ def fixtures_dir(tmp_path_factory):
     return d
 
 
+class ShturmanServer:
+    """The real Штурман Node/Express app on a free port with its own temporary
+    database, uploads and plan-import folders."""
+
+    def __init__(self, base: Path, key: str = "secret-test-key", seed_demo: bool = False):
+        self.base = base
+        self.key = key
+        self.port = _free_port()
+        self.url = f"http://127.0.0.1:{self.port}"
+        self.db_path = base / "data" / "app.sqlite"
+        self.uploads = base / "uploads"
+        self.plan_dir = base / "plan-imports"
+        self.seed_demo = seed_demo
+        self.proc = None
+        self.log = base / "server.log"
+
+    def env(self):
+        e = dict(os.environ)
+        e.update(PORT=str(self.port), DATABASE_PATH=str(self.db_path), UPLOADS_DIR=str(self.uploads),
+                 PLAN_IMPORT_DIR=str(self.plan_dir), AGENT_API_KEY=self.key,
+                 SEED_DEMO_DATA="true" if self.seed_demo else "false", PLAN_AGENT_PYTHON=sys.executable)
+        return e
+
+    def start(self):
+        self.base.mkdir(parents=True, exist_ok=True)
+        fh = open(self.log, "a")
+        self.proc = subprocess.Popen(["node", "server/index.js"], cwd=ROOT, env=self.env(), stdout=fh,
+                                     stderr=subprocess.STDOUT)
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            try:
+                if requests.get(self.url + "/api/health", timeout=1).status_code == 200:
+                    return self
+            except requests.RequestException:
+                time.sleep(0.1)
+        raise RuntimeError("Штурман server did not start:\n" + self.log.read_text())
+
+    def stop(self):
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+        self.proc = None
+
+    def restart(self):
+        self.stop()
+        return self.start()
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 @pytest.fixture
-def backend(tmp_path):
-    """Real reference backend on a random port, fresh database per test."""
-    from backend.server import make_server
-    srv = make_server(str(tmp_path / "db.sqlite"), "127.0.0.1", 0, "secret-test-key")
-    t = threading.Thread(target=srv.serve_forever, daemon=True)
-    t.start()
-    yield f"http://127.0.0.1:{srv.server_address[1]}"
-    srv.shutdown()
-    srv.server_close()
+def shturman(tmp_path):
+    srv = ShturmanServer(tmp_path / "shturman").start()
+    yield srv
+    srv.stop()
+
+
+@pytest.fixture
+def backend(shturman):
+    """Base URL of a running Штурман instance (the agent's only backend)."""
+    return shturman.url
 
 
 @pytest.fixture

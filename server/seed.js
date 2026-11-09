@@ -41,20 +41,30 @@ function seedStages() {
   tx(DEFAULT_STAGES);
 }
 
-function seedProjects() {
+// Demonstration projects are inserted ONLY when explicitly requested
+// (SEED_DEMO_DATA=true or `npm run seed:demo`) and ONLY into an empty
+// database, so a production database never receives them automatically.
+// Seeded records carry source "seed", which is how they can be told apart
+// from real data later (see scripts/demo-data.js).
+function seedProjects({ force = false } = {}) {
+  const wanted = force || String(process.env.SEED_DEMO_DATA || "").toLowerCase() === "true";
+  if (!wanted) return 0;
   const count = db.prepare("SELECT COUNT(*) AS n FROM projects").get().n;
-  if (count > 0) return;
-  SAMPLE_PROJECTS.forEach((p) => projectsModel.createProject(Object.assign({}, p, { source: "seed" })));
+  if (count > 0) return 0;
+  SAMPLE_PROJECTS.forEach((p) => projectsModel.createProject(Object.assign({}, p, { source: "seed" }),
+    { source: "seed", actor: "seed" }));
+  return SAMPLE_PROJECTS.length;
 }
 
-function seed() {
+function seed({ demo = false } = {}) {
   seedStages();
-  seedProjects();
+  return seedProjects({ force: demo });
 }
 
 if (require.main === module) {
-  seed();
-  console.log("Seed complete.");
+  const demo = process.argv.includes("--demo");
+  const n = seed({ demo });
+  console.log(`Seed complete: stages ensured; ${n} demonstration projects inserted.`);
 }
 
 module.exports = { seed, DEFAULT_STAGES, SAMPLE_PROJECTS };

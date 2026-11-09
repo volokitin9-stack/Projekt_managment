@@ -19,6 +19,7 @@ default_owner: planning_file
 
 fields:
   external_project_id:    planning_file
+  record_category:        planning_file
   project_name:           planning_file
   manufacturer:           planning_file
   vehicle_model:          planning_file
@@ -26,16 +27,21 @@ fields:
   article_number:         planning_file
   assigned_engineer:      planning_file
   priority:               planning_file
-  current_stage:          planning_file
-  project_status:         planning_file
+  priority_original:      planning_file
+  planned_stage:          planning_file   # suggestion only; the confirmed stage (status) is never written
+  work_status:            planning_file
   planned_start_date:     planning_file
-  planned_end_date:       planning_file
+  planned_deadline:       planning_file
   actual_completion_date: planning_file
   stages:                 planning_file
   dependencies:           planning_file
   extra_attributes:       planning_file
   source_file:            planning_file
+  source_sheet:           planning_file
   source_row:             planning_file
+  source_rows:            planning_file
+  last_plan_month:        planning_file
+  status:                 dashboard       # confirmed Kanban stage: set by people (or explicit transitions)
   description:            dashboard
   comments:               dashboard
   photos:                 image_agent

@@ -204,15 +204,40 @@ class PlanAgent:
                              for p in report["projects"] if p["change_type"] in ("new", "update")]}
         with open(self.history_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        if self.client is not None and report["mode"] == "sync":
+        if self.client is not None and report["mode"] in ("sync", "dry_run"):
+            c = report.get("counts") or {}
             try:
-                self.client.save_sync_run({"id": run_id, "started_at": started, "finished_at": entry["finished_at"],
-                                           "source_file": report["input_file"],
-                                           "file_sha256": report.get("file_sha256"), "mode": report["mode"],
-                                           "status": report["status"], "report": report})
+                self.client.save_sync_run({
+                    "id": run_id, "started_at": started, "finished_at": entry["finished_at"],
+                    "source_file": report["input_file"], "file_sha256": report.get("file_sha256"),
+                    "plan_month": a.profile.analysis.get("target_month") if a.profile is not None else None,
+                    "mode": report["mode"], "status": report["status"], "counts": c, "report": report,
+                    "error": report.get("fatal_error"),
+                    "review_status": f"{c.get('review', 0)} records need review" if c.get("review") else "none"})
             except ApiError as exc:
-                log.warning("could not store sync run on the dashboard: %s", exc)
+                log.warning("could not store the run on the dashboard: %s", exc)
+            if report["mode"] == "sync":
+                self._push_review_queue(a, run_id)
         return base.with_suffix(".txt")
+
+    def _push_review_queue(self, a, run_id: str) -> None:
+        """Ambiguous planning records go to the dashboard's review queue (idempotent per record)."""
+        for r in a.records:
+            if not r.needs_review():
+                continue
+            month = r.last_plan_month or ""
+            key = f"plan:{month}:{r.source_sheet}:{','.join(map(str, r.source_rows or [r.source_row]))}"
+            payload = {"project_name": r.project_name, "record_category": r.record_category,
+                       "source_file": r.source_file, "source_sheet": r.source_sheet, "source_rows": r.source_rows,
+                       "plan_month": month, "manufacturer": r.manufacturer, "vehicle_model": r.vehicle_model,
+                       "product_type": r.product_type, "external_project_id": r.external_project_id,
+                       "activities": r.activity_payload, "sync_run_id": run_id,
+                       "issues": [i.to_dict() for i in r.issues if i.severity.value in ("review", "error")]}
+            reason = "; ".join(i.message for i in r.issues if i.severity.value in ("review", "error"))
+            try:
+                self.client.push_review_item(key, "plan_record", payload, reason[:2000])
+            except ApiError as exc:
+                log.warning("could not queue review record %s: %s", key, exc)
 
     def _failed(self, run_id, name, error, a=None) -> ProcessOutcome:
         report = {"run_id": run_id, "input_file": name, "mode": "none", "status": "Failed", "fatal_error": error,

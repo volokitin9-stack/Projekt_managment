@@ -104,5 +104,16 @@ db.exec(`
   );
 `);
 
+// Versioned migrations on top of the baseline schema above (see server/migrations.js).
+const migrations = require("./migrations");
+const migrationResult = migrations.migrate(db, DATABASE_PATH);
+if (migrationResult.applied.length) {
+  // eslint-disable-next-line no-console
+  console.log(`database migrated to v${migrations.currentVersion(db)} (applied ${migrationResult.applied.join(", ")})` +
+    (migrationResult.backup ? `; backup written: ${migrationResult.backup}` : ""));
+}
+
 module.exports = db;
 module.exports.DATABASE_PATH = DATABASE_PATH;
+module.exports.migrationResult = migrationResult;
+module.exports.schemaVersion = () => migrations.currentVersion(db);

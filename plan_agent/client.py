@@ -97,8 +97,10 @@ class DashboardClient:
             if resp.status_code == 409 and body.get("error") == "version_conflict":
                 raise VersionConflict(body.get("message", "version conflict"), 409, body)
             if resp.status_code >= 400:
-                raise ApiError(f"{method} {path}: HTTP {resp.status_code} {body.get('error', '')}: "
-                               f"{body.get('message', '')}", resp.status_code, body)
+                details = body.get("details")
+                raise ApiError(f"{method} {path}: HTTP {resp.status_code} {body.get('error', '')}"
+                               f"{': ' + str(body.get('message')) if body.get('message') else ''}"
+                               f"{' ' + '; '.join(map(str, details)) if details else ''}", resp.status_code, body)
             return body
         raise NetworkError(f"{method} {path}: gave up")  # pragma: no cover
 
@@ -144,7 +146,7 @@ class DashboardClient:
                        activity_scope: Optional[dict] = None) -> dict:
         self._check_fields(data)
         self._check_activities(activities)
-        body = {"project": data, "sync": sync}
+        body = {"project": data, "sync": sync, "create_only": True}
         if activities is not None:
             body.update(activities=activities, activity_scope=activity_scope)
         return self._request("POST", "/api/agent/projects", body)
@@ -160,3 +162,9 @@ class DashboardClient:
 
     def save_sync_run(self, run: dict) -> None:
         self._request("POST", "/api/agent/sync-runs", run)
+
+    def push_review_item(self, dedupe_key: str, kind: str, payload: dict, reason: str) -> dict:
+        """Idempotent: the same dedupe_key updates the open item instead of adding another."""
+        return self._request("POST", "/api/agent/review-queue",
+                             {"dedupe_key": dedupe_key, "kind": kind, "payload": payload, "reason": reason,
+                              "source": "plan_agent"})

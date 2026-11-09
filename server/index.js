@@ -13,6 +13,8 @@ const projectsRouter = require("./routes/projects");
 const stagesRouter = require("./routes/stages");
 const agentRouter = require("./routes/agent");
 const reviewQueueRouter = require("./routes/reviewQueue");
+const planImportsRouter = require("./routes/planImports");
+const db = require("./db");
 
 seed();
 
@@ -34,12 +36,19 @@ app.use("/api/globals", buildDocRouter("globals"));
 app.use("/api/projects", projectsRouter);
 app.use("/api/stages", stagesRouter);
 app.use("/api/review-queue", reviewQueueRouter);
+app.use("/api/plan-imports", planImportsRouter);
+
+// Synchronisation runs recorded by the planning agent (read-only for the dashboard).
+app.get("/api/sync-runs", (req, res) => {
+  res.json(db.prepare("SELECT id, source_file, plan_month, mode, status, started_at, finished_at, counts, review_status FROM sync_runs ORDER BY started_at DESC LIMIT 100")
+    .all().map((r) => Object.assign({}, r, { counts: r.counts ? JSON.parse(r.counts) : null })));
+});
 
 // Agent-facing write API — everything under here requires AGENT_API_KEY auth (see server/auth.js).
 app.use("/api/agent", agentRouter);
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, time: new Date().toISOString() });
+  res.json({ ok: true, time: new Date().toISOString(), schema_version: db.schemaVersion() });
 });
 
 // Uploaded files (see server/storage.js — swap this mount if you move to an
@@ -54,12 +63,16 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
     return res.status(400).json({ error: "Invalid JSON body" });
   }
   if (err && err.message && /File too large/i.test(err.message)) {
-    return res.status(413).json({ error: `File exceeds the ${storage.MAX_UPLOAD_BYTES} byte limit` });
+    return res.status(413).json({ error: "File exceeds the upload size limit" });
   }
   console.error(err); // eslint-disable-line no-console
   res.status(500).json({ error: "Internal server error" });
 });
 
-app.listen(PORT, () => {
-  console.log(`Штурман dashboard listening on http://localhost:${PORT}`); // eslint-disable-line no-console
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Штурман dashboard listening on http://localhost:${PORT}`); // eslint-disable-line no-console
+  });
+}
+
+module.exports = app;

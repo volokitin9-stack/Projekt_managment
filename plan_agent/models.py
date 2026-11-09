@@ -156,13 +156,22 @@ class Activity:
 
 # Dashboard fields the agent may write.  Must stay in sync with the backend
 # schema; the client additionally verifies against GET /api/agent/schema.
+# Field names of the Штурман project API (the dashboard is the system of
+# record).  The agent maps its internal vocabulary onto these in to_payload():
+#   current_stage (derived from PLANNED work) -> planned_stage  (a suggestion;
+#       the confirmed Kanban stage `status` is never written by the agent)
+#   project_status -> work_status, planned_end_date -> planned_deadline
+#   priority medium -> normal (Штурман scale critical/high/normal/low)
+#   stage test_prototype -> prototype
 PROJECT_FIELDS = [
-    "external_project_id", "project_name", "manufacturer", "vehicle_model",
-    "product_type", "article_number", "assigned_engineer", "priority",
-    "current_stage", "project_status", "planned_start_date", "planned_end_date",
-    "actual_completion_date", "description", "stages", "dependencies",
-    "extra_attributes", "source_file", "source_row", "record_category", "last_plan_month",
+    "external_project_id", "record_category", "project_name", "manufacturer", "vehicle_model", "product_type",
+    "article_number", "assigned_engineer", "priority", "priority_original", "planned_stage", "work_status",
+    "description", "planned_deadline", "planned_start_date", "actual_completion_date", "source_file",
+    "source_sheet", "source_row", "source_rows", "last_plan_month", "extra_attributes", "dependencies", "stages",
 ]
+STAGE_TO_DASHBOARD = {"scanning": "scanning", "development": "development", "test_prototype": "prototype",
+                      "measurement": "measurement", "documentation": "documentation"}
+PRIORITY_TO_DASHBOARD = {"high": "high", "medium": "normal", "low": "low"}
 RECORD_CATEGORIES = ["main_project", "additional_work", "backlog"]
 
 
@@ -232,11 +241,13 @@ class ProjectRecord:
             "product_type": self.product_type,
             "article_number": self.article_number,
             "assigned_engineer": self.assigned_engineer,
-            "priority": self.priority,
-            "current_stage": self.current_stage,
-            "project_status": self.project_status,
+            "priority": PRIORITY_TO_DASHBOARD.get(self.priority) if self.priority else None,
+            "priority_original": self.extra_attributes.get("priority_original"),
+            # only a suggestion; additional stages (extra:...) are not Kanban columns
+            "planned_stage": STAGE_TO_DASHBOARD.get(self.current_stage) if self.current_stage else None,
+            "work_status": self.project_status,
             "planned_start_date": self.planned_start_date,
-            "planned_end_date": self.planned_end_date,
+            "planned_deadline": self.planned_end_date,
             "actual_completion_date": self.actual_completion_date,
             "description": self.description,
             # activity source rows are left out so that moving rows in the
@@ -246,7 +257,9 @@ class ProjectRecord:
             "dependencies": self.dependencies or None,
             "extra_attributes": self.extra_attributes or None,
             "source_file": self.source_file,
+            "source_sheet": self.source_sheet,
             "source_row": self.source_row,
+            "source_rows": self.source_rows or None,
             "record_category": self.record_category,
             "last_plan_month": self.last_plan_month,
         }
@@ -254,8 +267,8 @@ class ProjectRecord:
 
     def to_dict(self) -> dict:
         d = self.to_payload()
-        d["source_sheet"] = self.source_sheet
-        d["source_rows"] = self.source_rows
+        d["current_stage"] = self.current_stage
+        d["project_status"] = self.project_status
         d["issues"] = [i.to_dict() for i in self.issues]
         return d
 

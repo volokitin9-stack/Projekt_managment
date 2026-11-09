@@ -51,7 +51,7 @@ def fake_shturman(projects):
 
 
 @pytest.fixture
-def shturman():
+def fake_api():
     data = [{"id": "a", "created_at": "t1", "source": "seed"}, {"id": "b", "created_at": "t2", "source": "agent"}]
     srv = fake_shturman(data)
     yield f"http://127.0.0.1:{srv.server_address[1]}", data
@@ -67,8 +67,8 @@ def test_not_configured(tmp_path):
     assert not res["ready"] and "PM_API_URL is not set" in res["blocking"][0]
 
 
-def test_shturman_checks_without_writes(tmp_path, shturman):
-    url, _ = shturman
+def test_shturman_checks_without_writes(tmp_path, fake_api):
+    url, _ = fake_api
     res = verify(url, KEY, tmp_path)
     c = by(res)
     assert res["flavor"] == "shturman"
@@ -77,13 +77,13 @@ def test_shturman_checks_without_writes(tmp_path, shturman):
     assert "1 are seeded SAMPLE projects" in c["database contents"]["detail"]
     assert c["persistent database (survives restart)"]["status"] == "pending"
     assert c["production host"]["status"] == "fail"                    # localhost
-    assert c["agent payload compatibility"]["status"] == "fail"
+    assert c["agent payload compatibility"]["status"] == "fail"           # Штурман without the integration
     assert not res["ready"]
     assert verify(url, "wrong", tmp_path)["checks"][2]["status"] == "fail"
 
 
-def test_restart_persistence(tmp_path, shturman):
-    url, data = shturman
+def test_restart_persistence(tmp_path, fake_api):
+    url, data = fake_api
     verify(url, KEY, tmp_path)
     ok = by(verify(url, KEY, tmp_path, after_restart=True))
     assert ok["persistent database (survives restart)"]["status"] == "pass"
@@ -101,5 +101,9 @@ def test_sync_blocked_until_deployment_verified(backend, make_agent, fixtures_di
     assert out.report["mode"] == "dry_run" and out.status == "Dry run - deployment not verified"
     assert any("SYNC BLOCKED" in n for n in out.report["notes"])
     res = verify(backend, "secret-test-key", agent.settings.state_dir)
-    assert res["flavor"] == "reference" and not res["ready"]          # no dashboard UI, local host
+    c = by(res)
+    assert res["flavor"] == "shturman"
+    assert c["dashboard page"]["status"] == "pass" and c["agent authentication"]["status"] == "pass"
+    assert c["agent payload compatibility"]["status"] == "pass"           # integrated Штурман API
+    assert c["production host"]["status"] == "fail" and not res["ready"]  # local test instance
     assert load_status(agent.settings.state_dir, backend)["ready"] is False

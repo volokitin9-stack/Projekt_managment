@@ -8,6 +8,9 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "seed": "node server/seed.js",
+    "seed:demo": "node server/seed.js --demo",
+    "demo-data": "node scripts/demo-data.js",
+    "test": "python3 -m pytest -q",
     "build": "echo \"No build step: the frontend is plain static HTML/CSS/JS served as-is by Express.\""
   },
   "engines": {

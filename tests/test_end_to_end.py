@@ -1,4 +1,4 @@
-"""End-to-end: agent <-> real reference backend over HTTP."""
+"""End-to-end: planning agent <-> the real Штурман application over HTTP (generic file layout)."""
 import json
 import shutil
 
@@ -6,10 +6,13 @@ import openpyxl
 import requests
 
 KEY = "secret-test-key"
+H = {"Authorization": f"Bearer {KEY}"}
+PNG = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+       b"\x00\x00\x00\rIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82")
 
 
 def projects(url):
-    return {p["external_project_id"]: p for p in requests.get(url + "/api/projects").json()["projects"]}
+    return {p["external_project_id"]: p for p in requests.get(url + "/api/projects").json()}
 
 
 def approve(agent):
@@ -24,6 +27,8 @@ def test_initial_mode_is_dry_run_and_writes_nothing(backend, make_agent, fixture
     assert out.analysis_markdown and "Initial analysis" in out.analysis_markdown
     assert agent.store.proposed_path.exists()
     assert projects(backend) == {}
+    runs = requests.get(backend + "/api/sync-runs").json()
+    assert runs and runs[0]["mode"] == "dry_run"                         # the dry run is recorded, nothing else
 
 
 def test_full_lifecycle(backend, make_agent, fixtures_dir):
@@ -38,23 +43,28 @@ def test_full_lifecycle(backend, make_agent, fixtures_dir):
     db = projects(backend)
     assert set(db) == {"ENG-001", "ENG-002", "ENG-003", "ENG-004", "ENG-005"}
     assert "ENG-006" not in db                                     # ambiguous record was not written
-    assert db["ENG-001"]["current_stage"] == "test_prototype"
-    assert db["ENG-004"]["project_status"] is None                 # unknown stays unknown
+    p1 = db["ENG-001"]
+    assert p1["planned_stage"] == "prototype"                      # suggestion from planned work ...
+    assert p1["status"] is None and p1["days_in_stage"] is None     # ... never a confirmed Kanban stage
+    assert p1["priority"] == "high" and p1["priority_original"] is None
+    assert db["ENG-002"]["priority"] == "normal"                   # medium -> Штурман "normal"
+    assert db["ENG-004"]["work_status"] is None                    # unknown stays unknown
+    assert db["ENG-005"]["priority"] is None                       # not "normal" by default
 
-    # idempotent: same file again -> nothing new, nothing updated
     again = agent.receive(fixtures_dir / "engineering_plan_v1.xlsx", "watch_folder")
     assert (again.report["counts"]["new"], again.report["counts"]["updated"]) == (0, 0)
     assert again.report["counts"]["unchanged"] == 5
     assert len(projects(backend)) == 5
 
     # manual dashboard work that must survive
-    pid = db["ENG-001"]["id"]
-    requests.patch(f"{backend}/api/projects/{pid}",
-                   json={"changes": {"assigned_engineer": "Морозов", "comments": "Клиент просил ускорить"}})
-    requests.post(f"{backend}/api/projects/{pid}/attachments",
-                  json={"kind": "photo", "url": "https://example.invalid/p.jpg", "uploaded_by": "image_agent"})
+    pid, ver = p1["id"], p1["version"]
+    r = requests.patch(f"{backend}/api/projects/{pid}", json={"changes": {"assigned_engineer": "Морозов"}, "version": ver})
+    assert r.status_code == 200, r.text
+    assert requests.post(f"{backend}/api/projects/{pid}/comments", json={"text": "Клиент просил ускорить"}).status_code == 201
+    up = requests.post(f"{backend}/api/projects/{pid}/files", files={"file": ("p.png", PNG, "image/png")},
+                       data={"caption": "Опытный образец"})
+    assert up.status_code == 201, up.text
 
-    # second version: progress, new project, a project missing from the file
     v2 = agent.receive(fixtures_dir / "engineering_plan_v2.xlsx", "api")
     c = v2.report["counts"]
     assert v2.status == "Completed", v2.text
@@ -62,23 +72,23 @@ def test_full_lifecycle(backend, make_agent, fixtures_dir):
     db = projects(backend)
     assert "ENG-002" in db                                          # never deleted
     p1 = requests.get(f"{backend}/api/projects/{pid}").json()
-    assert p1["current_stage"] == "measurement" and p1["planned_end_date"] == "2026-11-30"
+    assert p1["planned_stage"] == "measurement" and p1["planned_deadline"] == "2026-11-30"
     assert p1["assigned_engineer"] == "Морозов"                    # manual edit kept
-    assert p1["comments"] == "Клиент просил ускорить"
-    assert len(p1["attachments"]) == 1
+    assert [x["text"] for x in p1["comments"]] == ["Клиент просил ускорить"]
+    assert len(p1["images"]) == 1 and p1["images"][0]["caption"] == "Опытный образец"
     conflicts = [cf for p in v2.report["projects"] for cf in p["conflicts"]]
     assert any(cf["field"] == "assigned_engineer" and cf["resolution"] == "kept_dashboard" for cf in conflicts)
 
-    hist = requests.get(f"{backend}/api/projects/{pid}/history").json()["history"]
-    by_source = {(h["field"], h["source_type"]) for h in hist}
-    assert ("assigned_engineer", "manual") in by_source
-    assert ("current_stage", "agent") in by_source
-    stage_change = next(h for h in hist if h["field"] == "current_stage")
-    assert (stage_change["previous_value"], stage_change["new_value"]) == ("test_prototype", "measurement")
-    assert stage_change["source"] == "engineering_plan_v2.xlsx" and stage_change["sync_run_id"] == v2.run_id
+    hist = p1["history"]
+    acts = {(h["action"], h["source"]) for h in hist}
+    assert ("updated:assigned_engineer", "manual") in acts
+    assert ("updated:planned_stage", "agent") in acts
+    stage = next(h for h in hist if h["action"] == "updated:planned_stage")
+    assert (stage["previous_value"], stage["new_value"]) == ("prototype", "measurement")
+    assert any(h["action"] == "agent_sync" and h["new_value"]["sync_run_id"] == v2.run_id for h in hist)
 
-    runs = requests.get(f"{backend}/api/agent/sync-runs", headers={"Authorization": f"Bearer {KEY}"}).json()
-    assert {r["id"] for r in runs["sync_runs"]} >= {out.run_id, v2.run_id}
+    runs = requests.get(f"{backend}/api/agent/sync-runs", headers=H).json()["sync_runs"]
+    assert {r["id"] for r in runs} >= {out.run_id, v2.run_id}
     lines = agent.history_path.read_text().splitlines()
     assert json.loads(lines[-1])["run_id"] == v2.run_id
 
@@ -103,8 +113,7 @@ def test_structure_change_requires_new_validation(backend, make_agent, fixtures_
     agent.receive(fixtures_dir / "engineering_plan_v1.xlsx", "cli")
     approve(agent)
     wb = openpyxl.load_workbook(fixtures_dir / "engineering_plan_v1.xlsx")
-    ws = wb["План КО"]
-    ws["U4"] = "Ответственный за КД"         # new column
+    wb["План КО"]["U4"] = "Ответственный за КД"         # new column
     p = tmp_path / "changed.xlsx"
     wb.save(p)
     out = agent.receive(p, "cli")
@@ -157,25 +166,29 @@ def test_unsupported_and_empty_files_fail_cleanly(make_agent, tmp_path):
     assert out.status == "Failed" and "empty" in out.report["fatal_error"]
 
 
-def test_backend_rejects_unsupported_fields_and_bad_values(backend):
-    h = {"Authorization": f"Bearer {KEY}"}
-    r = requests.post(backend + "/api/agent/projects", headers=h,
-                      json={"project": {"project_name": "X", "photos": ["a.jpg"]}})
-    assert r.status_code == 400 and r.json()["error"] == "unsupported_fields"
-    r = requests.post(backend + "/api/agent/projects", headers=h,
-                      json={"project": {"project_name": "X", "priority": "urgent!!"}})
-    assert r.status_code == 422
-    r = requests.post(backend + "/api/agent/projects", json={"project": {"project_name": "X"}})
-    assert r.status_code == 401
-    ok = requests.post(backend + "/api/agent/projects", headers=h,
-                       json={"project": {"project_name": "X", "external_project_id": "Q-1"}})
+def test_agent_api_rejects_invalid_requests(backend):
+    url = backend + "/api/agent/projects"
+    base = {"manufacturer": "TEST", "vehicle_model": "T1", "product_type": "probe"}
+    r = requests.post(url, headers=H, json={"project": {**base, "photos": ["a.jpg"]}})
+    assert r.status_code == 400 and r.json()["code"] == "unsupported_fields"          # never silently dropped
+    r = requests.post(url, headers=H, json={"project": {**base, "priority": "urgent!!"}})
+    assert r.status_code == 400
+    r = requests.post(url, headers=H, json={"project": {**base, "status": "development"}})
+    assert r.status_code == 400                                                       # agent cannot confirm a stage
+    r = requests.post(url, headers=H, json={"project": {"product_type": "no vehicle"}})
+    assert r.status_code == 400                                                       # main project needs a vehicle
+    assert requests.post(url, json={"project": base}).status_code == 401
+    ok = requests.post(url, headers=H, json={"project": {**base, "external_project_id": "Q-1"}})
     assert ok.status_code == 201
-    dup = requests.post(backend + "/api/agent/projects", headers=h,
-                        json={"project": {"project_name": "X2", "external_project_id": "Q-1"}})
+    dup = requests.post(url, headers=H, json={"project": {**base, "external_project_id": "Q-1"}, "create_only": True})
     assert dup.status_code == 409 and dup.json()["existing_ids"] == [ok.json()["id"]]
-    stale = requests.patch(f"{backend}/api/agent/projects/{ok.json()['id']}", headers=h,
-                           json={"changes": {"priority": "low"}, "expected_version": 99})
+    stale = requests.patch(f"{url}/{ok.json()['id']}", headers=H, json={"changes": {"priority": "low"}, "expected_version": 99})
     assert stale.status_code == 409 and stale.json()["error"] == "version_conflict"
+    bad_act = requests.patch(f"{url}/Q-1", headers=H, json={"changes": {}, "activities": [{"activity_key": "x"}]})
+    assert bad_act.status_code == 400                                                 # activities need a plan month
+    aw = requests.post(url, headers=H, json={"project": {"record_category": "additional_work",
+                                                         "project_name": "Техподдержка", "external_project_id": "AW-1"}})
+    assert aw.status_code == 201 and aw.json()["record_category"] == "additional_work"
 
 
 def test_reprocess_from_inbox(backend, make_agent, fixtures_dir, tmp_path):

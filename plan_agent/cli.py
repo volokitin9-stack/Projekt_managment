@@ -34,12 +34,18 @@ def main(argv=None) -> int:
     p = sub.add_parser("analyze")
     p.add_argument("file")
     p.add_argument("--month", help="target month YYYY-MM for monthly workbooks (default: auto)")
+    p.add_argument("--name", help="original file name to record (default: the path's name)")
+    p.add_argument("--json", action="store_true", help="print a one-line JSON summary at the end")
     p = sub.add_parser("approve")
     p.add_argument("--by", default=None)
+    p.add_argument("--fingerprint", default=None, help="only approve if the proposal has this structure fingerprint")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("sync")
     p.add_argument("file")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--month", help="target month YYYY-MM for monthly workbooks (default: auto)")
+    p.add_argument("--name", help="original file name to record (default: the path's name)")
+    p.add_argument("--json", action="store_true", help="print a one-line JSON summary at the end")
     p = sub.add_parser("reprocess")
     p.add_argument("sha")
     p.add_argument("--dry-run", action="store_true")
@@ -59,13 +65,29 @@ def main(argv=None) -> int:
     if a.cmd == "approve":
         from .mapping_config import MappingStore
         store = MappingStore(Settings.from_env().state_dir)
+        result = {"approved": False}
         try:
-            data = store.approve(a.by or getpass.getuser())
+            current = store.load_approved()
+            if a.fingerprint and current and current.get("fingerprint") == a.fingerprint:
+                result = {"approved": True, "fingerprint": a.fingerprint, "already_approved": True}
+            else:
+                if a.fingerprint:
+                    import yaml
+                    proposal = yaml.safe_load(store.proposed_path.read_text()) if store.proposed_path.exists() else {}
+                    if (proposal or {}).get("fingerprint") != a.fingerprint:
+                        raise ValueError(f"the proposed mapping has fingerprint {(proposal or {}).get('fingerprint')}, "
+                                         f"not {a.fingerprint}; analyse the file again")
+                data = store.approve(a.by or getpass.getuser())
+                result = {"approved": True, "fingerprint": data["fingerprint"]}
         except (FileNotFoundError, ValueError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 2
-        print(f"mapping approved (fingerprint {data['fingerprint']}) -> {store.approved_path}")
-        return 0
+            result = {"approved": False, "error": str(exc)}
+        if a.json:
+            print(json.dumps(result, ensure_ascii=False))
+        elif result["approved"]:
+            print(f"mapping approved (fingerprint {result['fingerprint']}) -> {store.approved_path}")
+        else:
+            print(f"error: {result['error']}", file=sys.stderr)
+        return 0 if result["approved"] else 2
 
     if a.cmd == "verify-deployment":
         from .deployment import render, verify
@@ -77,12 +99,22 @@ def main(argv=None) -> int:
     agent = _agent()
     if a.cmd in ("analyze", "sync"):
         mode = "dry_run" if a.cmd == "analyze" or a.dry_run else "auto"
-        out = agent.receive(Path(a.file), "cli", Path(a.file).name, mode, target_month=a.month)
-        print(out.text)
-        if out.analysis_markdown:
-            md = agent.reports_dir / f"{out.run_id}_analysis.md"
-            print(f"Initial analysis report: {md}")
-        print(f"Report: {out.report_path}")
+        name = a.name or Path(a.file).name
+        out = agent.receive(Path(a.file), "cli", name, mode, target_month=a.month)
+        md = agent.reports_dir / f"{out.run_id}_analysis.md"
+        if a.json:
+            r = out.report
+            print(json.dumps({"run_id": out.run_id, "status": out.status, "mode": r.get("mode"),
+                              "counts": r.get("counts"), "fingerprint": r.get("structure_fingerprint"),
+                              "fatal_error": r.get("fatal_error"), "notes": r.get("notes"),
+                              "report_path": str(out.report_path),
+                              "report_json_path": str(out.report_path.with_suffix(".json")),
+                              "analysis_path": str(md) if md.exists() else None}, ensure_ascii=False))
+        else:
+            print(out.text)
+            if out.analysis_markdown:
+                print(f"Initial analysis report: {md}")
+            print(f"Report: {out.report_path}")
         return {"Failed": 1}.get(out.status, 3 if "required" in out.status else
                                  4 if "errors" in out.status else 0)
     if a.cmd == "reprocess":

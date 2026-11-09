@@ -32,7 +32,7 @@ from typing import Any, Optional
 import yaml
 from openpyxl.utils import column_index_from_string
 
-from ..models import Activity, ProjectRecord, Severity
+from ..models import STAGE_TO_DASHBOARD, Activity, ProjectRecord, Severity
 from ..normalize import clean_text, norm_header, norm_key
 from . import xlsx_fast
 
@@ -569,7 +569,8 @@ class MonthlyPlanProfile:
                                      "progress_rule": d.get("progress_rule")}.items() if v is not None}
         return {
             "activity_key": d["activity_key"], "plan_month": d["plan_month"], "sequence": d["sequence"],
-            "cycle": d["cycle"], "name": a.name, "activity_type": d["activity_type"], "stage": d["stage"],
+            "cycle": d["cycle"], "name": a.name, "activity_type": d["activity_type"],
+            "stage": STAGE_TO_DASHBOARD.get(d["stage"]) if d["stage"] else None,
             "task_type": d["task_type"], "project_stage_original": d["project_stage"],
             "task_group": d["task_group"], "assignee": d["assignee"], "assignee_original": d["assignee_original"],
             "planned_hours": d["planned_hours"], "actual_hours": d["actual_hours"],
