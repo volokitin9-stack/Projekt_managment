@@ -328,9 +328,10 @@ def render_profile_analysis(a, plans, report) -> str:
     w("")
     w("## Next step")
     w("")
-    w("Nothing has been written. The first synchronisation stays **blocked** until `verify-deployment` reports "
-      "READY for the production dashboard (reachable, authenticated, persistent across a restart, not a local or "
-      "temporary instance, compatible API).")
+    w("Nothing has been written. In the dashboard: **Инж. проекты → Импорт плана → Синхронизировать** approves the "
+      "mapping of exactly this analysis and writes the records above; review-queue records stay out. From the command "
+      "line, a sync to a remote dashboard additionally requires `verify-deployment` to report READY (reachable, "
+      "authenticated, persistent across a restart, compatible API).")
     return "\n".join(L) + "\n"
 
 

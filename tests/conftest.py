@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests" / "fixtures"))
 
-import make_fixtures  # noqa: E402
+import make_fixtures  # noqa: E402,F401
 from plan_agent.config import Settings, load_policy, load_vocabulary  # noqa: E402
 
 

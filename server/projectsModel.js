@@ -38,7 +38,7 @@ const ALIASES = { make: "manufacturer", model: "vehicle_model", product: "produc
 const CONTROL_FIELDS = ["version", "actor"];
 // Fields an agent planning sync may write. `status` is NOT here: a confirmed
 // stage only changes through an explicit transition.
-const AGENT_WRITABLE = PROJECT_FIELDS.filter((f) => !["status", "comments"].includes(f));
+const AGENT_WRITABLE = PROJECT_FIELDS.filter((f) => !["status", "comments", "source"].includes(f));
 // Fields a person may edit in the dashboard.
 const MANUAL_EDITABLE = ["project_name", "article_number", "assigned_engineer", "priority", "description",
   "planned_deadline", "work_status"];
@@ -528,7 +528,7 @@ function createProject(input, { externalId = null, needsReview = false, source =
  * `status` is a recorded stage transition and restarts the stage timer.
  */
 function updateProject(id, patch, { actor = null, source = "manual", expectedVersion = null, activities = null,
-  activityScope = null, sync = null, stageAt = null } = {}) {
+  activityScope = null, sync = null, stageAt = null, protectManual = true } = {}) {
   const row = getStmt.get(id);
   if (!row) return { error: "not_found" };
   const current = JSON.parse(row.data);
@@ -557,7 +557,7 @@ function updateProject(id, patch, { actor = null, source = "manual", expectedVer
       return;
     }
     if (JSON.stringify(current[k]) === JSON.stringify(v)) return;
-    if (source === "agent" && fieldSources[k] === "manual" && !isEmpty(current[k])) {
+    if (protectManual && source === "agent" && fieldSources[k] === "manual" && !isEmpty(current[k])) {
       conflicts.push({ field: k, dashboard_value: current[k], incoming_value: v, resolution: "kept_dashboard",
         reason: "edited manually in the dashboard" });
       return;
@@ -605,8 +605,13 @@ function updateProject(id, patch, { actor = null, source = "manual", expectedVer
       throw err;
     }
     changes.forEach(([k, prev, next]) => {
-      if (k === "status") recordActivity(row.id, "stage_transition", source, actor, prev || null, next, stageEnteredAt);
-      else recordActivity(row.id, `updated:${k}`, source, actor, prev, next);
+      if (k === "status") {
+        // logged when it is recorded; a verified earlier entry time is kept as its own event
+        recordActivity(row.id, "stage_transition", source, actor, prev || null, next);
+        if (stageAt) recordActivity(row.id, "stage_entered_at", source, actor, null, stageEnteredAt);
+      } else {
+        recordActivity(row.id, `updated:${k}`, source, actor, prev, next);
+      }
     });
     if (sync && sync.run_id && (changes.length || actChanged)) {
       recordActivity(row.id, "agent_sync", "agent", actor, null, { sync_run_id: sync.run_id,
@@ -635,7 +640,8 @@ function moveStage(id, stage, { source = "manual", actor = null, expectedVersion
   }
   const current = JSON.parse(row.data);
   if ((current.status || null) === stage) return { project: getProject(row.id), unchanged: true };
-  const r = safeUpdate(row.id, { status: stage }, { source, actor, expectedVersion, stageAt: at });
+  // an explicit, confirmed transition is not a planning sync: manual-edit protection does not apply
+  const r = safeUpdate(row.id, { status: stage }, { source, actor, expectedVersion, stageAt: at, protectManual: false });
   if (!r.error && note) recordActivity(row.id, "comment:stage_transition", source, actor, null, note);
   return r;
 }

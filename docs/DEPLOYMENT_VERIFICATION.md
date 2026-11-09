@@ -27,16 +27,11 @@ Nothing is written to the dashboard. Agent authentication is tested by sending a
 | production host | the API is not on a local address |
 | agent payload compatibility | the API can store categories, activities and original values without loss |
 
-## Gaps in the Штурман agent API (branch `main`)
+## API compatibility
 
-These were measured on a local test copy using synthetic probe records. They block a lossless sync today:
+The integrated Штурман app advertises its planning support in `GET /api/agent/schema`: activities, create-only writes, review queue, sync runs and field sources. The compatibility check passes only when all of these are present.
 
-* There are no record categories, so additional work and backlog items would appear as Kanban projects.
-* There are no activities, so per-task assignee, hours, hours per date, progress and source rows would be lost.
-* Unknown fields (`extra_attributes`, `record_category`, `last_plan_month`, `source_row`) are silently dropped.
-* Priorities are `critical/high/normal/low`, and a missing priority is **displayed as "normal"**.
-* The stage is stored in `status` with the key `prototype`, and a missing stage is **displayed as "scanning"**.
-* Creating a project requires manufacturer, model and product, so additional work without a vehicle is rejected.
-* A fresh database seeds 14 sample projects with placeholder engineers.
-
-The reference backend in `backend/` implements the full contract. Porting its additions into Штурман (additive, with the UI unchanged except for separate lists for additional work and backlog) removes these gaps.
+A Штурман build **without** this integration (the original `main` branch) fails the check. In such a build:
+* there are no categories or activities;
+* unknown fields are silently dropped;
+* a missing priority or stage is displayed as "normal" or "scanning".

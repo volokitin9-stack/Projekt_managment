@@ -2,24 +2,23 @@
 
 ## Environment variables
 
-Secrets live only in environment variables, or in a secret manager that sets them. They are never written to reports, logs or mapping files.
+Secrets live only in environment variables, or in a secret manager that sets them. They are never written to reports, logs or mapping files. See `.env.example`.
 
 | Variable | Used by | Purpose |
 |---|---|---|
-| `PM_API_URL` | agent | Base URL of the Projekt_managment backend, e.g. `https://pm.example.com` |
-| `PM_AGENT_API_KEY` | agent **and** backend | Shared secret for `/api/agent/*`, sent as `Authorization: Bearer …` |
-| `PM_API_TIMEOUT` | agent | HTTP timeout in seconds (default 20) |
-| `PM_API_MAX_RETRIES` | agent | Retries for network errors, 429 and 5xx, with exponential backoff 2s, 4s, 8s, 16s (default 4) |
-| `PLAN_AGENT_STATE_DIR` | agent | Inbox, reports, mapping approvals and history (default `./state`) |
-| `PLAN_AGENT_CONFIG_DIR` | agent | Directory with `vocabulary.yaml` and `ownership_policy.yaml` (default `./config`) |
-| `PLAN_AGENT_INTAKE_KEY` | agent `serve` | Secret other agents use to upload files |
-| `PLAN_AGENT_HOST`, `PLAN_AGENT_PORT` | agent `serve` | Intake bind address (default `127.0.0.1:8090`) |
-| `PM_DB_PATH`, `PM_HOST`, `PM_PORT` | backend | SQLite path and bind address |
-| `PM_DASHBOARD_URL` | agent `verify-deployment` | dashboard page URL, if it is not served by the API host |
-| `PLAN_TARGET_MONTH` | agent | `YYYY-MM` target month for monthly workbooks (default: profile `target_month`, i.e. `auto`) |
-| `PLAN_AGENT_REQUIRE_VERIFIED_DEPLOYMENT` | agent | `1` (default): a real sync runs only after `verify-deployment` reported READY for the same API URL. `0` disables the gate (tests only) |
-
-See `.env.example`.
+| `PORT` | app | HTTP port (default 3000) |
+| `DATABASE_PATH` | app | SQLite file. Put it on a **persistent** disk |
+| `UPLOADS_DIR` | app | photos and attachments. Must be persistent |
+| `AGENT_API_KEY` | app | shared secret for `/api/agent/*`. The plan import is disabled until it is set |
+| `SEED_DEMO_DATA` | app | `true` inserts the 14 demo projects into an EMPTY database (development only) |
+| `PLAN_IMPORT_DIR` | app | uploaded planning files and the agent state (reports, approved mapping, review queue). Not served over HTTP |
+| `PLAN_AGENT_PYTHON` | app | Python interpreter for `python -m plan_agent` (default `python3`) |
+| `MAX_UPLOAD_BYTES`, `MAX_PLAN_UPLOAD_BYTES` | app | upload limits |
+| `PM_API_URL`, `PM_AGENT_API_KEY` | agent CLI | the Штурман server and key. Set automatically for in-app imports |
+| `PLAN_AGENT_STATE_DIR` | agent CLI | agent state directory (in-app: `PLAN_IMPORT_DIR/state`) |
+| `PLAN_TARGET_MONTH` | agent CLI | `YYYY-MM` target month for monthly workbooks |
+| `PM_DASHBOARD_URL` | `verify-deployment` | dashboard page URL, if it differs from the API |
+| `PLAN_AGENT_REQUIRE_VERIFIED_DEPLOYMENT` | agent CLI | `1` (default): a command-line sync runs only after `verify-deployment` reported READY. In-app imports set `0`, because the agent talks to its own server |
 
 ## `config/vocabulary.yaml`: how the agent reads files
 

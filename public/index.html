@@ -488,6 +488,80 @@
   .eng-card-due{ font-size:10.5px; font-family:"JetBrains Mono",monospace; color:var(--ink-soft); }
   .eng-card-due.overdue{ color:var(--crit); font-weight:700; }
 
+  /* ---- engineering projects: planning integration (sub-views, stage confirmation, details) ---- */
+  .eng-subtabs{ display:flex; flex-wrap:wrap; gap:3px; margin:12px 20px 0; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:8px; padding:2px; width:max-content; max-width:calc(100% - 40px); }
+  .eng-subtab{ background:none; border:none; color:var(--ink-soft); font-size:12px; font-weight:600; padding:6px 12px; border-radius:6px; cursor:pointer; }
+  .eng-subtab:hover{ color:var(--ink); }
+  .eng-subtab.active{ background:var(--accent-soft); color:var(--accent-ink); }
+  .eng-subtab .n{ font-family:"JetBrains Mono",monospace; font-size:10.5px; margin-left:4px; opacity:.8; }
+  .eng-card-article{ font-size:10.5px; font-family:"JetBrains Mono",monospace; color:var(--ink-faint); }
+  .eng-card-stage{ font-size:10.5px; color:var(--ink-soft); }
+  .eng-card-stage b{ font-family:"JetBrains Mono",monospace; color:var(--ink); font-weight:700; }
+  .eng-card-stage.unknown{ color:var(--ink-faint); font-style:italic; }
+  .eng-card-engineer.none{ color:var(--ink-faint); font-style:italic; }
+  .eng-card-img.has-photo{ background-size:cover; background-position:center; }
+  .eng-priority-pill.none{ background:var(--surface-3); color:var(--ink-faint); }
+  .eng-priority-pill.none .dot{ background:transparent; border:1px solid var(--ink-faint); }
+  .eng-card[draggable="true"]{ cursor:grab; }
+  .eng-card.dragging{ opacity:.45; }
+  .eng-col.drop-target{ border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
+  .eng-unconfirmed{ margin:12px 20px 0; border:1px dashed var(--line); border-radius:12px; background:var(--surface); }
+  .eng-unconfirmed-head{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; padding:9px 13px;
+    border-bottom:1px dashed var(--line); font-size:11.5px; color:var(--ink-soft); }
+  .eng-unconfirmed-head b{ color:var(--ink); text-transform:uppercase; letter-spacing:.04em; font-size:11.5px; }
+  .eng-unconfirmed-body{ display:flex; gap:10px; overflow-x:auto; padding:10px; }
+  .eng-unconfirmed-body .eng-card{ flex:0 0 230px; }
+  .eng-unconfirmed.collapsed .eng-unconfirmed-body{ display:none; }
+  .eng-suggest{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:4px; }
+  .eng-mini-btn{ font-size:10.5px; font-weight:600; padding:3px 8px; border-radius:6px; border:1px solid var(--line); background:none;
+    color:var(--accent-ink); cursor:pointer; }
+  .eng-mini-btn:hover{ border-color:var(--accent); }
+  .eng-list-wrap{ padding:14px 20px 20px; overflow:auto; }
+  .eng-table{ width:100%; border-collapse:collapse; font-size:12px; }
+  .eng-table th{ text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft); font-weight:600;
+    padding:7px 8px; border-bottom:1px solid var(--line); white-space:nowrap; position:sticky; top:0; background:var(--bg, var(--surface)); }
+  .eng-table td{ padding:7px 8px; border-bottom:1px solid var(--line); color:var(--ink); vertical-align:top; }
+  .eng-table td.num{ text-align:right; font-family:"JetBrains Mono",monospace; white-space:nowrap; }
+  .eng-table td.ghost{ color:var(--ink-faint); font-style:italic; }
+  .eng-table tr.clickable{ cursor:pointer; }
+  .eng-table tr.clickable:hover td{ background:var(--surface-2); }
+  .eng-empty{ color:var(--ink-faint); font-style:italic; font-size:12.5px; padding:16px 0; }
+  .eng-panel{ background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:14px; }
+  .eng-panel h3{ margin:0 0 10px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink); }
+  .eng-form-row{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; font-size:12px; color:var(--ink-soft); }
+  .eng-form-row .btn, .eng-panel .btn{ width:auto; flex:0 0 auto; }
+  .eng-input{ font-family:"Inter",sans-serif; font-size:12.5px; padding:7px 9px; border:1px solid var(--line); border-radius:8px;
+    background:var(--surface-2); color:var(--ink); }
+  textarea.eng-input{ width:100%; min-height:60px; resize:vertical; }
+  .eng-pre{ white-space:pre-wrap; font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--ink-soft); background:var(--surface-2);
+    border:1px solid var(--line); border-radius:8px; padding:10px; max-height:420px; overflow:auto; }
+  .eng-status{ font-weight:700; }
+  .eng-status.ok{ color:var(--ok, #2FBF71); }
+  .eng-status.warn{ color:var(--warn); }
+  .eng-status.err{ color:var(--crit); }
+  .detail-panel.wide{ width:600px; }
+  .eng-sec{ border-top:1px dashed var(--line); padding-top:12px; margin-top:14px; }
+  .eng-sec-head{ display:flex; justify-content:space-between; align-items:center; font-size:10.5px; text-transform:uppercase;
+    letter-spacing:.04em; color:var(--ink-soft); font-weight:600; margin-bottom:8px; }
+  .eng-sums{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .eng-sums .kpi-tile{ flex:1 1 110px; padding:7px 10px; }
+  .eng-sums .kpi-value{ font-size:16px; }
+  .eng-hist{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+  .eng-hist li{ font-size:12px; color:var(--ink); border-left:2px solid var(--line); padding:2px 0 2px 9px; }
+  .eng-hist li.stage{ border-left-color:var(--accent); }
+  .eng-hist .when{ font-family:"JetBrains Mono",monospace; font-size:10.5px; color:var(--ink-faint); margin-right:6px; }
+  .eng-hist .src{ font-size:10px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.03em; margin-left:6px; }
+  .eng-gallery{ display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:8px; }
+  .eng-thumb{ aspect-ratio:1/1; border-radius:8px; border:1px solid var(--line); background:var(--surface-3) center/cover no-repeat; cursor:zoom-in; }
+  .eng-lightbox{ position:fixed; inset:0; z-index:60; background:rgba(3,8,14,.86); display:none; align-items:center; justify-content:center;
+    flex-direction:column; gap:10px; padding:20px; }
+  .eng-lightbox.show{ display:flex; }
+  .eng-lightbox img{ max-width:100%; max-height:78vh; border-radius:8px; }
+  .eng-lightbox .cap{ color:#E8EEF4; font-size:12.5px; max-width:720px; text-align:center; }
+  .eng-comment{ font-size:12.5px; border-bottom:1px solid var(--line); padding:6px 0; }
+  .eng-comment .meta{ font-size:10.5px; color:var(--ink-faint); }
+
   /* ---- responsive ---- */
   @media (min-width:1024px){
     .tree-wrap.panel-open-width{ width:calc(100% - 390px); }
@@ -513,6 +587,9 @@
     .eng-kpis{ padding:10px 14px 0; }
     .eng-toolbar{ padding:10px 14px 0; }
     .eng-board{ padding:12px 14px 16px; }
+    .eng-subtabs{ margin:10px 14px 0; max-width:calc(100% - 28px); }
+    .eng-unconfirmed{ margin:10px 14px 0; }
+    .eng-list-wrap{ padding:12px 14px 16px; }
   }
 </style>
 
@@ -601,36 +678,58 @@
 
 <div id="engView" style="display:none;">
 
-  <div class="eng-preview-banner">Данные хранятся на сервере и доступны внешнему AI-агенту через API. Создание проекта и перетаскивание карточек между этапами — в следующем этапе разработки.</div>
+  <div class="eng-preview-banner" id="engBanner">Данные хранятся на сервере. Перетащите карточку в другую колонку, чтобы подтвердить этап — переход записывается в историю проекта. Проекты из плана без подтверждённого этапа — в блоке «Этап не подтверждён».</div>
 
-  <div class="eng-kpis">
-    <div class="kpi-tile"><div class="kpi-label">Активные проекты</div><div class="kpi-value" id="engKpiActive">0</div></div>
-    <div class="kpi-tile crit"><div class="kpi-label">Критичный приоритет</div><div class="kpi-value" id="engKpiCrit">0</div></div>
-    <div class="kpi-tile warn"><div class="kpi-label">Просрочено</div><div class="kpi-value" id="engKpiOverdue">0</div></div>
-  </div>
+  <nav class="eng-subtabs" id="engSubtabs">
+    <button type="button" class="eng-subtab active" data-subview="board">Проекты<span class="n" id="engCntBoard"></span></button>
+    <button type="button" class="eng-subtab" data-subview="additional">Доп. работы<span class="n" id="engCntAdditional"></span></button>
+    <button type="button" class="eng-subtab" data-subview="backlog">Банк задач<span class="n" id="engCntBacklog"></span></button>
+    <button type="button" class="eng-subtab" data-subview="review">На проверке<span class="n" id="engCntReview"></span></button>
+    <button type="button" class="eng-subtab" data-subview="import">Импорт плана</button>
+  </nav>
 
-  <div class="eng-toolbar">
-    <div class="eng-search-wrap">
-      <span class="icon" id="engSearchIcon"></span>
-      <input type="text" class="eng-search" id="engSearchInput" placeholder="Поиск по марке, модели, продукту…">
+  <div id="engBoardView">
+    <div class="eng-kpis">
+      <div class="kpi-tile"><div class="kpi-label">Активные проекты</div><div class="kpi-value" id="engKpiActive">0</div></div>
+      <div class="kpi-tile crit"><div class="kpi-label">Критичный приоритет</div><div class="kpi-value" id="engKpiCrit">0</div></div>
+      <div class="kpi-tile warn"><div class="kpi-label">Просрочено</div><div class="kpi-value" id="engKpiOverdue">0</div></div>
+      <div class="kpi-tile"><div class="kpi-label">Этап не подтверждён</div><div class="kpi-value" id="engKpiUnconfirmed">0</div></div>
     </div>
-    <select class="eng-select" id="engFilterMake" data-filter-key="make"><option value="">Марка</option></select>
-    <select class="eng-select" id="engFilterModel" data-filter-key="model"><option value="">Модель</option></select>
-    <select class="eng-select" id="engFilterProduct" data-filter-key="product"><option value="">Продукт</option></select>
-    <select class="eng-select" id="engFilterEngineer" data-filter-key="engineer"><option value="">Инженер</option></select>
-    <select class="eng-select" id="engFilterPriority" data-filter-key="priority">
-      <option value="">Приоритет</option>
-      <option value="critical">Критично</option>
-      <option value="high">Высокий</option>
-      <option value="normal">Обычный</option>
-      <option value="low">Низкий</option>
-    </select>
-    <button type="button" class="eng-clear-btn" id="engFilterClearBtn">Сбросить фильтры</button>
+
+    <div class="eng-toolbar">
+      <div class="eng-search-wrap">
+        <span class="icon" id="engSearchIcon"></span>
+        <input type="text" class="eng-search" id="engSearchInput" placeholder="Поиск по марке, модели, продукту, артикулу…">
+      </div>
+      <select class="eng-select" id="engFilterMake" data-filter-key="make"><option value="">Марка</option></select>
+      <select class="eng-select" id="engFilterModel" data-filter-key="model"><option value="">Модель</option></select>
+      <select class="eng-select" id="engFilterProduct" data-filter-key="product"><option value="">Продукт</option></select>
+      <select class="eng-select" id="engFilterEngineer" data-filter-key="engineer"><option value="">Инженер</option></select>
+      <select class="eng-select" id="engFilterPriority" data-filter-key="priority">
+        <option value="">Приоритет</option>
+        <option value="critical">Критично</option>
+        <option value="high">Высокий</option>
+        <option value="normal">Средний</option>
+        <option value="low">Низкий</option>
+        <option value="none">Не указан</option>
+      </select>
+      <button type="button" class="eng-clear-btn" id="engFilterClearBtn">Сбросить фильтры</button>
+    </div>
+
+    <div class="eng-unconfirmed" id="engUnconfirmed" style="display:none;"></div>
+
+    <div class="eng-board" id="engBoard"></div>
   </div>
 
-  <div class="eng-board" id="engBoard"></div>
+  <div id="engAdditionalView" class="eng-list-wrap" style="display:none;"></div>
+  <div id="engBacklogView" class="eng-list-wrap" style="display:none;"></div>
+  <div id="engReviewView" class="eng-list-wrap" style="display:none;"></div>
+  <div id="engImportView" class="eng-list-wrap" style="display:none;"></div>
 
 </div>
+
+<div class="eng-lightbox" id="engLightbox"><img id="engLightboxImg" alt=""><div class="cap" id="engLightboxCap"></div>
+  <button type="button" class="btn" id="engLightboxClose">Закрыть</button></div>
 
 <div class="detail-scrim" id="detailScrim"></div>
 <aside class="detail-panel" id="detailPanel">
@@ -1037,6 +1136,8 @@
   function closeDetail(){
     openDetailTaskId = null;
     openDetailGlobalId = null;
+    openDetailEngId = null;
+    document.getElementById("detailPanel").classList.remove("wide");
     document.getElementById("detailPanel").classList.remove("open");
     document.getElementById("detailScrim").classList.remove("show");
     document.getElementById("treeWrap").classList.remove("panel-open-width");
@@ -1046,12 +1147,16 @@
   }
   function openTaskDetail(id){
     openDetailGlobalId = null;
+    openDetailEngId = null;
+    document.getElementById("detailPanel").classList.remove("wide");
     openDetailTaskId = id;
     renderTaskDetailBody();
     openDetailPanel();
   }
   function openGlobalDetail(id){
     openDetailTaskId = null;
+    openDetailEngId = null;
+    document.getElementById("detailPanel").classList.remove("wide");
     openDetailGlobalId = id;
     renderGlobalDetailBody();
     openDetailPanel();
@@ -1129,20 +1234,32 @@
   }
 
   // ================= ENGINEERING PROJECTS =================
-  // Backed by the server's /api/projects (see server/routes/projects.js). The server seeds
-  // the same sample records the original Artifact preview shipped with, so a fresh install
-  // isn't empty; from then on this reflects real, persisted data (including anything the
-  // external agent writes via /api/agent/projects).
+  // Backed by the server's /api/projects (see server/routes/projects.js). Projects come
+  // from people, the external agents and the planning-file import. Only CONFIRMED stages
+  // (`status`) place a card in a Kanban column; a stage suggested by a planning file
+  // (`planned_stage`) is shown in the "Этап не подтверждён" strip until a person confirms it.
   var ENG_STAGES = ["scanning","development","prototype","measurement","documentation"];
   var ENG_STAGE_LABELS = {
     scanning:"Сканирование", development:"Разработка", prototype:"Тестовый образец",
     measurement:"Замер", documentation:"Оформление"
   };
-  var ENG_PRIORITY_LABELS = { critical:"Критично", high:"Высокий", normal:"Обычный", low:"Низкий" };
-  var ENG_PRIORITY_ORDER = { critical:0, high:1, normal:2, low:3 };
+  var ENG_PRIORITY_LABELS = { critical:"Критично", high:"Высокий", normal:"Средний", low:"Низкий", none:"Не указан" };
+  var ENG_PRIORITY_ORDER = { critical:0, high:1, normal:2, low:3, none:4 };
+  var ENG_ACTIVITY_LABELS = { scanning:"Сканирование", development:"Разработка", test_prototype:"Тестовый образец",
+    measurement:"Замер", documentation:"Оформление", testing:"Тесты (доп.)", transfer_extension:"Перевод / расширение (доп.)",
+    engineering_change:"Изменения (доп.)" };
+  var ENG_PROGRESS_LABELS = { planned:"Запланировано", in_progress:"В работе", done:"Выполнено", blocked:"Приостановлено",
+    cancelled:"Отменено" };
+  var ENG_WORK_STATUS_LABELS = { not_started:"Не начато", in_progress:"В работе (часы списаны)", on_hold:"Приостановлено",
+    completed:"Завершено", cancelled:"Отменено" };
+  var ENG_CATEGORY_LABELS = { main_project:"Основной проект", additional_work:"Доп. работа", backlog:"Банк задач" };
 
-  var engProjects = [];
+  var engProjects = [];      // main engineering projects (record_category = main_project)
+  var engAllRecords = [];    // every record incl. additional work and backlog
+  var engReview = [];
   var engStagesLoaded = false;
+  var engSubview = "board";
+  var engUnconfirmedCollapsed = false;
 
   function loadStages(){
     // Stages are configurable server-side (a "stages" table, not a hardcoded
@@ -1161,13 +1278,23 @@
   function loadEngProjects(){
     var ready = engStagesLoaded ? Promise.resolve() : loadStages().then(function(){ engStagesLoaded = true; });
     return ready.then(function(){
-      return apiFetch("/api/projects");
-    }).then(function(list){
-      engProjects = list || [];
+      return Promise.all([apiFetch("/api/projects"), apiFetch("/api/review-queue").catch(function(){ return []; })]);
+    }).then(function(res){
+      engAllRecords = (res[0] || []).map(engNormalize);
+      engProjects = engAllRecords.filter(function(p){ return p.record_category === "main_project"; });
+      engReview = res[1] || [];
       renderEngBoard();
+      renderEngSubviewLists();
+      if(openDetailEngId && document.getElementById("detailPanel").classList.contains("open")) refreshEngDetail();
     }).catch(function(err){
       showSyncNote("Не удалось загрузить инженерные проекты: "+(err && err.message ? err.message : "неизвестная ошибка"));
     });
+  }
+
+  function engNormalize(p){
+    p.record_category = p.record_category || "main_project";
+    p.prio = p.priority || "none";
+    return p;
   }
 
   var engFilters = { search:"", make:"", model:"", product:"", engineer:"", priority:"" };
@@ -1178,11 +1305,25 @@
     if(n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return "проекта";
     return "проектов";
   }
+  function ruDaysWord(n){
+    var n10 = n % 10, n100 = n % 100;
+    if(n10 === 1 && n100 !== 11) return "день";
+    if(n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return "дня";
+    return "дней";
+  }
+  function fmtH(x){ x = Number(x) || 0; return (Math.round(x*10)/10).toString().replace(".", ","); }
+  function fmtTs(iso){
+    if(!iso) return "—";
+    var d = new Date(iso); if(isNaN(d.getTime())) return escapeHtml(String(iso));
+    function z(n){ return (n<10?"0":"")+n; }
+    return z(d.getDate())+"."+z(d.getMonth()+1)+"."+d.getFullYear()+" "+z(d.getHours())+":"+z(d.getMinutes());
+  }
 
   function engDistinct(field, forMake){
     var seen = {}, out = [];
     engProjects.forEach(function(p){
       if(forMake && p.make !== forMake) return;
+      if(!p[field]) return;
       if(!seen[p[field]]){ seen[p[field]] = true; out.push(p[field]); }
     });
     out.sort();
@@ -1195,9 +1336,9 @@
     if(f.model && p.model !== f.model) return false;
     if(f.product && p.product !== f.product) return false;
     if(f.engineer && p.engineer !== f.engineer) return false;
-    if(f.priority && p.priority !== f.priority) return false;
+    if(f.priority && p.prio !== f.priority) return false;
     if(f.search){
-      var hay = (p.make+" "+p.model+" "+p.product+" "+p.id).toLowerCase();
+      var hay = (p.make+" "+p.model+" "+p.product+" "+(p.article_number||"")+" "+p.id).toLowerCase();
       if(hay.indexOf(f.search.toLowerCase()) === -1) return false;
     }
     return true;
@@ -1207,7 +1348,7 @@
 
   function engSortProjects(list){
     return list.slice().sort(function(a,b){
-      var pr = ENG_PRIORITY_ORDER[a.priority] - ENG_PRIORITY_ORDER[b.priority];
+      var pr = ENG_PRIORITY_ORDER[a.prio] - ENG_PRIORITY_ORDER[b.prio];
       if(pr !== 0) return pr;
       if(a.deadline && b.deadline) return a.deadline < b.deadline ? -1 : (a.deadline > b.deadline ? 1 : 0);
       if(a.deadline) return -1;
@@ -1216,21 +1357,41 @@
     });
   }
 
-  function engCardHtml(p){
+  function engStageLine(p){
+    if(!p.stage){
+      return '<div class="eng-card-stage unknown">Этап не подтверждён' +
+        (p.planned_stage ? ' · по плану: '+escapeHtml(ENG_STAGE_LABELS[p.planned_stage] || p.planned_stage) : '') + '</div>';
+    }
+    if(p.days_in_stage === null || p.days_in_stage === undefined){
+      return '<div class="eng-card-stage unknown">Длительность неизвестна</div>';
+    }
+    return '<div class="eng-card-stage">На стадии: <b>'+p.days_in_stage+'</b> '+ruDaysWord(p.days_in_stage)+'</div>';
+  }
+
+  function engCardHtml(p, opts){
+    opts = opts || {};
     var overdue = engIsOverdue(p);
     var dueStr = formatDue(p.deadline);
+    var photo = (p.images || []).filter(function(i){ return i.is_primary; })[0] || (p.images || [])[0];
+    var img = photo
+      ? '<div class="eng-card-img has-photo" style="background-image:url(\''+encodeURI(photo.url)+'\')"></div>'
+      : '<div class="eng-card-img">'+iconSvg('image',26,1.5)+'</div>';
     return (
-      '<div class="eng-card '+p.priority+'" data-action="open-eng-project" data-id="'+p.id+'">' +
-        '<div class="eng-card-img">'+iconSvg('image',26,1.5)+'</div>' +
+      '<div class="eng-card '+p.prio+'" data-action="open-eng-project" data-id="'+p.id+'" draggable="true">' +
+        img +
         '<div class="eng-card-body">' +
           '<div class="eng-card-make">'+escapeHtml(p.make)+'</div>' +
           '<div class="eng-card-model">'+escapeHtml(p.model)+'</div>' +
           '<div class="eng-card-product">'+escapeHtml(p.product)+'</div>' +
+          (p.article_number ? '<div class="eng-card-article">арт. '+escapeHtml(p.article_number)+'</div>' : '') +
+          engStageLine(p) +
           '<div class="eng-card-foot">' +
-            '<span class="eng-card-engineer">'+escapeHtml(p.engineer)+'</span>' +
-            '<span class="eng-priority-pill '+p.priority+'"><span class="dot"></span>'+ENG_PRIORITY_LABELS[p.priority]+'</span>' +
+            (p.engineer ? '<span class="eng-card-engineer">'+escapeHtml(p.engineer)+'</span>'
+                        : '<span class="eng-card-engineer none">Не назначен</span>') +
+            '<span class="eng-priority-pill '+p.prio+'"><span class="dot"></span>'+ENG_PRIORITY_LABELS[p.prio]+'</span>' +
           '</div>' +
           (dueStr ? '<div class="eng-card-due'+(overdue?' overdue':'')+'">'+(overdue?'просрочено, ':'')+escapeHtml(dueStr)+'</div>' : '') +
+          (opts.suggest && p.planned_stage ? '<div class="eng-suggest"><button type="button" class="eng-mini-btn" data-action="confirm-stage" data-id="'+p.id+'" data-stage="'+escapeHtml(p.planned_stage)+'">Подтвердить «'+escapeHtml(ENG_STAGE_LABELS[p.planned_stage]||p.planned_stage)+'»</button></div>' : '') +
         '</div>' +
       '</div>'
     );
@@ -1255,17 +1416,40 @@
     if(!wrap) return;
     renderEngFilterOptions();
     var visible = engProjects.filter(engMatchesFilters);
+    var confirmed = visible.filter(function(p){ return !!p.stage && ENG_STAGES.indexOf(p.stage) !== -1; });
+    var unconfirmed = visible.filter(function(p){ return !p.stage || ENG_STAGES.indexOf(p.stage) === -1; });
 
     document.getElementById("engKpiActive").textContent = engProjects.length;
     document.getElementById("engKpiCrit").textContent = engProjects.filter(function(p){ return p.priority === "critical"; }).length;
     document.getElementById("engKpiOverdue").textContent = engProjects.filter(engIsOverdue).length;
+    document.getElementById("engKpiUnconfirmed").textContent = engProjects.filter(function(p){ return !p.stage; }).length;
+    document.getElementById("engCntBoard").textContent = engProjects.length;
+    document.getElementById("engCntAdditional").textContent = engAllRecords.filter(function(p){ return p.record_category === "additional_work"; }).length;
+    document.getElementById("engCntBacklog").textContent = engAllRecords.filter(function(p){ return p.record_category === "backlog"; }).length;
+    document.getElementById("engCntReview").textContent = engReview.length;
+
+    var un = document.getElementById("engUnconfirmed");
+    if(unconfirmed.length){
+      var withSuggestion = unconfirmed.filter(function(p){ return !!p.planned_stage; }).length;
+      un.style.display = "";
+      un.className = "eng-unconfirmed" + (engUnconfirmedCollapsed ? " collapsed" : "");
+      un.innerHTML =
+        '<div class="eng-unconfirmed-head"><span><b>Этап не подтверждён</b> · '+unconfirmed.length+' '+ruProjectsWord(unconfirmed.length)+
+        ' · перетащите карточку в колонку или подтвердите предложенный этап</span><span style="display:flex;gap:6px;">' +
+        (withSuggestion ? '<button type="button" class="eng-mini-btn" data-action="confirm-all-suggested">Подтвердить предложенные ('+withSuggestion+')</button>' : '') +
+        '<button type="button" class="eng-mini-btn" data-action="toggle-unconfirmed">'+(engUnconfirmedCollapsed?'Показать':'Свернуть')+'</button></span></div>' +
+        '<div class="eng-unconfirmed-body">'+engSortProjects(unconfirmed).map(function(p){ return engCardHtml(p, { suggest:true }); }).join("")+'</div>';
+    } else {
+      un.style.display = "none";
+      un.innerHTML = "";
+    }
 
     wrap.innerHTML = ENG_STAGES.map(function(stage){
-      var inStage = engSortProjects(visible.filter(function(p){ return p.stage === stage; }));
+      var inStage = engSortProjects(confirmed.filter(function(p){ return p.stage === stage; }));
       var critInStage = inStage.filter(function(p){ return p.priority === "critical"; }).length;
-      var cardsHtml = inStage.length ? inStage.map(engCardHtml).join("") : '<div class="eng-col-empty">Нет проектов</div>';
+      var cardsHtml = inStage.length ? inStage.map(function(p){ return engCardHtml(p); }).join("") : '<div class="eng-col-empty">Нет проектов</div>';
       return (
-        '<div class="eng-col">' +
+        '<div class="eng-col" data-stage="'+stage+'">' +
           '<div class="eng-col-head">' +
             '<div class="eng-col-name">'+ENG_STAGE_LABELS[stage]+'</div>' +
             '<div class="eng-col-meta"><span>'+inStage.length+' '+ruProjectsWord(inStage.length)+'</span>' +
@@ -1278,31 +1462,447 @@
     }).join("");
   }
 
+  // ---- confirmed stage transitions (drag-and-drop, buttons, details panel) ----
+  function engFind(id){
+    for(var i=0;i<engAllRecords.length;i++){ if(engAllRecords[i].id === id) return engAllRecords[i]; }
+    return null;
+  }
+  function engMoveStage(id, stage){
+    var p = engFind(id);
+    if(!p) return Promise.resolve();
+    if((p.stage || null) === (stage || null)) return Promise.resolve();
+    return apiFetch("/api/projects/"+encodeURIComponent(id)+"/stage", { method:"POST", body:{ stage: stage, version: p.version } })
+      .then(function(){ return loadEngProjects(); })
+      .catch(function(err){ showSyncNote("Этап не изменён: "+err.message); return loadEngProjects(); });
+  }
+
+  var engDragId = null;
+  var engView = document.getElementById("engView");
+  engView.addEventListener("dragstart", function(e){
+    var card = e.target.closest && e.target.closest(".eng-card[draggable='true']");
+    if(!card) return;
+    engDragId = card.getAttribute("data-id");
+    card.classList.add("dragging");
+    try{ e.dataTransfer.setData("text/plain", engDragId); e.dataTransfer.effectAllowed = "move"; }catch(err){ /* ignore */ }
+  });
+  engView.addEventListener("dragend", function(e){
+    var card = e.target.closest && e.target.closest(".eng-card");
+    if(card) card.classList.remove("dragging");
+    Array.prototype.forEach.call(document.querySelectorAll(".eng-col.drop-target"), function(c){ c.classList.remove("drop-target"); });
+  });
+  engView.addEventListener("dragover", function(e){
+    var col = e.target.closest && e.target.closest(".eng-col[data-stage]");
+    if(!col || !engDragId) return;
+    e.preventDefault();
+    col.classList.add("drop-target");
+  });
+  engView.addEventListener("dragleave", function(e){
+    var col = e.target.closest && e.target.closest(".eng-col[data-stage]");
+    if(col && !col.contains(e.relatedTarget)) col.classList.remove("drop-target");
+  });
+  engView.addEventListener("drop", function(e){
+    var col = e.target.closest && e.target.closest(".eng-col[data-stage]");
+    if(!col || !engDragId) return;
+    e.preventDefault();
+    col.classList.remove("drop-target");
+    var id = engDragId; engDragId = null;
+    engMoveStage(id, col.getAttribute("data-stage"));
+  });
+
+  // ---- project details: information, workload, history, photos ----
+  function engHistoryLabel(h){
+    var a = h.action || "";
+    var pv = h.previous_value, nv = h.new_value;
+    function st(x){ return x ? (ENG_STAGE_LABELS[x] || x) : "не подтверждён"; }
+    function val(x){ if(x === null || x === undefined || x === "") return "—"; return typeof x === "object" ? JSON.stringify(x) : String(x); }
+    if(a === "created") return "Проект создан" + (nv && nv.source_file ? " (из файла «"+nv.source_file+"»)" : "");
+    if(a === "stage_transition") return "Этап: "+st(pv)+" → "+st(nv);
+    if(a === "stage_entered_at") return "Дата входа в этап (подтверждена): "+fmtTs(nv);
+    if(a === "agent_sync") return "Синхронизация планировщика" + (nv && nv.source_file ? " · файл «"+nv.source_file+"»" : "") +
+      (nv && nv.fields && nv.fields.length ? " · поля: "+nv.fields.join(", ") : "") +
+      (nv && nv.activities ? " · работы: +"+(nv.activities.added||0)+" ~"+(nv.activities.updated||0) : "");
+    if(a === "activity_added") return "Добавлена работа «"+val(nv && nv.name)+"» ("+val(nv && nv.plan_month)+")";
+    if(a === "activity_removed_from_source") return "Работа "+val(nv && nv.activity_key)+" отсутствует в новом плане (сохранена)";
+    if(a.indexOf("activity_updated:") === 0) return "Работа "+a.slice(17)+": "+val(pv)+" → "+val(nv);
+    if(a.indexOf("updated:") === 0) return "Изменено «"+a.slice(8)+"»: "+val(pv)+" → "+val(nv);
+    if(a === "file_uploaded" || a === "image_uploaded") return "Добавлен файл" + (nv && nv.caption ? " «"+nv.caption+"»" : "");
+    if(a.indexOf("event:") === 0) return "Событие агента: "+a.slice(6);
+    if(a === "comment:stage_transition") return "Комментарий к переходу: "+val(nv);
+    return a;
+  }
+  var ENG_SOURCE_LABELS = { manual:"вручную", agent:"агент", seed:"демо", telegram:"Telegram" };
+
+  function engInfoSection(p){
+    var prioOrig = p.priority_original;
+    var src = [p.source_file, p.source_sheet ? "лист «"+p.source_sheet+"»" : null,
+      (p.source_rows && p.source_rows.length) ? "строки "+p.source_rows.join(", ") : (p.source_row ? "строка "+p.source_row : null)]
+      .filter(Boolean).join(" · ");
+    var stageOpts = '<option value="">— не подтверждён —</option>' + ENG_STAGES.map(function(s){
+      return '<option value="'+s+'"'+(p.stage===s?' selected':'')+'>'+escapeHtml(ENG_STAGE_LABELS[s])+'</option>'; }).join("");
+    var prioOpts = ["", "critical", "high", "normal", "low"].map(function(k){
+      return '<option value="'+k+'"'+((p.priority||"")===k?' selected':'')+'>'+(k?ENG_PRIORITY_LABELS[k]:"Не указан")+'</option>'; }).join("");
+    var durStr = !p.stage ? "—" : (p.days_in_stage === null || p.days_in_stage === undefined ? "Длительность неизвестна"
+      : p.days_in_stage+" "+ruDaysWord(p.days_in_stage)+" (с "+fmtTs(p.stage_entered_at)+")");
+    var comments = (p.comments || []).map(function(c){
+      return '<div class="eng-comment">'+escapeHtml(c.text)+'<div class="meta">'+fmtTs(c.at)+' · '+escapeHtml(ENG_SOURCE_LABELS[c.source]||c.source||"")+(c.author?' · '+escapeHtml(c.author):'')+'</div></div>';
+    }).join("") || '<div class="eng-empty">Комментариев нет</div>';
+    var ex = p.extra_attributes || {};
+    return (
+      '<div class="task-meta">' +
+        '<div class="meta-row"><span class="k">Марка</span><span class="v">'+escapeHtml(p.make||"—")+'</span></div>' +
+        '<div class="meta-row"><span class="k">Модель</span><span class="v">'+escapeHtml(p.model||"—")+'</span></div>' +
+        '<div class="meta-row"><span class="k">Продукт</span><span class="v">'+escapeHtml(p.product||"—")+'</span></div>' +
+        '<div class="meta-row"><span class="k">Категория</span><span class="v">'+escapeHtml(ENG_CATEGORY_LABELS[p.record_category]||p.record_category)+'</span></div>' +
+        '<div class="meta-row"><span class="k">Этап</span><span class="v">'+(p.stage?escapeHtml(ENG_STAGE_LABELS[p.stage]||p.stage):'<span class="ghost">не подтверждён</span>')+'</span></div>' +
+        '<div class="meta-row"><span class="k">На стадии</span><span class="v'+(p.stage && p.days_in_stage!=null?'':' ghost')+'">'+escapeHtml(durStr)+'</span></div>' +
+        (p.planned_stage ? '<div class="meta-row"><span class="k">Этап по плану</span><span class="v">'+escapeHtml(ENG_STAGE_LABELS[p.planned_stage]||p.planned_stage)+' — предложение из плана</span></div>' : '') +
+        '<div class="meta-row"><span class="k">Статус работ</span><span class="v'+(p.work_status?'':' ghost')+'">'+escapeHtml(p.work_status?(ENG_WORK_STATUS_LABELS[p.work_status]||p.work_status):"не определён")+'</span></div>' +
+        (ex.plan_comment ? '<div class="meta-row"><span class="k">Комментарий плана</span><span class="v">'+escapeHtml(ex.plan_comment)+'</span></div>' : '') +
+        '<div class="meta-row"><span class="k">Источник</span><span class="v'+(src?'':' ghost')+'">'+escapeHtml(src||"вручную")+'</span></div>' +
+      '</div>' +
+      '<div class="eng-sec"><div class="eng-sec-head"><span>Редактирование</span></div>' +
+        '<div class="eng-form-row"><span style="width:110px;">Этап</span><select class="eng-input" id="engEditStage">'+stageOpts+'</select>' +
+          '<button type="button" class="btn" data-action="eng-save-stage">Подтвердить этап</button></div>' +
+        '<div class="eng-form-row"><span style="width:110px;">Ответственный</span><input class="eng-input" id="engEditEngineer" value="'+escapeHtml(p.assigned_engineer||"")+'" placeholder="Не назначен"></div>' +
+        '<div class="eng-form-row"><span style="width:110px;">Приоритет</span><select class="eng-input" id="engEditPriority">'+prioOpts+'</select>' +
+          (prioOrig !== null && prioOrig !== undefined && prioOrig !== "" ? '<span>исходное значение в плане: <b>'+escapeHtml(Array.isArray(prioOrig)?prioOrig.join(", "):String(prioOrig))+'</b></span>' : '') + '</div>' +
+        '<div class="eng-form-row"><span style="width:110px;">Артикул</span><input class="eng-input" id="engEditArticle" value="'+escapeHtml(p.article_number||"")+'"></div>' +
+        '<div class="eng-form-row" style="display:block;"><div style="margin-bottom:4px;">Описание</div><textarea class="eng-input" id="engEditDescription">'+escapeHtml(p.description||"")+'</textarea></div>' +
+        '<button type="button" class="btn primary" data-action="eng-save-fields">Сохранить</button>' +
+        ' <span style="font-size:11px;color:var(--ink-faint);">Ручные изменения сохраняются при следующих импортах плана.</span>' +
+      '</div>' +
+      '<div class="eng-sec"><div class="eng-sec-head"><span>Комментарии</span></div>'+comments+
+        '<div class="eng-form-row" style="margin-top:8px;"><input class="eng-input" id="engNewComment" style="flex:1;" placeholder="Инженерный комментарий…"><button type="button" class="btn" data-action="eng-add-comment">Добавить</button></div>' +
+      '</div>'
+    );
+  }
+
+  function engWorkloadSection(p){
+    var w = p.workload || {}; var acts = p.activities || [];
+    if(!acts.length) return '<div class="eng-empty">Работы по плану не загружены</div>';
+    var progOpts = function(cur){ return '<option value="">—</option>' + Object.keys(ENG_PROGRESS_LABELS).map(function(k){
+      return '<option value="'+k+'"'+(cur===k?' selected':'')+'>'+ENG_PROGRESS_LABELS[k]+'</option>'; }).join(""); };
+    var rows = acts.map(function(a){
+      var who = a.assignee || (a.assignee_original ? a.assignee_original+" (не подтверждено)" : "Не назначен");
+      return '<tr'+(a.removed_from_source?' style="opacity:.5"':'')+'><td>'+escapeHtml(a.plan_month||"—")+'</td><td>'+escapeHtml(a.name||"—")+
+        '<div style="font-size:10.5px;color:var(--ink-faint);">'+escapeHtml(ENG_ACTIVITY_LABELS[a.activity_type]||a.activity_type||"тип не определён")+
+        (a.project_stage_original?' · '+escapeHtml(a.project_stage_original):'')+(a.cycle>1?' · цикл '+a.cycle:'')+
+        (a.removed_from_source?' · нет в новом плане':'')+'</div></td>' +
+        '<td'+(a.assignee?'':' class="ghost"')+'>'+escapeHtml(who)+'</td><td class="num">'+fmtH(a.planned_hours)+'</td><td class="num">'+fmtH(a.actual_hours)+'</td>' +
+        '<td><select class="eng-input" style="padding:3px 5px;font-size:11px;" data-action="eng-activity-progress" data-aid="'+a.id+'">'+progOpts(a.progress_status)+'</select>' +
+        ((a.items_ok||a.items_nok)?'<div style="font-size:10px;color:var(--ink-faint);">ОК: '+escapeHtml(a.items_ok||"—")+' · NOK: '+escapeHtml(a.items_nok||"—")+'</div>':'')+
+        (a.source_row?'<div style="font-size:10px;color:var(--ink-faint);">'+escapeHtml(a.source_sheet||"")+'!'+a.source_row+'</div>':'')+'</td></tr>';
+    }).join("");
+    var emp = Object.keys(w.by_employee||{}).map(function(k){ var e = w.by_employee[k];
+      return '<tr><td>'+escapeHtml(k)+'</td><td class="num">'+e.activities+'</td><td class="num">'+fmtH(e.planned_hours)+'</td><td class="num">'+fmtH(e.actual_hours)+'</td></tr>'; }).join("");
+    var months = Object.keys(w.by_month||{}).sort().map(function(k){ var m = w.by_month[k];
+      return '<tr><td>'+escapeHtml(k)+'</td><td class="num">'+m.activities+'</td><td class="num">'+fmtH(m.planned_hours)+'</td><td class="num">'+fmtH(m.actual_hours)+'</td></tr>'; }).join("");
+    var days = Object.keys(w.by_date||{}).map(function(d){ return escapeHtml(d)+': <b>'+fmtH(w.by_date[d])+'</b> ч'; }).join(" · ");
+    return (
+      '<div class="eng-sums">' +
+        '<div class="kpi-tile"><div class="kpi-label">План, ч</div><div class="kpi-value">'+fmtH(w.planned_hours)+'</div></div>' +
+        '<div class="kpi-tile"><div class="kpi-label">Факт, ч</div><div class="kpi-value">'+fmtH(w.actual_hours)+'</div></div>' +
+        '<div class="kpi-tile"><div class="kpi-label">Остаток плана, ч</div><div class="kpi-value">'+(w.remaining_planned_hours===null||w.remaining_planned_hours===undefined?'—':fmtH(w.remaining_planned_hours))+'</div></div>' +
+      '</div>' +
+      '<div style="font-size:10.5px;color:var(--ink-faint);margin-bottom:8px;">Часы — это трудозатраты, а не признак выполнения. Статус «Выполнено» ставится только вручную.</div>' +
+      '<table class="eng-table"><tr><th>Месяц</th><th>Работа</th><th>Исполнитель</th><th>План, ч</th><th>Факт, ч</th><th>Прогресс</th></tr>'+rows+'</table>' +
+      '<div class="eng-sec-head" style="margin-top:12px;"><span>По сотрудникам</span></div>' +
+      '<table class="eng-table"><tr><th>Сотрудник</th><th>Работ</th><th>План, ч</th><th>Факт, ч</th></tr>'+emp+'</table>' +
+      '<div class="eng-sec-head" style="margin-top:12px;"><span>По месяцам плана</span></div>' +
+      '<table class="eng-table"><tr><th>Месяц</th><th>Работ</th><th>План, ч</th><th>Факт, ч</th></tr>'+months+'</table>' +
+      '<div class="eng-sec-head" style="margin-top:12px;"><span>По дням (факт)</span></div>' +
+      '<div style="font-size:11.5px;color:var(--ink-soft);">'+(days || '<span class="eng-empty">Нет данных по дням</span>')+'</div>'
+    );
+  }
+
+  function engHistorySection(p){
+    var hist = (p.history || []).slice().reverse();
+    if(!hist.length) return '<div class="eng-empty">История пуста</div>';
+    return '<ul class="eng-hist">' + hist.slice(0, 200).map(function(h){
+      return '<li class="'+(h.action==="stage_transition"?"stage":"")+'"><span class="when">'+fmtTs(h.at)+'</span>'+escapeHtml(engHistoryLabel(h))+
+        '<span class="src">'+escapeHtml(ENG_SOURCE_LABELS[h.source]||h.source||"")+(h.actor?' · '+escapeHtml(h.actor):'')+'</span></li>';
+    }).join("") + '</ul>' + (hist.length > 200 ? '<div class="eng-empty">Показаны последние 200 событий из '+hist.length+'</div>' : '');
+  }
+
+  function engPhotosSection(p){
+    var imgs = p.images || [], files = p.attachments || [];
+    var gal = imgs.length ? '<div class="eng-gallery">' + imgs.map(function(i){
+      return '<div class="eng-thumb" data-action="eng-lightbox" data-url="'+escapeHtml(i.url)+'" data-cap="'+escapeHtml(
+        [i.caption, i.technical_comment, i.event_at ? "снято: "+fmtTs(i.event_at) : null, "загружено: "+fmtTs(i.uploaded_at),
+         i.source==="telegram" || i.telegram_message_id ? "Telegram"+(i.telegram_chat_id?" · чат "+i.telegram_chat_id:"")+(i.telegram_message_id?" · сообщение "+i.telegram_message_id:"") : (ENG_SOURCE_LABELS[i.source]||i.source)]
+          .filter(Boolean).join(" · "))+'" style="background-image:url(\''+encodeURI(i.url)+'\')" title="'+escapeHtml(i.caption||"")+'"></div>';
+    }).join("") + '</div>' : '<div class="eng-empty">Фотографий пока нет. Фото из Telegram появятся здесь автоматически после подключения агента.</div>';
+    var att = files.length ? files.map(function(f){
+      return '<div class="eng-comment"><a href="'+escapeHtml(f.url)+'" target="_blank" rel="noopener" style="color:var(--accent-ink);">'+escapeHtml(f.original_filename||"файл")+'</a>' +
+        '<div class="meta">'+fmtTs(f.uploaded_at)+(f.caption?' · '+escapeHtml(f.caption):'')+'</div></div>'; }).join("") : '';
+    return gal + (att ? '<div class="eng-sec-head" style="margin-top:12px;"><span>Файлы</span></div>'+att : '') +
+      '<div class="eng-form-row" style="margin-top:10px;"><input type="file" id="engUploadFile" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" class="eng-input" style="flex:1 1 180px;">' +
+      '<input class="eng-input" id="engUploadCaption" placeholder="Описание" style="flex:1 1 140px;">' +
+      '<input class="eng-input" id="engUploadComment" placeholder="Технический комментарий" style="flex:1 1 160px;">' +
+      '<button type="button" class="btn" data-action="eng-upload">Загрузить</button></div>';
+  }
+
+  var engDetailCache = null;
+  function renderEngDetail(p){
+    engDetailCache = p;
+    engNormalize(p);
+    document.getElementById("treeDetailEyebrow").textContent = p.stage ? (ENG_STAGE_LABELS[p.stage] || "Проект")
+      : (ENG_CATEGORY_LABELS[p.record_category] || "Проект");
+    var title = [p.make, p.model].filter(Boolean).join(" ") || p.project_name;
+    var html =
+      '<div class="task-head"><div class="task-title">'+escapeHtml(title)+'</div>' +
+        '<span class="eng-priority-pill '+p.prio+'"><span class="dot"></span>'+ENG_PRIORITY_LABELS[p.prio]+'</span></div>' +
+      '<div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px;">'+escapeHtml(p.product||p.project_name||"")+
+        (p.article_number?' · арт. '+escapeHtml(p.article_number):'')+' · '+(p.engineer?escapeHtml(p.engineer):'<i>Не назначен</i>')+'</div>' +
+      '<div class="eng-sec"><div class="eng-sec-head"><span>Информация о проекте</span></div>'+engInfoSection(p)+'</div>' +
+      '<div class="eng-sec"><div class="eng-sec-head"><span>Трудозатраты</span></div>'+engWorkloadSection(p)+'</div>' +
+      '<div class="eng-sec"><div class="eng-sec-head"><span>История проекта</span></div>'+engHistorySection(p)+'</div>' +
+      '<div class="eng-sec"><div class="eng-sec-head"><span>Фотографии и файлы</span></div>'+engPhotosSection(p)+'</div>';
+    document.getElementById("treeDetailBody").innerHTML = html;
+  }
+
+  function refreshEngDetail(){
+    if(!openDetailEngId) return Promise.resolve();
+    var focused = document.activeElement && document.getElementById("detailPanel").contains(document.activeElement) &&
+      /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+    if(focused) return Promise.resolve();          // never overwrite what the user is typing
+    return apiFetch("/api/projects/"+encodeURIComponent(openDetailEngId)).then(renderEngDetail).catch(function(){});
+  }
+
   function openEngDetail(id){
     openDetailEngId = id;
-    var p = null;
-    for(var i=0;i<engProjects.length;i++){ if(engProjects[i].id === id){ p = engProjects[i]; break; } }
-    if(!p) return;
-    document.getElementById("treeDetailEyebrow").textContent = ENG_STAGE_LABELS[p.stage] || "Проект";
-    var overdue = engIsOverdue(p);
-    var dueStr = formatDue(p.deadline);
-    var html = (
-      '<div class="eng-preview-banner" style="margin:0 0 14px;">Проект из базы сервера. Редактирование, фото и история изменений появятся на следующих этапах.</div>' +
-      '<div class="task-head"><div class="task-title">'+escapeHtml(p.make)+' '+escapeHtml(p.model)+'</div></div>' +
-      '<div class="task-meta">' +
-        '<div class="meta-row"><span class="k">Продукт</span><span class="v">'+escapeHtml(p.product)+'</span></div>' +
-        '<div class="meta-row"><span class="k">Инженер</span><span class="v">'+escapeHtml(p.engineer)+'</span></div>' +
-        '<div class="meta-row"><span class="k">Приоритет</span><span class="v">'+ENG_PRIORITY_LABELS[p.priority]+'</span></div>' +
-        '<div class="meta-row"><span class="k">Этап</span><span class="v">'+ENG_STAGE_LABELS[p.stage]+'</span></div>' +
-        '<div class="meta-row"><span class="k">Срок</span><span class="v'+(overdue?' overdue':(dueStr?'':' ghost'))+'">'+(dueStr?(overdue?'просрочено, ':'')+escapeHtml(dueStr):'—')+'</span></div>' +
-      '</div>' +
-      '<div class="eng-card-img" style="margin-top:14px;border-radius:10px;aspect-ratio:16/9;">'+iconSvg('image',34,1.5)+'</div>'
-    );
-    document.getElementById("treeDetailBody").innerHTML = html;
+    var p = engFind(id);
+    if(p) renderEngDetail(p);
+    document.getElementById("detailPanel").classList.add("wide");
     openDetailPanel();
+    refreshEngDetail();
+  }
+
+  document.getElementById("treeDetailBody").addEventListener("click", function(e){
+    var p = engDetailCache;
+    if(!p || !openDetailEngId) return;
+    var t = e.target.closest("[data-action]");
+    if(!t) return;
+    var act = t.getAttribute("data-action");
+    if(act === "eng-save-stage"){
+      var st = document.getElementById("engEditStage").value || null;
+      engMoveStage(p.id, st).then(refreshEngDetail);
+    } else if(act === "eng-save-fields"){
+      var changes = {};
+      var eng = document.getElementById("engEditEngineer").value.trim();
+      var pr = document.getElementById("engEditPriority").value || null;
+      var art = document.getElementById("engEditArticle").value.trim();
+      var desc = document.getElementById("engEditDescription").value;
+      if(eng !== (p.assigned_engineer||"")) changes.assigned_engineer = eng;
+      if(pr !== (p.priority||null)) changes.priority = pr;
+      if(art !== (p.article_number||"")) changes.article_number = art || null;
+      if(desc !== (p.description||"")) changes.description = desc;
+      if(!Object.keys(changes).length) return;
+      apiFetch("/api/projects/"+encodeURIComponent(p.id), { method:"PATCH", body:{ changes: changes, version: p.version } })
+        .then(function(){ document.activeElement && document.activeElement.blur(); return loadEngProjects(); }).then(refreshEngDetail)
+        .catch(function(err){ showSyncNote("Не сохранено: "+err.message); });
+    } else if(act === "eng-add-comment"){
+      var txt = document.getElementById("engNewComment").value.trim();
+      if(!txt) return;
+      apiFetch("/api/projects/"+encodeURIComponent(p.id)+"/comments", { method:"POST", body:{ text: txt } })
+        .then(function(){ document.getElementById("engNewComment").value = ""; document.activeElement && document.activeElement.blur(); return refreshEngDetail(); })
+        .catch(function(err){ showSyncNote("Комментарий не добавлен: "+err.message); });
+    } else if(act === "eng-upload"){
+      var f = document.getElementById("engUploadFile").files[0];
+      if(!f) return;
+      var fd = new FormData();
+      fd.append("file", f);
+      fd.append("caption", document.getElementById("engUploadCaption").value);
+      fd.append("technical_comment", document.getElementById("engUploadComment").value);
+      apiFetch("/api/projects/"+encodeURIComponent(p.id)+"/files", { method:"POST", body: fd })
+        .then(function(){ document.activeElement && document.activeElement.blur(); return loadEngProjects(); }).then(refreshEngDetail)
+        .catch(function(err){ showSyncNote("Файл не загружен: "+err.message); });
+    } else if(act === "eng-lightbox"){
+      document.getElementById("engLightboxImg").src = t.getAttribute("data-url");
+      document.getElementById("engLightboxCap").textContent = t.getAttribute("data-cap") || "";
+      document.getElementById("engLightbox").classList.add("show");
+    }
+  });
+  document.getElementById("treeDetailBody").addEventListener("change", function(e){
+    var t = e.target.closest('[data-action="eng-activity-progress"]');
+    if(!t || !openDetailEngId) return;
+    apiFetch("/api/projects/"+encodeURIComponent(openDetailEngId)+"/activities/"+encodeURIComponent(t.getAttribute("data-aid")),
+      { method:"PATCH", body:{ changes:{ progress_status: t.value || null } } })
+      .then(function(){ t.blur(); return refreshEngDetail(); })
+      .catch(function(err){ showSyncNote("Прогресс не сохранён: "+err.message); });
+  });
+  function closeLightbox(){ document.getElementById("engLightbox").classList.remove("show"); }
+  document.getElementById("engLightboxClose").addEventListener("click", closeLightbox);
+  document.getElementById("engLightbox").addEventListener("click", function(e){ if(e.target.id === "engLightbox") closeLightbox(); });
+
+  // ---- additional work, backlog, review queue, plan import ----
+  function engRecordsTable(cat){
+    var list = engAllRecords.filter(function(p){ return p.record_category === cat; });
+    if(!list.length) return '<div class="eng-empty">Записей нет. Они появятся после импорта плана.</div>';
+    if(cat === "additional_work"){
+      var totF = 0, totP = 0;
+      var rows = list.map(function(p){
+        var w = p.workload || {}; totF += w.actual_hours || 0; totP += w.planned_hours || 0;
+        return '<tr class="clickable" data-action="open-eng-project" data-id="'+p.id+'"><td>'+escapeHtml(p.project_name||"—")+'</td>' +
+          '<td'+(p.engineer?'':' class="ghost"')+'>'+escapeHtml(p.engineer||"Не назначен")+'</td>' +
+          '<td>'+escapeHtml([p.make,p.model].filter(Boolean).join(" ")||"—")+'</td>' +
+          '<td class="num">'+fmtH(w.planned_hours)+'</td><td class="num">'+fmtH(w.actual_hours)+'</td>' +
+          '<td>'+escapeHtml(p.last_plan_month||"—")+'</td><td>'+escapeHtml((p.source_sheet||"")+(p.source_row?"!"+p.source_row:""))+'</td></tr>';
+      }).join("");
+      return '<div class="eng-panel"><h3>Доп. работы</h3><div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Внеплановые и операционные задания. Учитываются в общей загрузке отдела, на канбан-доску не попадают. Итого: план '+fmtH(totP)+' ч, факт '+fmtH(totF)+' ч.</div>' +
+        '<table class="eng-table"><tr><th>Задание</th><th>Исполнитель</th><th>Автомобиль</th><th>План, ч</th><th>Факт, ч</th><th>Месяц</th><th>Источник</th></tr>'+rows+'</table></div>';
+    }
+    var rowsB = list.map(function(p){
+      var a = (p.activities || [])[0] || {}; var ex = p.extra_attributes || {};
+      return '<tr class="clickable" data-action="open-eng-project" data-id="'+p.id+'"><td>'+escapeHtml(p.project_name||"—")+'</td>' +
+        '<td>'+escapeHtml(a.task_type||"—")+'</td><td'+(a.assignee?'':' class="ghost"')+'>'+escapeHtml(a.assignee||a.assignee_original||"Не назначен")+'</td>' +
+        '<td>'+escapeHtml(ex.scheduling_note||"—")+'</td><td>'+escapeHtml(ex.feasibility||"—")+'</td>' +
+        '<td class="num">'+fmtH(a.planned_hours)+'</td><td>'+escapeHtml((p.source_sheet||"")+(p.source_row?"!"+p.source_row:""))+'</td></tr>';
+    }).join("");
+    return '<div class="eng-panel"><h3>Банк задач</h3><div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Будущие и отложенные задачи. Отметки вроде «На Июнь» сохранены как в плане и не означают выполнение.</div>' +
+      '<table class="eng-table"><tr><th>Позиция</th><th>Работа</th><th>Исполнитель</th><th>Планирование (из плана)</th><th>Выполнимо</th><th>План, ч</th><th>Источник</th></tr>'+rowsB+'</table></div>';
+  }
+
+  function engReviewHtml(){
+    if(!engReview.length) return '<div class="eng-empty">Очередь проверки пуста.</div>';
+    var KIND = { plan_record:"Запись плана", image:"Фото", project:"Проект без идентификатора", telegram_photo:"Фото Telegram" };
+    var rows = engReview.map(function(r){
+      var pl = r.payload || {}; var acts = pl.activities || [];
+      var hrsP = acts.reduce(function(s,a){ return s+(a.planned_hours||0); },0), hrsF = acts.reduce(function(s,a){ return s+(a.actual_hours||0); },0);
+      var who = acts.map(function(a){ return a.assignee || a.assignee_original; }).filter(Boolean);
+      who = who.filter(function(v,i){ return who.indexOf(v)===i; }).join(", ");
+      return '<tr><td>'+escapeHtml(KIND[r.kind]||r.kind)+'</td><td>'+escapeHtml(pl.project_name||pl.caption||pl.original_filename||"—")+
+        (pl.url?'<div><a href="'+escapeHtml(pl.url)+'" target="_blank" rel="noopener" style="color:var(--accent-ink);font-size:11px;">открыть файл</a></div>':'')+'</td>' +
+        '<td style="max-width:360px;">'+escapeHtml(r.reason||"")+'</td><td>'+escapeHtml(who||"—")+'</td>' +
+        '<td class="num">'+(acts.length?fmtH(hrsP)+' / '+fmtH(hrsF):'—')+'</td>' +
+        '<td>'+escapeHtml(pl.source_sheet ? pl.source_sheet+"!"+(pl.source_rows||[]).join(",") : "—")+'</td>' +
+        '<td><button type="button" class="eng-mini-btn" data-action="eng-resolve-review" data-id="'+r.id+'">Разобрано</button></td></tr>';
+    }).join("");
+    return '<div class="eng-panel"><h3>На проверке</h3><div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Записи, которые нельзя надёжно сопоставить с проектом. Они не попадают на доску, пока их не разберёт человек.</div>' +
+      '<table class="eng-table"><tr><th>Тип</th><th>Запись</th><th>Причина</th><th>Исполнители</th><th>План / факт, ч</th><th>Источник</th><th></th></tr>'+rows+'</table></div>';
+  }
+
+  var engImports = [];
+  var ENG_IMPORT_STATUS = { analyzed:"Пробный анализ выполнен — ожидает утверждения", synced:"Синхронизировано",
+    failed:"Ошибка анализа", sync_failed:"Ошибка синхронизации", analyzing:"Анализ…" };
+  var engImportResult = null;
+  function engImportHtml(){
+    var now = new Date();
+    var defMonth = now.getFullYear()+"-"+(now.getMonth()<9?"0":"")+(now.getMonth()+1);
+    var form = '<div class="eng-panel"><h3>Импорт плана (Excel)</h3>' +
+      '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">1. Загрузите файл и выберите отчётный месяц — выполняется только пробный анализ, данные не записываются. 2. Проверьте результат. 3. Нажмите «Синхронизировать», чтобы записать утверждённые данные.</div>' +
+      '<div class="eng-form-row"><input type="file" id="engPlanFile" accept=".xlsx,.xls,.csv,.pdf,.docx" class="eng-input" style="flex:1 1 240px;">' +
+      '<span>Месяц</span><input type="month" id="engPlanMonth" class="eng-input" value="'+defMonth+'">' +
+      '<button type="button" class="btn primary" data-action="eng-plan-analyze">Анализировать</button><span id="engPlanBusy" style="font-size:12px;"></span></div></div>';
+    var res = "";
+    var r = engImportResult;
+    if(r){
+      var dr = (r.summary && r.summary.dry_run) || {};
+      var c = (r.report && r.report.counts) || dr.counts || {};
+      var cls = r.status === "synced" ? "ok" : (r.status === "analyzed" ? "warn" : "err");
+      var STATUS = ENG_IMPORT_STATUS;
+      res = '<div class="eng-panel"><h3>Результат: '+escapeHtml(r.original_name||"")+' · '+escapeHtml(r.plan_month||"")+'</h3>' +
+        '<div class="eng-form-row"><span class="eng-status '+cls+'">'+escapeHtml(STATUS[r.status]||r.status)+'</span>' +
+        (dr.status ? '<span>агент: '+escapeHtml(dr.status)+'</span>' : '') + '</div>' +
+        (r.error ? '<div class="eng-status err" style="font-size:12px;margin-bottom:8px;">'+escapeHtml(String(r.error))+'</div>' : '') +
+        '<table class="eng-table" style="max-width:520px;"><tr><th>Показатель</th><th>Количество</th></tr>' +
+          '<tr><td>Записей распознано</td><td class="num">'+(c.identified||0)+'</td></tr>' +
+          '<tr><td>Будет создано</td><td class="num">'+(c.new||0)+'</td></tr>' +
+          '<tr><td>Будет обновлено</td><td class="num">'+(c.updated||0)+'</td></tr>' +
+          '<tr><td>Без изменений</td><td class="num">'+(c.unchanged||0)+'</td></tr>' +
+          '<tr><td>На проверку</td><td class="num">'+(c.review||0)+'</td></tr>' +
+          '<tr><td>Ошибки</td><td class="num">'+((c.invalid_records||0)+(c.sync_errors||0))+'</td></tr></table>' +
+        ((dr.notes||[]).length ? '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">'+dr.notes.map(escapeHtml).join("<br>")+'</div>' : '') +
+        (r.status === "analyzed" ? '<div class="eng-form-row" style="margin-top:10px;"><button type="button" class="btn primary" data-action="eng-plan-approve" data-id="'+r.id+'">Синхронизировать</button>' +
+          '<span style="font-size:11.5px;color:var(--ink-faint);">Утверждает сопоставление этого файла и записывает данные в базу.</span></div>' : '') +
+        (r.analysis_md ? '<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:12px;">Полный отчёт анализа</summary><div class="eng-pre">'+escapeHtml(r.analysis_md)+'</div></details>' : '') +
+        (r.report_text ? '<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12px;">Отчёт синхронизации</summary><div class="eng-pre">'+escapeHtml(r.report_text)+'</div></details>' : '') +
+      '</div>';
+    }
+    var hist = engImports.length ? '<div class="eng-panel"><h3>Последние загрузки</h3><table class="eng-table"><tr><th>Файл</th><th>Месяц</th><th>Статус</th><th>Загружен</th><th></th></tr>' +
+      engImports.map(function(i){ return '<tr><td>'+escapeHtml(i.original_name||"")+'</td><td>'+escapeHtml(i.plan_month||"")+'</td><td>'+escapeHtml(ENG_IMPORT_STATUS[i.status]||i.status)+'</td><td>'+fmtTs(i.uploaded_at)+'</td>' +
+        '<td><button type="button" class="eng-mini-btn" data-action="eng-plan-open" data-id="'+i.id+'">Открыть</button></td></tr>'; }).join("") + '</table></div>' : '';
+    return form + res + hist;
+  }
+  function loadImports(){
+    return apiFetch("/api/plan-imports").then(function(list){ engImports = list || []; renderEngSubviewLists(); }).catch(function(){});
+  }
+
+  function renderEngSubviewLists(){
+    var a = document.getElementById("engAdditionalView"), b = document.getElementById("engBacklogView"),
+        rv = document.getElementById("engReviewView"), im = document.getElementById("engImportView");
+    if(engSubview === "additional") a.innerHTML = engRecordsTable("additional_work");
+    if(engSubview === "backlog") b.innerHTML = engRecordsTable("backlog");
+    if(engSubview === "review") rv.innerHTML = engReviewHtml();
+    if(engSubview === "import" && !(document.activeElement && im.contains(document.activeElement))) im.innerHTML = engImportHtml();
+  }
+
+  function setEngSubview(v){
+    engSubview = v;
+    Array.prototype.forEach.call(document.querySelectorAll(".eng-subtab"), function(b){
+      b.classList.toggle("active", b.getAttribute("data-subview") === v); });
+    document.getElementById("engBoardView").style.display = v === "board" ? "" : "none";
+    document.getElementById("engAdditionalView").style.display = v === "additional" ? "" : "none";
+    document.getElementById("engBacklogView").style.display = v === "backlog" ? "" : "none";
+    document.getElementById("engReviewView").style.display = v === "review" ? "" : "none";
+    document.getElementById("engImportView").style.display = v === "import" ? "" : "none";
+    if(v === "import") loadImports();
+    renderEngSubviewLists();
   }
 
   document.getElementById("engView").addEventListener("click", function(e){
+    var sub = e.target.closest(".eng-subtab");
+    if(sub){ setEngSubview(sub.getAttribute("data-subview")); return; }
+    var btn = e.target.closest("[data-action]");
+    var act = btn ? btn.getAttribute("data-action") : null;
+    if(act === "confirm-stage"){
+      e.stopPropagation();
+      engMoveStage(btn.getAttribute("data-id"), btn.getAttribute("data-stage"));
+      return;
+    }
+    if(act === "confirm-all-suggested"){
+      var todo = engProjects.filter(function(p){ return !p.stage && p.planned_stage && engMatchesFilters(p); });
+      if(!todo.length) return;
+      if(!window.confirm("Подтвердить предложенный планом этап для "+todo.length+" "+ruProjectsWord(todo.length)+"?\nКаждый переход будет записан в историю проекта с текущей датой.")) return;
+      todo.reduce(function(chain, p){
+        return chain.then(function(){ return apiFetch("/api/projects/"+encodeURIComponent(p.id)+"/stage", { method:"POST", body:{ stage:p.planned_stage, version:p.version } }).catch(function(){}); });
+      }, Promise.resolve()).then(loadEngProjects);
+      return;
+    }
+    if(act === "toggle-unconfirmed"){ engUnconfirmedCollapsed = !engUnconfirmedCollapsed; renderEngBoard(); return; }
+    if(act === "eng-resolve-review"){
+      apiFetch("/api/review-queue/"+encodeURIComponent(btn.getAttribute("data-id"))+"/resolve", { method:"POST", body:{ resolution:"resolved" } })
+        .then(loadEngProjects).catch(function(err){ showSyncNote(err.message); });
+      return;
+    }
+    if(act === "eng-plan-analyze"){
+      var f = document.getElementById("engPlanFile").files[0];
+      var m = document.getElementById("engPlanMonth").value;
+      if(!f){ showSyncNote("Выберите файл плана"); return; }
+      var fd = new FormData(); fd.append("file", f); fd.append("month", m);
+      document.getElementById("engPlanBusy").textContent = "Анализ… (может занять до минуты)";
+      btn.disabled = true;
+      apiFetch("/api/plan-imports", { method:"POST", body: fd })
+        .then(function(r){ engImportResult = r; })
+        .catch(function(err){ engImportResult = { status:"failed", error: err.message, original_name: f.name, plan_month: m }; })
+        .then(function(){ btn.disabled = false; document.activeElement && document.activeElement.blur(); return loadImports(); });
+      return;
+    }
+    if(act === "eng-plan-open"){
+      apiFetch("/api/plan-imports/"+encodeURIComponent(btn.getAttribute("data-id"))).then(function(r){ engImportResult = r; renderEngSubviewLists(); });
+      return;
+    }
+    if(act === "eng-plan-approve"){
+      if(!window.confirm("Синхронизировать этот план с базой?\nБудут созданы и обновлены записи согласно пробному анализу. Записи «на проверку» не переносятся.")) return;
+      btn.disabled = true;
+      btn.textContent = "Синхронизация…";
+      apiFetch("/api/plan-imports/"+encodeURIComponent(btn.getAttribute("data-id"))+"/approve", { method:"POST", body:{ confirm:true, approved_by:"dashboard_user" } })
+        .then(function(){ return apiFetch("/api/plan-imports/"+encodeURIComponent(btn.getAttribute("data-id"))); })
+        .then(function(r){ engImportResult = r; })
+        .catch(function(err){ showSyncNote("Синхронизация не выполнена: "+err.message); })
+        .then(function(){ return Promise.all([loadImports(), loadEngProjects()]); });
+      return;
+    }
     var card = e.target.closest('[data-action="open-eng-project"]');
     if(card){ openEngDetail(card.getAttribute("data-id")); return; }
     if(e.target.closest("#engFilterClearBtn")){

@@ -1,8 +1,22 @@
 # Connecting an external file-delivery agent
 
+**Recommended for the integrated Штурман application:** deliver the file to the same endpoint the dashboard uses. This runs the dry run only:
+
+```bash
+curl -sS -F "file=@plan.xlsx" -F month=2026-11 http://<shturman>/api/plan-imports
+```
+
+Then approve it, either by a person in **Инж. проекты → Импорт плана** or by an authorized caller:
+
+```bash
+curl -sS -X POST -H "Content-Type: application/json" -d '{"confirm": true, "approved_by": "planning-bot"}' http://<shturman>/api/plan-imports/<import-id>/approve
+```
+
+Manual and automatic deliveries therefore share one validation and synchronization pipeline. The alternatives below run the agent outside the app and write to the same Штурман API.
+
 Every channel stores the file in the content-addressed inbox and runs **the same pipeline**. File names are never relied on: the format is detected from the file contents, and the original name is kept only as metadata.
 
-## 1. HTTP intake (recommended for agent-to-agent)
+## 1. HTTP intake of the agent itself (agent running outside the app)
 
 Set the intake key on the receiving side:
 
