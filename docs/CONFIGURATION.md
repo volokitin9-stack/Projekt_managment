@@ -45,6 +45,23 @@ When the department uses a new term, add it here. No code change is needed.
 
 These rules apply regardless of configuration: an empty value never clears data, projects are never deleted, and attachments, comments and history are never sent.
 
+## Workbook profiles: `config/profiles/`
+
+Some planning files belong to a known family, and an explicit profile reads them instead of the generic heuristics. `monthly_work_plan.yaml` covers the department's monthly work plan: one worksheet per month, one row per task.
+
+* **Target month:** `target_month: auto` uses the current month. Override it per run with `--month YYYY-MM` (CLI), `?month=YYYY-MM` (HTTP intake) or `PLAN_TARGET_MONTH`. **Only** the worksheet of that month is imported.
+* **Sheet selection:** a sheet is a month plan when its name contains a month name (Russian or English, all grammatical forms are listed in `month_names`) **and** it has the `required_headers`.
+  * A sheet matching `derived_sheet_patterns` (e.g. "Сводная Ноябрь") is reported as a derived summary.
+  * **Two plan sheets for the same month** stop the run with *Verification required* until `sheet_override: {"2026-11": "<sheet>"}` is set.
+  * If the file name names a different year than the target month, the run also stops for verification.
+* **Columns** are found by header text, never by letter.
+* **Sections and row structure:** `section_markers` and `import_sections` split the sheet into sections (ДОП РАБОТЫ / БАНК ЗАДАЧ are not imported by default). Task rows end at `end_of_tasks_prefixes`. `cycle_closing_task_groups` defines task-cycle boundaries.
+* **Workflow:** `activity_rules` is an ordered, first-match rule list over (*План на месяц*, *Стадия проекта*, *Группа задач*) that assigns each task to a dashboard stage.
+* **Status, priority and engineer:** `status_rules` derive status from evidence only, `priority_map` translates priorities, and `unassigned_engineer_markers` lists engineer values that are not a person.
+* **Re-validation:** `strict_value_kinds` lists value kinds where a value never seen at approval sends the project to review.
+
+The first dry run copies these rules, together with every observed value combination, into `state/mapping.proposed.yaml`. Approving it makes the approved copy the permanent configuration for later files. A new column structure (fingerprint) triggers a new validation.
+
 ## Mapping lifecycle (initial analysis mode)
 
 1. **analyze** writes `state/mapping.proposed.yaml` and `state/reports/<run>_analysis.md`. The proposal contains:

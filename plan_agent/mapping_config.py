@@ -134,6 +134,16 @@ class MappingStore:
             for c in sh.get("columns", []) or []:
                 if not validate_role(c.get("role")):
                     errors.append(f"sheet '{sh['name']}' column {c['column']}: unknown role {c['role']!r}")
+        main_stages = {"scanning", "development", "test_prototype", "measurement", "documentation"}
+        for i, rule in enumerate(data.get("activity_rules") or []):
+            st = rule.get("stage")
+            if not (st in main_stages or (isinstance(st, str) and st.startswith("extra:"))):
+                errors.append(f"activity_rules[{i}]: invalid stage {st!r}")
+            if not isinstance(rule.get("when"), dict) or not rule["when"]:
+                errors.append(f"activity_rules[{i}]: 'when' must be a non-empty mapping")
+        for raw, mapped in (data.get("priority_map") or {}).items():
+            if mapped not in ("high", "medium", "low", None):
+                errors.append(f"priority_map[{raw!r}]: invalid priority {mapped!r}")
         if errors:
             raise ValueError("cannot approve mapping:\n  " + "\n  ".join(errors))
         data["approved"] = True

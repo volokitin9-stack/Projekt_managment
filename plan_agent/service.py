@@ -57,28 +57,33 @@ class PlanAgent:
 
     # ------------------------------------------------------------------ #
     def receive(self, path: Path, channel: str, original_name: Optional[str] = None,
-                requested_mode: str = "auto", metadata: Optional[dict] = None) -> ProcessOutcome:
+                requested_mode: str = "auto", metadata: Optional[dict] = None,
+                target_month: Optional[str] = None) -> ProcessOutcome:
         stored, meta = self.inbox.store(Path(path), channel, original_name, metadata)
         name = original_name or Path(path).name
-        return self.process(stored, name, requested_mode)
+        return self.process(stored, name, requested_mode, target_month)
 
-    def reprocess(self, sha: str, requested_mode: str = "auto") -> ProcessOutcome:
+    def reprocess(self, sha: str, requested_mode: str = "auto", target_month: Optional[str] = None) -> ProcessOutcome:
         stored, meta = self.inbox.get(sha)
         name = meta["deliveries"][-1]["original_name"]
         meta["deliveries"].append({"channel": "reprocess",
                                    "received_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                                    "original_name": name})
         (stored.parent / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-        return self.process(stored, name, requested_mode)
+        return self.process(stored, name, requested_mode, target_month)
 
     # ------------------------------------------------------------------ #
-    def process(self, path: Path, display_name: str, requested_mode: str = "auto") -> ProcessOutcome:
-        """requested_mode: 'auto' (sync if approved, else dry run), 'dry_run', 'sync'."""
+    def process(self, path: Path, display_name: str, requested_mode: str = "auto",
+                target_month: Optional[str] = None) -> ProcessOutcome:
+        """requested_mode: 'auto' (sync if approved, else dry run), 'dry_run', 'sync'.
+        target_month: 'YYYY-MM' for monthly workbooks (default: PLAN_TARGET_MONTH or profile setting)."""
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:6]
         started = datetime.now(timezone.utc).isoformat(timespec="seconds")
         approved = self.store.load_approved()
         try:
-            a = analyze_file(path, self.vocab, approved, display_name=display_name)
+            a = analyze_file(path, self.vocab, approved, display_name=display_name,
+                             target_month=target_month or self.settings.target_month,
+                             config_dir=self.settings.config_dir)
         except (UnsupportedFormatError, EmptyFileError, CorruptFileError) as exc:
             return self._failed(run_id, display_name, f"{type(exc).__name__}: {exc}")
         except Exception as exc:  # unexpected parser failure: report, never crash the service
@@ -86,7 +91,10 @@ class PlanAgent:
             return self._failed(run_id, display_name, f"unexpected analysis error: {type(exc).__name__}: {exc}")
 
         notes: list[str] = []
-        if not any(s.relevant for s in a.schemas):
+        prof = a.profile
+        if prof is not None and not prof.analysis.get("source_sheet"):
+            return self._failed(run_id, display_name, "; ".join(prof.blocking) or "no source worksheet", a)
+        if prof is None and not any(s.relevant for s in a.schemas):
             return self._failed(run_id, display_name,
                                 "no worksheet/section with project planning data was recognised: " +
                                 " | ".join(f"{s.source}: {'; '.join(s.reasons)}" for s in a.schemas), a)
@@ -102,6 +110,10 @@ class PlanAgent:
                          f"{approved.get('fingerprint')} - new validation required; dry run only")
         else:
             mode = "dry_run" if requested_mode == "dry_run" else "sync"
+        blocked = bool(prof is not None and prof.blocking)
+        if blocked:
+            mode = "dry_run"
+            notes.extend("VERIFICATION REQUIRED: " + b for b in prof.blocking)
         if mode == "dry_run" and (initial or not a.structure_matches_approved):
             self.store.save_proposal(a.proposal)
             notes.append(f"proposed mapping written to {self.store.proposed_path}")
@@ -137,13 +149,21 @@ class PlanAgent:
         if mode == "sync":
             status = "Failed" if fatal and c["new"] + c["updated"] == 0 and c["sync_errors"] else \
                 "Completed with errors" if c["sync_errors"] or fatal else "Completed"
+        elif blocked:
+            status = "Verification required (dry run)"
         elif initial or not a.structure_matches_approved:
             status = "Approval required (dry run)"
         else:
             status = "Dry run" if not fatal else "Dry run - dashboard unavailable"
         report["status"] = status
         text = render_text(report)
-        md = render_initial_analysis(a, plans, report) if (initial or not a.structure_matches_approved) else None
+        md = None
+        if initial or not a.structure_matches_approved or blocked:
+            if prof is not None:
+                from .profiles.report import render_profile_analysis
+                md = render_profile_analysis(a, plans, report)
+            else:
+                md = render_initial_analysis(a, plans, report)
         rp = self._persist(run_id, started, a, report, text, md)
         return ProcessOutcome(run_id, status, report, text, md, rp)
 

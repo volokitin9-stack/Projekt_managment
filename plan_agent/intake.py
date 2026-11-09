@@ -88,7 +88,7 @@ def make_intake_server(agent: PlanAgent, host: str, port: int, intake_key: str) 
                     remaining -= len(chunk)
             try:
                 with _lock:
-                    out = agent.receive(Path(tmp.name), "api", name, mode, meta)
+                    out = agent.receive(Path(tmp.name), "api", name, mode, meta, target_month=q.get("month"))
             finally:
                 os.unlink(tmp.name)
             self._send(200, _outcome(out))

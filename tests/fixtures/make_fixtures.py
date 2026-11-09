@@ -142,3 +142,105 @@ if __name__ == "__main__":
     make_wide_xlsx(out / "engineering_plan_v2.xlsx", 2)
     make_long_csv(out / "engineering_plan_long.csv")
     print("written to", out)
+
+
+# --------------------------------------------------------------------------- #
+# Monthly work-plan workbook (structure of the department's real plan; the
+# content here is synthetic).
+# --------------------------------------------------------------------------- #
+MONTH_HEADER = ["№", "КО", "Канал продаж", "ТГ", "Приоритет", "Выполнимо", "Марка", "Модель", "Марка+Модель",
+                "Продукт/Задача", "План на месяц", "Стадия проекта", "Группа задач", "Артикул", "Номер заказа",
+                "NOK", "ОК", "Вероятность2", "Вероятность", "Шанс", "Факт", "Комментарии", "План месяц",
+                "Факт месяц"] + list(range(1, 31))
+
+
+def _task(eng, ch, tg, prio, mk, model, prod, task, stage, group, art=None, plan=8, fact=0, comment=None,
+          ok=None, days=None):
+    return dict(eng=eng, ch=ch, tg=tg, prio=prio, mk=mk, model=model, prod=prod, task=task, stage=stage,
+                group=group, art=art, plan=plan, fact=fact, comment=comment, ok=ok, days=days or {})
+
+
+def month_tasks(variant: int = 1):
+    fit = ("Примерить", "Примерка", "Замеры")
+    kd = ("КД", "Серия", "Разработка")
+    c1 = ("1С", "Серия", "Разработка")
+    pdm = ("Прочее", "Оформление", "Выгрузка в PDM")
+    dev = ("Разработать", "Разработка", "Разработка")
+    order = ("Заказать", "Разработка", "Разработка")
+    lab = ("Прочее", "Операционка", "Лабаратория, разбор опытников, фотоконтент")
+    gac = [("Орлов/Соколов",) + fit, ("Иванов",) + kd, ("Иванов",) + c1, ("Иванов",) + pdm]
+    t = []
+    for i, (eng, task, stage, group) in enumerate(gac):
+        fact = 5 if (variant == 2 and task == "КД") else 0
+        t.append(_task(eng, "CIS", "ЗК", 1, "GAC", "S9", "Комплект защит", task, stage, group, plan=8, fact=fact,
+                       days={3: 5} if fact else None))
+    for eng, task, stage, group in [("Петров",) + dev, ("Петров",) + order, ("Петров",) + lab,
+                                    ("Петров",) + kd, ("Петров",) + c1, ("Петров",) + pdm]:
+        t.append(_task(eng, "CIS", "ЗК", 3, "Honda", "CR-V (1995-2001)", "Защита картера+КПП", task, stage, group))
+    t.append(_task("Сидоров", "CIS", "ЗК", 2, "Belgee", "X80 (P145)", "Защита батареи", "1С", "Серия перевод",
+                   "Перевод", art="XX10TEST01", ok=1, plan=4, fact=4))
+    t.append(_task("Сидоров", "CIS", "ЗК", 2, "Belgee", "X80 (P145)", "Защита батареи", "Прочее", "Оформление",
+                   "Выгрузка в PDM", art="XX10TEST01", plan=1))
+    for eng in ("Иванов", "Петров"):     # two vehicle-less blocks of the same task
+        for task, stage, group in [("КД", "Серия перевод", "Перевод на ШО"), ("1С", "Серия перевод", "Перевод на ШО"),
+                                   pdm]:
+            t.append(_task(eng, "CIS", "ЗК ШО", 1, None, None, "Проверка, перевод штампованых защит", task, stage,
+                           group, art="ЗАПОЛНИТЬ (T.OSN.1)" if task == "1С" and eng == "Иванов" else None))
+    t.append(_task("Н", "CIS", "ЗК", 1, "AUDI ", "A5 long", "Комплект защит", "КД", "Серия", "Разработка"))
+    t.append(_task("Иванов", "CIS", "Прочее", 1.1, None, None, "Техподдержка", None,
+                   "Улучшения конструктивов (запрос пр-во, акты, рекламации)", "Изменения (запросы, акты, рекламации)"))
+    if variant == 2:
+        t.append(_task("Петров", "OEM", "ТСУ", 1, "Lada", "Azimut", "ТСУ", "Верификация", "Серия", "Тесты"))
+    return t
+
+
+def write_month_sheet(ws, tasks, filter_engineer=None):
+    for j, h in enumerate(MONTH_HEADER, start=1):
+        ws.cell(1, j, h)
+    col = {h: j for j, h in enumerate(MONTH_HEADER, start=1)}
+    r = 2
+    for n, t in enumerate(tasks, start=1):
+        vals = {"№": n, "КО": t["eng"], "Канал продаж": t["ch"], "ТГ": t["tg"], "Приоритет": t["prio"],
+                "Марка": t["mk"], "Модель": t["model"],
+                "Марка+Модель": f"{t['mk']} {t['model']}" if t["mk"] else None, "Продукт/Задача": t["prod"],
+                "План на месяц": t["task"], "Стадия проекта": t["stage"], "Группа задач": t["group"],
+                "Артикул": t["art"], "ОК": t["ok"], "Комментарии": t["comment"], "План месяц": t["plan"],
+                "Факт месяц": t["fact"]}
+        for k, v in vals.items():
+            if v is not None:
+                ws.cell(r, col[k], v)
+        for d, h in t["days"].items():
+            ws.cell(r, col[d], h)
+        if filter_engineer and t["eng"] != filter_engineer:
+            ws.row_dimensions[r].hidden = True
+        r += 1
+    ws.cell(r, 2, "ДОП РАБОТЫ"); r += 1
+    ws.cell(r, 2, "Иванов"); ws.cell(r, 4, "Доп"); ws.cell(r, col["Комментарии"], "Упаковка защит")
+    ws.cell(r, col["Факт месяц"], 3); r += 1
+    ws.cell(r, 2, "БАНК ЗАДАЧ"); r += 1
+    ws.cell(r, 7, "JETOUR"); ws.cell(r, 8, "X50"); ws.cell(r, 10, "Сетки"); ws.cell(r, 11, "Разработать")
+    ws.cell(r, col["Комментарии"], "На Август"); r += 1
+    ws.cell(r, 12, "Итого Aftermarket CIS:"); ws.cell(r, col["Факт месяц"], 100); r += 3
+    ws.cell(r, 2, "КО"); ws.cell(r, 11, "Продукт/Задача"); r += 1
+    for v in ("Иванов", "Петров", "Сидоров", "Орлов/Соколов", "Н"):
+        ws.cell(r, 2, v); r += 1
+    if filter_engineer:
+        ws.auto_filter.ref = f"A1:BD{len(tasks) + 1}"
+        ws.auto_filter.add_filter_column(1, [filter_engineer])
+
+
+def make_monthly_workbook(path: Path, variant: int = 1, duplicate_november: bool = False) -> None:
+    wb = openpyxl.Workbook()
+    oct_ws = wb.active
+    oct_ws.title = "Октябрь"
+    write_month_sheet(oct_ws, [_task("Иванов", "CIS", "ЗК", 1, "Chery", "Tiggo 9", "Защита картера", "КД",
+                                     "Серия", "Разработка")])
+    nov = wb.create_sheet("Ноябрь")
+    write_month_sheet(nov, month_tasks(variant), filter_engineer="Петров")
+    summ = wb.create_sheet("Сводная Ноябрь")
+    summ["A1"] = "ЦЕЛЬ"
+    summ["A15"], summ["B15"] = "ТГ", "Марка+Модель"
+    if duplicate_november:
+        write_month_sheet(wb.create_sheet("Ноябрь (2)"), month_tasks(variant))
+    wb.create_sheet("Приоритеты")["B5"] = "Месяц"
+    wb.save(path)

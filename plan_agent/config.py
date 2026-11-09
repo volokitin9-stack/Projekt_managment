@@ -126,6 +126,7 @@ class Settings:
     config_dir: Path
     timeout: float = 20.0
     max_retries: int = 4
+    target_month: Optional[str] = None      # "YYYY-MM" for monthly workbooks; None = profile default
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -136,6 +137,7 @@ class Settings:
             config_dir=Path(os.environ.get("PLAN_AGENT_CONFIG_DIR", DEFAULT_CONFIG_DIR)),
             timeout=float(os.environ.get("PM_API_TIMEOUT", "20")),
             max_retries=int(os.environ.get("PM_API_MAX_RETRIES", "4")),
+            target_month=os.environ.get("PLAN_TARGET_MONTH") or None,
         )
 
     def __repr__(self) -> str:  # never leak the key through logging/repr

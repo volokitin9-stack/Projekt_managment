@@ -1,0 +1,148 @@
+# ---------------------------------------------------------------------------
+# Workbook profile: engineering department MONTHLY WORK PLAN
+# (one worksheet per month, rows = tasks).
+#
+# Everything is explicit and deterministic.  The first dry run copies these
+# rules into state/mapping.proposed.yaml; after approval the approved copy is
+# the permanent configuration used for every later file.
+# Columns are located by HEADER TEXT, never by column letter, because column
+# positions differ between months (January has an extra "Этап" column, the
+# header row moved from row 3 to row 1, ...).
+# ---------------------------------------------------------------------------
+profile: monthly_work_plan
+version: 1
+
+# The profile applies to a workbook when a month-named worksheet has these headers.
+required_headers: ["КО", "Марка", "Модель", "Продукт/Задача", "План на месяц", "Стадия проекта"]
+header_search_rows: 10
+
+# --- target month ------------------------------------------------------------
+# "auto" = current calendar month; override per run with --month 2026-12 or
+# PLAN_TARGET_MONTH=2026-12.  Only the worksheet of the target month is imported.
+target_month: auto
+month_names:
+  1:  ["январь", "января", "янв", "january", "jan"]
+  2:  ["февраль", "февраля", "фев", "february", "feb"]
+  3:  ["март", "марта", "мар", "march", "mar"]
+  4:  ["апрель", "апреля", "апр", "april", "apr"]
+  5:  ["май", "мая", "may"]
+  6:  ["июнь", "июня", "июн", "june", "jun"]
+  7:  ["июль", "июля", "июл", "july", "jul"]
+  8:  ["август", "августа", "авг", "august", "aug"]
+  9:  ["сентябрь", "сентября", "сен", "сент", "september", "sep", "sept"]
+  10: ["октябрь", "октября", "окт", "october", "oct"]
+  11: ["ноябрь", "ноября", "ноя", "нояб", "november", "nov"]
+  12: ["декабрь", "декабря", "дек", "december", "dec"]
+# Worksheets whose name mentions the month but which are summaries/pivots of
+# the month sheet.  They are reported, never imported.
+derived_sheet_patterns: ["^сводн", "^компактн", "^общий", "pivot", "summary"]
+# Explicit choice when several plan sheets exist for one month, e.g.
+#   sheet_override: {"2026-11": "Ноябрь"}
+sheet_override: {}
+
+# --- columns (header text -> role) --------------------------------------------
+columns:
+  row_number:        ["№"]
+  engineer:          ["КО"]
+  sales_channel:     ["Канал продаж"]
+  product_group:     ["ТГ"]
+  priority:          ["Приоритет"]
+  feasibility:       ["Выполнимо"]
+  manufacturer:      ["Марка"]
+  vehicle_model:     ["Модель"]
+  vehicle_full:      ["Марка+Модель"]       # formula = Марка + Модель; used only as a cross-check
+  product_type:      ["Продукт/Задача"]
+  task_type:         ["План на месяц"]
+  project_stage:     ["Стадия проекта"]
+  task_group:        ["Группа задач"]
+  article_number:    ["Артикул"]
+  order_note:        ["Номер заказа"]
+  items_outstanding: ["NOK"]               # "Факт NOK" in the month summary pivot
+  items_delivered:   ["ОК", "OK"]          # "Факт ОК" in the month summary pivot
+  probability_note:  ["Вероятность", "Вероятность2"]
+  delivery_chance:   ["Шанс"]
+  result:            ["Факт"]
+  comment:           ["Комментарии", "Комментарий"]
+  planned_hours:     ["План месяц"]
+  actual_hours:      ["Факт месяц"]
+  # columns whose header is a day number 1..31 hold hours worked on that day
+day_columns: true
+
+# --- row structure -----------------------------------------------------------
+# A value in the engineer column that starts a new section.
+section_markers:
+  "ДОП РАБОТЫ": extra_work      # ad-hoc work (free text, mostly no vehicle)
+  "БАНК ЗАДАЧ": backlog         # task bank (items for later months)
+# Only these sections produce dashboard projects.
+import_sections: [main]
+# Task rows end at the first totals row; below it are totals, the resource
+# table and the dropdown source lists (department vocabulary).
+end_of_tasks_prefixes: ["Итого", "Запас часов"]
+# Engineer-column values that do not name a person.
+unassigned_engineer_markers: ["Н"]
+# Engineer values that are teams of two people.
+team_separator: "/"
+
+# --- project identity ----------------------------------------------------------
+# A project = Марка + Модель + Продукт/Задача (normalised for matching only;
+# the file's own spelling is kept for display).  A valid single article number
+# is used as the strongest identifier when present.  The row number "№" is a
+# running counter and is NOT an identifier.
+identity: [manufacturer, vehicle_model, product_type]
+article_pattern: "^[A-Za-z0-9][A-Za-z0-9.\\-/_]{2,40}$"
+article_invalid_markers: ["ЗАПОЛНИТЬ"]
+# A task cycle ends after one of these task groups (PDM upload closes the
+# series cycle, the prototype-lab task closes the development cycle).  Several
+# cycles of the same vehicle+product are merged into one project; several
+# cycles WITHOUT a vehicle become separate records for review.
+cycle_closing_task_groups: ["Выгрузка в PDM", "Лабаратория, разбор опытников, фотоконтент"]
+# Rows without a vehicle that are operational work, not projects.
+operational_product_groups: ["Прочее", "Доп", "Доп."]
+operational_stages: ["Операционка", "Не профильная работа", "Административка",
+                     "Работа по новым проектам компании"]
+
+# --- workflow: activity -> dashboard stage --------------------------------------
+# Ordered rules, first match wins.  Conditions compare normalised text of the
+# task ("План на месяц"), project stage ("Стадия проекта") and task group
+# ("Группа задач").  Stage codes: scanning, development, test_prototype,
+# measurement, documentation, or extra:<code> for additional stages.
+activity_rules:
+  - {when: {project_stage: ["Тесты"]}, stage: "extra:testing",
+     why: "tooling/product tests - not one of the five main stages"}
+  - {when: {project_stage: ["Улучшения конструктивов (запрос пр-во, акты, рекламации)",
+                            "Изменения (запросы, акты, рекламации)"]},
+     stage: "extra:engineering_change", why: "change requests / design improvements of serial products"}
+  - {when: {task_type: ["Улучшения конструктивов (запрос пр-во, акты, рекламации)"]},
+     stage: "extra:engineering_change", why: "change request task"}
+  - {when: {task_type: ["Отсканировать"]}, stage: scanning, why: "vehicle scanning"}
+  - {when: {task_type: ["Разработать", "Доработать", "Доработать (GEN 2)", "Доработать (GEN 3)"]},
+     stage: development, why: "CAD design / redesign"}
+  - {when: {task_type: ["Заказать"]}, stage: test_prototype, why: "ordering the test prototype"}
+  - {when: {task_group: ["Лабаратория, разбор опытников, фотоконтент"]}, stage: test_prototype,
+     why: "laboratory analysis of prototypes"}
+  - {when: {task_type: ["Примерить"]}, stage: measurement, why: "trial fit on the vehicle (task group 'Замеры')"}
+  - {when: {task_group: ["Замеры"]}, stage: measurement, why: "measurements"}
+  - {when: {task_type: ["Перевод", "Перевод из OEM", "Расширение"]}, stage: "extra:series_transfer",
+     why: "transfer/extension of an existing product to the series ('Серия перевод')"}
+  - {when: {task_type: ["КД", "1С"]}, stage: documentation, why: "design documentation (КД) and 1C registration"}
+  - {when: {task_group: ["Выгрузка в PDM"]}, stage: documentation, why: "PDM upload ('Оформление')"}
+  - {when: {project_stage: ["Сканирование"]}, stage: scanning, why: "project stage"}
+  - {when: {project_stage: ["Разработка"]}, stage: development, why: "project stage"}
+  - {when: {project_stage: ["Примерка"]}, stage: measurement, why: "project stage"}
+  - {when: {project_stage: ["Серия", "Оформление", "Серия перевод"]}, stage: documentation, why: "project stage"}
+
+# --- statuses (no status column exists; evidence-based only) --------------------
+# Evaluated per activity in this order.  A planned date never marks completion.
+status_rules:
+  - {if: items_delivered_positive, status: done, needs_confirmation: true,
+     why: "'ОК' column counts delivered items ('Факт ОК' in the summary pivot)"}
+  - {if: actual_hours_positive, status: in_progress, why: "hours were logged this month"}
+  - {if: planned_hours_positive, status: pending, why: "planned this month, no hours logged yet"}
+
+# --- priorities ------------------------------------------------------------------
+# Scale from the 'Приоритеты' sheet: 1 highest (sub-levels 1.1-1.3), 2, 3.
+# Unlisted values (e.g. 0) are kept as unknown and flagged.
+priority_map: {"1": high, "1.1": high, "1.2": high, "1.3": high, "2": medium, "3": low}
+
+# Value kinds for which an unseen value after approval sends the project to review.
+strict_value_kinds: [task_type, project_stage, task_group, priority]

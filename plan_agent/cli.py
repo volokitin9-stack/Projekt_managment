@@ -33,11 +33,13 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("analyze")
     p.add_argument("file")
+    p.add_argument("--month", help="target month YYYY-MM for monthly workbooks (default: auto)")
     p = sub.add_parser("approve")
     p.add_argument("--by", default=None)
     p = sub.add_parser("sync")
     p.add_argument("file")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--month", help="target month YYYY-MM for monthly workbooks (default: auto)")
     p = sub.add_parser("reprocess")
     p.add_argument("sha")
     p.add_argument("--dry-run", action="store_true")
@@ -66,13 +68,13 @@ def main(argv=None) -> int:
     agent = _agent()
     if a.cmd in ("analyze", "sync"):
         mode = "dry_run" if a.cmd == "analyze" or a.dry_run else "auto"
-        out = agent.receive(Path(a.file), "cli", Path(a.file).name, mode)
+        out = agent.receive(Path(a.file), "cli", Path(a.file).name, mode, target_month=a.month)
         print(out.text)
         if out.analysis_markdown:
             md = agent.reports_dir / f"{out.run_id}_analysis.md"
             print(f"Initial analysis report: {md}")
         print(f"Report: {out.report_path}")
-        return {"Failed": 1}.get(out.status, 3 if "Approval required" in out.status else
+        return {"Failed": 1}.get(out.status, 3 if "required" in out.status else
                                  4 if "errors" in out.status else 0)
     if a.cmd == "reprocess":
         out = agent.reprocess(a.sha, "dry_run" if a.dry_run else "auto")

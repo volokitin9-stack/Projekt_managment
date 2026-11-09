@@ -145,9 +145,13 @@ class Activity:
     depends_on: list[str] = field(default_factory=list)
     comment: Optional[str] = None
     source_row: Optional[int] = None
+    details: dict = field(default_factory=dict)   # profile-specific facts (hours, task group, ...)
 
     def to_dict(self) -> dict:
-        return {k: v for k, v in asdict(self).items()}
+        d = {k: v for k, v in asdict(self).items()}
+        if not d["details"]:
+            d.pop("details")
+        return d
 
 
 # Dashboard fields the agent may write.  Must stay in sync with the backend

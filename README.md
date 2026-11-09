@@ -91,6 +91,20 @@ The department's real file has not been supplied yet, so **no final column mappi
 2. Correct anything wrong in `state/mapping.proposed.yaml`, such as a column role or a status value mapping, and run `approve`.
 3. Run `sync`.
 
+## Monthly work-plan workbooks
+
+The department's plan, a workbook with one worksheet per month, is read by the explicit profile `config/profiles/monthly_work_plan.yaml` (see [docs/CONFIGURATION.md](docs/CONFIGURATION.md#workbook-profiles-configprofiles)). Only the target month's worksheet is imported:
+
+```bash
+python -m plan_agent analyze plan.xlsx --month 2026-11
+```
+
+* A project is Марка + Модель + Продукт/Задача, made of the month's task rows.
+* Rows hidden by an AutoFilter are still read.
+* The ad-hoc work and backlog sections, totals, the resource table and the dropdown lists are not imported as projects.
+* Summary or pivot sheets of the month are reported but never imported.
+* Two plan sheets for the same month stop the run for verification.
+
 ## Safety guarantees
 
 * The first file, and any file whose detected structure changed, is processed as a **dry run** that needs approval.

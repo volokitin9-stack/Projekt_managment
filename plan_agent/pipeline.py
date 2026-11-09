@@ -31,6 +31,7 @@ class AnalysisResult:
     structure_matches_approved: bool
     mapping_notes: list[str] = field(default_factory=list)
     new_values: dict = field(default_factory=dict)
+    profile: Optional[object] = None        # ProfileResult when a workbook profile was used
 
 
 def sha256_file(path: str | Path) -> str:
@@ -42,11 +43,18 @@ def sha256_file(path: str | Path) -> str:
 
 
 def analyze_file(path: str | Path, vocab: Vocabulary, approved: Optional[dict] = None,
-                 display_name: Optional[str] = None) -> AnalysisResult:
+                 display_name: Optional[str] = None, target_month: Optional[str] = None,
+                 config_dir: Optional[Path] = None) -> AnalysisResult:
     """Parse + recognise + extract + validate.  Raises parser errors for
-    unreadable files (unsupported/empty/corrupt); everything else is reported."""
+    unreadable files (unsupported/empty/corrupt); everything else is reported.
+
+    Workbooks matching a known profile (config/profiles/) are processed by that
+    profile; everything else goes through generic structure recognition."""
     path = Path(path)
     name = display_name or path.name
+    prof = _try_profile(path, name, vocab, approved, target_month, config_dir)
+    if prof is not None:
+        return prof
     parsed = parse_file(path)
     detector = SchemaDetector(vocab)
     schemas = [detector.detect(t) for t in parsed.tables]
@@ -92,3 +100,25 @@ def analyze_file(path: str | Path, vocab: Vocabulary, approved: Optional[dict] =
     proposal = build_proposal(name, parsed.tables, schemas, mapper.observed, fp)
     return AnalysisResult(name, sha256_file(path), parsed, schemas, records, extractor.row_errors, fp, proposal,
                           approved, matches, notes, new_values)
+
+
+def _try_profile(path: Path, name: str, vocab: Vocabulary, approved: Optional[dict], target_month: Optional[str],
+                 config_dir: Optional[Path]) -> Optional[AnalysisResult]:
+    from .config import DEFAULT_CONFIG_DIR
+    from .parsers import detect_format
+    from .profiles.monthly_plan import MonthlyPlanProfile, load_profile
+    from .profiles import xlsx_fast
+    cfg = Path(config_dir or DEFAULT_CONFIG_DIR)
+    if detect_format(path) != "xlsx" or not (cfg / "profiles" / "monthly_work_plan.yaml").exists():
+        return None
+    profile = load_profile(cfg)
+    if not MonthlyPlanProfile.detect(str(path), profile):
+        return None
+    result = MonthlyPlanProfile(profile, approved).build(str(path), name, target_month)
+    for r in result.records:
+        validate(r, vocab.stage_order)
+    matches = bool(approved and approved.get("profile") == MonthlyPlanProfile.name
+                   and approved.get("fingerprint") == result.fingerprint)
+    parsed = ParsedFile(str(path), "xlsx", [], xlsx_fast.list_sheets(str(path)))
+    return AnalysisResult(name, sha256_file(path), parsed, [], result.records, [], result.fingerprint,
+                          result.proposal, approved, matches, result.notes, result.new_values, result)
