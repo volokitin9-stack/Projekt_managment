@@ -1,0 +1,55 @@
+# ---------------------------------------------------------------------------
+# Field ownership policy: who is the authority for each dashboard field.
+#
+#   planning_file : the planning file controls the field.  The agent writes it
+#                   whenever the file has a non-empty, different value.
+#   dashboard     : people edit the field in the dashboard.  The agent only
+#                   fills it while the dashboard value is empty; a different
+#                   file value is reported as a conflict and NOT written.
+#   image_agent / other : another system owns it.  The planning agent never
+#                   touches it.
+#
+# Rules that apply regardless of ownership:
+#   * an empty value in the file never clears a dashboard value;
+#   * projects missing from a new file are never deleted;
+#   * photos, attachments, comments and history are never sent by this agent.
+# ---------------------------------------------------------------------------
+
+default_owner: planning_file
+
+fields:
+  external_project_id:    planning_file
+  project_name:           planning_file
+  manufacturer:           planning_file
+  vehicle_model:          planning_file
+  product_type:           planning_file
+  article_number:         planning_file
+  assigned_engineer:      planning_file
+  priority:               planning_file
+  current_stage:          planning_file
+  project_status:         planning_file
+  planned_start_date:     planning_file
+  planned_end_date:       planning_file
+  actual_completion_date: planning_file
+  stages:                 planning_file
+  dependencies:           planning_file
+  extra_attributes:       planning_file
+  source_file:            planning_file
+  source_row:             planning_file
+  description:            dashboard
+  comments:               dashboard
+  photos:                 image_agent
+  attachments:            image_agent
+
+# What to do when a planning_file-owned field was last changed MANUALLY in the
+# dashboard (the backend tracks the last writer of each field) and the file now
+# carries a different value:
+#   report_and_keep      - keep the manual value, report a conflict (safest; default)
+#   overwrite_and_report - write the file value, report the overwrite
+on_manual_edit: report_and_keep
+
+# Fields that identify a project.  If the file carries a DIFFERENT non-empty
+# value for an already-matched project (e.g. the model of ENG-003 suddenly
+# reads "Jolion" instead of "Dargo" - typically a shifted merged cell), the
+# change is not applied: the project goes to review.
+identity_fields: [external_project_id, article_number, manufacturer, vehicle_model, product_type]

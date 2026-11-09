@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+# runtime state: inbox copies of planning files, reports, mapping approvals
+state/
+# reference backend database
+data/
+.env

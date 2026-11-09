@@ -1,0 +1,134 @@
+# ---------------------------------------------------------------------------
+# Vocabulary used by schema detection and workflow mapping.
+#
+# Everything here is a *hint*, not a fixed file layout: the agent scores
+# headers and cell contents against these lists, proposes a mapping, and that
+# mapping is reviewed/approved (state/mapping.approved.yaml) before syncing.
+# Add synonyms here when your department uses new terms - no code change needed.
+# Matching is case-insensitive; "ё" == "е".
+# ---------------------------------------------------------------------------
+
+column_roles:
+  row_number:        ["№", "№ п/п", "п/п", "#", "no", "no.", "nr", "n"]
+  external_id:       ["id", "id проекта", "код проекта", "номер проекта", "№ проекта", "шифр", "шифр проекта",
+                      "project id", "project code", "project no", "project number", "external id"]
+  project_name:      ["проект", "название проекта", "наименование проекта", "project", "project name", "задание",
+                      "наименование работ"]
+  manufacturer:      ["марка", "марка авто", "марка автомобиля", "производитель", "производитель авто", "бренд",
+                      "автопроизводитель", "manufacturer", "make", "brand", "oem"]
+  vehicle_model:     ["модель", "модель авто", "модель автомобиля", "model", "vehicle model"]
+  vehicle:           ["автомобиль", "авто", "тс", "транспортное средство", "vehicle", "car", "марка/модель",
+                      "марка и модель", "make/model"]
+  product_type:      ["изделие", "наименование изделия", "тип изделия", "продукт", "вид изделия", "наименование",
+                      "product", "product type", "item", "part", "part name"]
+  product_category:  ["категория", "категория изделия", "группа изделий", "группа", "category", "product category"]
+  article_number:    ["артикул", "арт", "арт.", "код изделия", "каталожный номер", "article", "article number",
+                      "article no", "sku", "part number", "part no", "p/n", "pn"]
+  engineer:          ["конструктор", "ответственный", "ответственный конструктор", "инженер", "исполнитель",
+                      "разработчик", "фио", "engineer", "designer", "responsible", "owner", "assignee"]
+  priority:          ["приоритет", "важность", "срочность", "priority"]
+  project_status:    ["статус", "статус проекта", "состояние", "общий статус", "status", "project status", "state"]
+  current_stage:     ["этап", "текущий этап", "стадия", "текущая стадия", "stage", "current stage", "phase"]
+  activity:          ["работа", "вид работ", "задача", "операция", "мероприятие", "activity", "task", "work item"]
+  activity_status:   ["статус работы", "статус задачи", "выполнение", "task status", "activity status"]
+  comment:           ["комментарий", "комментарии", "примечание", "примечания", "замечания", "comment", "comments",
+                      "notes", "note", "remarks"]
+  description:       ["описание", "description"]
+  planned_start:     ["дата начала", "начало", "план начало", "плановое начало", "старт", "start", "start date",
+                      "planned start", "plan start"]
+  planned_end:       ["срок", "срок сдачи", "срок выполнения", "дедлайн", "окончание", "план окончание",
+                      "плановая дата", "планируемая дата", "дата окончания", "дата завершения", "deadline", "due",
+                      "due date", "end", "end date", "planned end", "plan end", "finish"]
+  actual_completion: ["факт", "дата факт", "фактическая дата", "фактическое окончание", "дата выполнения",
+                      "выполнено дата", "actual", "actual date", "actual end", "completed on", "completion date"]
+  dependency:        ["зависит от", "зависимость", "зависимости", "предшественник", "предшественники", "после",
+                      "depends on", "dependency", "dependencies", "predecessor", "predecessors"]
+  progress:          ["%", "% выполнения", "процент", "прогресс", "готовность", "progress", "complete %", "% complete"]
+  documentation_status: ["статус кд", "статус документации", "кд статус", "documentation status", "docs status"]
+
+# Sub-headers found under a stage name in two-row headers (e.g. "Сканирование" / "План").
+stage_subheaders:
+  planned_start: ["начало", "старт", "start", "план начало"]
+  planned_end:   ["план", "плановая", "срок", "plan", "planned", "due", "окончание", "end", "deadline"]
+  actual:        ["факт", "фактическая", "выполнено", "actual", "done", "completed", "дата факт"]
+  status:        ["статус", "состояние", "status", "отметка", "выполнение"]
+  engineer:      ["ответственный", "исполнитель", "конструктор", "owner", "engineer"]
+
+# Main workflow stages, in order.  Keys are the dashboard stage codes.
+workflow_stages:
+  - code: scanning
+    label: Scanning
+    synonyms: ["сканирование", "скан", "3d скан", "3d-скан", "3д скан", "оцифровка", "сканирование авто",
+               "сканирование автомобиля", "scan", "scanning", "3d scan", "vehicle scanning"]
+  - code: development
+    label: Development
+    synonyms: ["разработка", "проектирование", "моделирование", "3d модель", "3d-модель", "3д модель",
+               "конструирование", "cad", "cad модель", "cad моделирование", "development", "design", "modeling",
+               "modelling", "cad modeling"]
+  - code: test_prototype
+    label: Test Prototype
+    synonyms: ["прототип", "опытный образец", "тестовый образец", "изготовление образца", "изготовление прототипа",
+               "образец", "макет", "пробный образец", "prototype", "test prototype", "sample", "test sample",
+               "prototype production"]
+  - code: measurement
+    label: Measurement
+    synonyms: ["замер", "замеры", "примерка", "измерение", "измерения", "проверка установки", "установка на авто",
+               "контрольная установка", "fitment", "measurement", "trial fit", "test fit", "fit check",
+               "product fitment measurement"]
+  - code: documentation
+    label: Documentation
+    synonyms: ["документация", "кд", "конструкторская документация", "чертеж", "чертежи", "оформление кд",
+               "выпуск кд", "подготовка чертежей", "documentation", "drawings", "drawing preparation", "docs"]
+
+# Recognised stages outside the five main ones.  They are preserved on the
+# project (stage = "extra:<code>") and never discarded.
+additional_stages:
+  approval:   ["согласование", "утверждение", "approval", "sign-off"]
+  production: ["производство", "запуск в производство", "серия", "серийное производство", "production",
+               "mass production"]
+  packaging:  ["упаковка", "packaging"]
+  photo:      ["фото", "фотосъемка", "photo", "photos"]
+
+# Activity / project status values.
+statuses:
+  done:        ["выполнено", "выполнен", "выполнена", "готово", "готов", "завершено", "завершен", "сделано", "да",
+                "+", "✓", "✔", "v", "ok", "done", "completed", "complete", "finished", "yes", "closed", "100%"]
+  in_progress: ["в работе", "в процессе", "выполняется", "начато", "в разработке", "in progress", "ongoing", "wip",
+                "active", "started"]
+  pending:     ["не начато", "ожидает", "запланировано", "в плане", "в очереди", "pending", "planned",
+                "not started", "todo", "to do", "new", "нет", "0%"]
+  blocked:     ["приостановлено", "заблокировано", "на паузе", "пауза", "ожидание", "проблема", "стоп", "blocked",
+                "on hold", "paused", "hold", "waiting"]
+  cancelled:   ["отменено", "отмена", "отменен", "не актуально", "неактуально", "cancelled", "canceled", "dropped"]
+
+# How an activity/project status maps to the dashboard project_status.
+project_status_map:
+  done: completed
+  in_progress: in_progress
+  pending: not_started
+  blocked: on_hold
+  cancelled: cancelled
+
+priorities:
+  high:   ["высокий", "высокая", "высокое", "срочно", "срочный", "критичный", "критично", "high", "urgent",
+           "critical", "a", "!!!"]
+  medium: ["средний", "средняя", "среднее", "обычный", "normal", "medium", "b", "!!"]
+  low:    ["низкий", "низкая", "низкое", "low", "c", "!"]
+# Numeric priorities are ambiguous (is 1 the highest?).  This is the default
+# reading; the initial analysis always flags numeric priorities for confirmation.
+numeric_priority:
+  1: high
+  2: medium
+  3: low
+
+# Used only to split a combined "Vehicle" column ("HAVAL Jolion") into
+# manufacturer + model.  If the first word is not listed, the value is kept
+# whole in vehicle_model and manufacturer stays unknown.
+known_manufacturers: ["haval", "chery", "geely", "changan", "exeed", "omoda", "jaecoo", "tank", "great wall",
+                      "jac", "faw", "dongfeng", "gac", "byd", "lada", "kia", "hyundai", "toyota", "nissan",
+                      "mitsubishi", "renault", "skoda", "volkswagen", "vw", "mazda", "suzuki", "subaru", "lexus",
+                      "honda", "ford", "chevrolet", "uaz", "уаз", "лада", "gaz", "газ", "jetour", "knewstar",
+                      "kaiyi", "livan", "solaris", "tenet", "belgee", "moskvich", "москвич", "baic", "hongqi",
+                      "voyah", "zeekr", "li auto", "lixiang", "bmw", "mercedes", "mercedes-benz", "audi", "porsche",
+                      "land rover", "jeep", "dodge", "ram", "isuzu", "ssangyong", "kgm", "datsun", "infiniti",
+                      "volvo", "peugeot", "citroen", "opel"]

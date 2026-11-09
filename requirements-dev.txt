@@ -1,0 +1,3 @@
+-r requirements.txt
+pytest>=8
+reportlab>=4   # only used to generate a PDF fixture in tests
