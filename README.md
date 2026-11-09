@@ -1,138 +1,238 @@
-# Projekt_managment: Engineering Plan Agent
+# Штурман — Project Management Dashboard
 
-An agent that reads the engineering department's planning files (Excel, CSV, PDF or Word), works out their structure on its own, and keeps the Projekt_managment dashboard up to date through the backend API, never through Git commits. It preserves manual dashboard data and records history for every change.
+This is the Штурман task/project dashboard, migrated out of a Claude Artifact
+into a standalone Node.js web application with a persistent database and a
+REST API for an external AI agent.
 
-> **Repository state when this was built:** the GitHub repository was **empty**: no dashboard, no backend, no database schema. Since there was no existing API to verify against, this repository now contains:
->
-> * `plan_agent/`: the file-processing and synchronization agent (the main deliverable);
-> * `backend/`: a small **reference backend** (REST API + SQLite) implementing the agent endpoints from the specification (`GET /api/projects`, `POST /api/agent/projects`, `PATCH /api/agent/projects/:id`) plus history and sync-run storage. It is the data layer the dashboard UI should read from. It is *not* a second dashboard.
->
-> The agent talks to the backend only through HTTP (`plan_agent/client.py`). If the dashboard team ships a different backend, it only needs the contract in [docs/API.md](docs/API.md).
+The dashboard itself — look, layout, the task tree, the "Глобально" view, the
+"Инж. проекты" Kanban preview — is unchanged from the Artifact version. What
+changed is everything underneath it: data now lives in a real SQLite
+database behind an Express API instead of the Artifact's built-in storage,
+and that API is ready for a separately-developed AI agent to write into.
 
-> **Update - the real dashboard:** branch `main` now contains the production dashboard **Штурман** (Node/Express/SQLite, its own `/api/agent/*` API). That app is the integration target. `backend/` here remains the reference implementation of the data contract the import needs: categories, month-scoped activities, original values and history. The Штурман API does not yet support that contract (see `docs/DEPLOYMENT_VERIFICATION.md`), so the first synchronization stays blocked until it does and a production deployment has been verified.
+See `MIGRATION_REPORT.md` for exactly what was preserved, what changed, and
+what is implemented-and-tested versus prepared-but-not-yet-wired-up.
 
-## How it works
+## Architecture
 
-```text
-manual upload / folder drop / HTTP POST from another agent / schedule / reprocess
-                                   │
-                         inbox (content-addressed; file name is only metadata)
-                                   │
- parse (xlsx/xls/csv/pdf/docx) → detect structure → extract projects → map workflow → validate
-                                   │
-              approved mapping & same structure fingerprint?  ── no ──► dry run + proposal + analysis report
-                                   │ yes
-            GET dashboard projects → match (id → article → make+model+product) → field ownership policy
-                                   │
-            POST/PATCH per project (one transaction each, history rows)  → report + sync history
+```
+public/index.html   →  the dashboard (unchanged UI, same CSS/HTML/D3 tree rendering)
+                        talks to the API below over fetch(), polling every 20s
+                        (replacing the Artifact's real-time ArtifactData listeners)
+        ↓ HTTP
+server/index.js      →  Express app: static file serving + API routing
+server/routes/*.js    →  one file per route group (tasks, globals, projects, agent, stages, review-queue)
+server/projectsModel.js → project read/write/validation logic shared by the public and agent routes
+server/docStore.js    →  generic JSON-document CRUD (used for tasks + globals)
+server/storage.js     →  local-disk file storage adapter (swap this to move to S3/GCS later)
+server/auth.js        →  Bearer-token auth for the agent-only routes
+server/db.js           →  SQLite schema + connection (better-sqlite3)
+        ↓
+data/app.sqlite        →  all persistent data (gitignored — created on first run)
+uploads/                →  uploaded images/attachments (gitignored — created on first run)
 ```
 
-| Module | Responsibility |
+No build step: the frontend is plain static HTML/CSS/JS (exactly as it was
+in the Artifact), served as-is by Express. There is nothing to bundle or
+transpile.
+
+## Installation
+
+```bash
+git clone https://github.com/volokitin9-stack/Projekt_managment.git
+cd Projekt_managment
+npm install
+cp .env.example .env
+```
+
+Open `.env` and set at least `AGENT_API_KEY` (generate one with
+`openssl rand -hex 32`). Agent endpoints return `501` until this is set —
+there is no insecure default.
+
+## Local development
+
+```bash
+npm run seed   # optional: seeds the 5 workflow stages + 14 sample projects
+                # into a fresh database; `npm start` also does this
+                # automatically on first boot, so this is only needed if you
+                # want to reseed explicitly
+npm start       # or: npm run dev   (restarts on file changes)
+```
+
+Then open `http://localhost:3000`.
+
+## Production build
+
+There is no separate build artifact to produce — `npm run build` is a no-op
+that says so. To run in production:
+
+```bash
+npm ci --omit=dev
+NODE_ENV=production npm start
+```
+
+Put a reverse proxy (nginx, Caddy, your platform's own edge) in front of it
+for TLS; the app itself just listens on `PORT` (default `3000`).
+
+## Database
+
+SQLite via `better-sqlite3`, chosen because:
+
+- The original app had no database at all (it used the Artifact's own
+  document store, which doesn't exist outside Claude), so there was no
+  existing engine to stay compatible with.
+- It needs no separate server process, which keeps "clone it and run it"
+  true for a one-person/small-team dashboard like this one.
+- It's a single file, which makes backup trivial (`cp data/app.sqlite
+  backup.sqlite`) and makes "does my data survive a restart" easy to reason
+  about and to test (see `MIGRATION_REPORT.md` for the actual restart test
+  performed during migration).
+
+**Important for deployment:** `DATABASE_PATH` and `UPLOADS_DIR` must point
+at a persistent volume/disk on whatever platform you deploy to. Several
+popular Node hosts wipe the local filesystem on every redeploy; if
+`data/app.sqlite` lives on that ephemeral filesystem, a redeploy silently
+discards all projects, tasks and uploaded images. If your platform can't
+give you a persistent disk, you'll need to point `DATABASE_PATH` at a
+managed Postgres/MySQL instead and port `server/db.js` + `server/docStore.js`
++ `server/projectsModel.js` to it — the SQL in those three files is plain
+enough that this is a mechanical change, not a rewrite.
+
+Schema (see `server/db.js` for the authoritative `CREATE TABLE` statements):
+
+| Table | Purpose |
 |---|---|
-| `parsers/` | Format detection by content; merged cells, outline groups, hidden rows, cell notes; PDF/Word tables |
-| `schema_detection.py` | Header row(s) anywhere in the sheet, multi-row headers, column roles + confidence + evidence, section rows, wide vs. activity layout |
-| `workflow.py` | Stage/status/priority mapping and derivation of current stage and status, **without fabricating facts** |
-| `extraction.py` | Rows → project records; hierarchy from section rows; merging across sheets |
-| `validation.py` | Record-level checks; problems become issues, never exceptions |
-| `matching.py` | Duplicate prevention: exact identifiers first, fuzzy matching only to suggest candidates |
-| `ownership.py` | Configurable field ownership; empty values never overwrite; manual edits are reported |
-| `sync.py`, `client.py` | Safe execution: retries, auth handling, optimistic concurrency, verification of retried writes |
-| `mapping_config.py` | Proposed/approved mapping, structure fingerprint |
-| `report.py` | Sync report and initial-analysis report |
-| `service.py`, `intake.py`, `cli.py` | One pipeline for all delivery channels |
+| `docs` | generic JSON-document store for `tasks` and `globals` (the two collections the original board used) |
+| `projects` | engineering projects — one JSON blob per row plus an indexed `external_project_id` |
+| `stages` | the 5 workflow stages, **configurable rows, not a hardcoded list** |
+| `project_files` | images/attachments, one row per file, linked to a project |
+| `project_activity` | append-only change log per project (who/what/when) |
+| `agent_events` | raw agent-submitted events, keyed by the agent's own `event_id` for idempotency |
+| `review_queue` | agent submissions that couldn't be confidently matched to a project |
 
-## Quick start
+## API
 
-Install the dependencies:
+All endpoints return JSON. Errors are `{"error": "...", "details": [...]}`
+with an appropriate 4xx/5xx status.
 
-```bash
-pip install -r requirements.txt
-```
+### Dashboard-facing (no auth — see "Authentication" below for why)
 
-Start the backend. The agent key is a shared secret: generate it once and use the same value for the backend and the agent.
+| Method | Path | |
+|---|---|---|
+| GET | `/api/tasks` | list |
+| POST | `/api/tasks` | create |
+| PATCH | `/api/tasks/:id` | update (send back `version` from your last read; mismatched version → `409`) |
+| DELETE | `/api/tasks/:id` | delete |
+| GET/POST/PATCH/DELETE | `/api/globals/...` | same shape, for the "Глобально" collection |
+| GET | `/api/projects` | list engineering projects (supports `?make=&model=&product=&engineer=&priority=&status=&q=`) |
+| GET | `/api/projects/:id` | one project, with its `images`, `attachments`, `comments`, `activity` |
+| GET | `/api/stages` | the configured workflow stages, in order |
+| GET | `/api/review-queue` | items the agent couldn't confidently match (no UI yet — see Migration Report) |
+| GET | `/api/health` | `{ok:true}` liveness check |
 
-```bash
-export PM_AGENT_API_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-```
+### Agent-facing (requires `Authorization: Bearer <AGENT_API_KEY>`)
 
-```bash
-python -m backend.server --db data/projekt.db --port 8080 &
-```
+| Method | Path | |
+|---|---|---|
+| POST | `/api/agent/projects` | create, or **upsert** if `external_project_id` matches an existing project |
+| PATCH | `/api/agent/projects/:id` | update by internal id or `external_project_id` |
+| POST | `/api/agent/projects/:id/images` | multipart upload; attach an image/attachment to a known project |
+| POST | `/api/agent/images/unassigned` | multipart upload for a photo the agent **isn't sure** belongs to any project — goes to `review_queue` instead of guessing |
+| POST | `/api/agent/projects/:id/events` | record a generic event (`event_id` makes redelivery a no-op) |
 
-Point the agent at the backend:
+See `docs/agent-request-example.json` for a full worked example of every one
+of these calls.
 
-```bash
-export PM_API_URL=http://127.0.0.1:8080
-```
+## Authentication
 
-Run the initial analysis. It is always a dry run and writes nothing to the dashboard.
+There is exactly one agent-auth scheme: a shared secret
+(`Authorization: Bearer <AGENT_API_KEY>`), checked in `server/auth.js`.
 
-```bash
-python -m plan_agent analyze path/to/engineering_plan.xlsx
-```
+The dashboard-facing GET/CRUD routes (`/api/tasks`, `/api/globals`,
+`/api/projects`, …) have **no** authentication. This mirrors the original
+Artifact, which was a personal, single-user tool shared "anyone with the
+link," with no concept of user accounts or roles — that decision was made
+explicitly during the Artifact's own development, not revisited here. If
+this dashboard will ever be used by multiple people who need different
+permissions, that's new work, not something this migration silently skipped
+— see `MIGRATION_REPORT.md`.
 
-Review `state/reports/<run>_analysis.md` and `state/mapping.proposed.yaml`, edit the mapping if needed, then approve it:
+**Secrets are never written to the frontend.** `public/index.html` and
+`public/` as a whole contain no API key of any kind. `AGENT_API_KEY` lives
+only in `.env` (gitignored) / your host's environment variable settings.
 
-```bash
-python -m plan_agent approve --by "Your Name"
-```
+## Image/attachment upload workflow
 
-Synchronize. This and every later file with the same structure syncs automatically:
+Images and other files are **not** stored in the Git repository or inside
+the database — they go to disk under `UPLOADS_DIR`, with only metadata
+(filename, mime type, size, which project, who/what uploaded it, and —
+for Telegram-sourced files — the originating message/chat id) recorded in
+the `project_files` table. `server/storage.js` is the one module that
+knows about the actual disk path; swapping to S3/GCS/etc. later means
+rewriting that one file, not anything that calls into it.
 
-```bash
-python -m plan_agent sync path/to/engineering_plan.xlsx
-```
+Validation happens server-side (`server/storage.js#validateFile`) against
+the **declared MIME type of the uploaded part**, not the filename extension:
+allowed types are `image/jpeg`, `image/png`, `image/webp`, `image/gif`, and
+`application/pdf` (for technical drawings/documentation), capped at
+`MAX_UPLOAD_BYTES` (default 10 MB).
 
-Exit codes for `analyze` and `sync`: `0` completed, `3` approval required (dry run), `4` completed with errors, `1` failed.
+Duplicate-import protection: a (`telegram_chat_id`, `telegram_message_id`)
+pair is unique in `project_files`. Submitting the same Telegram message's
+photo twice returns the existing file record (`"duplicate": true`) instead
+of creating a second row.
 
-## Processing the real engineering plan
+## Agent integration
 
-The department's real file has not been supplied yet, so **no final column mapping exists**. The vocabulary in `config/vocabulary.yaml` contains hints only. When the file arrives:
+The AI agent is developed separately (see the original task spec); this
+repository only prepares the receiving side. From the agent's perspective:
 
-1. `python -m plan_agent analyze <file>` produces the initial-analysis report. It covers detected sheets, header rows, the meaning of every column with its evidence, how projects are identified, how statuses and stages were interpreted, which fields are unreliable, and a table of proposed changes.
-2. Correct anything wrong in `state/mapping.proposed.yaml`, such as a column role or a status value mapping, and run `approve`.
-3. Run `sync`.
+1. It authenticates with `AGENT_API_KEY`.
+2. For each project it wants to create or touch, it should carry a stable
+   `external_project_id` of its own choosing (e.g. derived from how it
+   tracks the project internally) and send that on every call. This is what
+   makes `POST /api/agent/projects` an upsert instead of a duplicate-creator,
+   and what makes `PATCH .../:id` work by that id as well as by our internal
+   one.
+3. If the agent creates a project **without** an `external_project_id`, the
+   project is still created (data is never silently discarded) but flagged
+   `needs_review: true` and added to `/api/review-queue`, because future
+   updates for that project can't be reliably matched back to it.
+4. If the agent has a photo but isn't confident which project it belongs to,
+   `POST /api/agent/images/unassigned` stores it (with whatever identifying
+   hints are available) for manual confirmation, rather than guessing.
+5. Every project mutation is appended to `project_activity`
+   (`GET /api/projects/:id` → `.activity`), so "what did the agent change
+   and when" is always inspectable.
+6. Every event the agent records carries its own `event_id`; redelivering
+   the same `event_id` is a safe no-op.
 
-## Monthly work-plan workbooks
+The dashboard never talks to Telegram (or any other external source)
+itself — that's entirely the agent's job, by design (see the original task
+spec, section 11).
 
-The department's plan, a workbook with one worksheet per month, is read by the explicit profile `config/profiles/monthly_work_plan.yaml` (see [docs/CONFIGURATION.md](docs/CONFIGURATION.md#workbook-profiles-configprofiles)). Only the target month's worksheet is imported:
+## What's implemented and tested vs. prepared only
 
-```bash
-python -m plan_agent analyze plan.xlsx --month 2026-11
-```
+See `MIGRATION_REPORT.md` for the detailed breakdown. Short version:
+database, REST API (dashboard + agent), auth, idempotency, image upload,
+and the ported dashboard UI are implemented and were exercised end-to-end
+during migration. A UI for the review queue, drag-and-drop between
+Kanban stages, and the Telegram agent itself are explicitly out of scope
+for this migration and are not built.
 
-* A project is Марка + Модель + Продукт/Задача, made of the month's task rows.
-* Rows hidden by an AutoFilter are still read.
-* The sheet becomes three dashboard categories: main engineering projects, additional work (ДОП РАБОТЫ) and task backlog (БАНК ЗАДАЧ). Totals, the resource table and the dropdown lists are accounted for but not imported.
-* Every task row is an activity with its own assignee, hours, progress and source reference. Activities are stored per month, so December adds to November's history instead of replacing it.
-* Summary or pivot sheets of the month are reported but never imported.
-* Two plan sheets for the same month stop the run for verification.
+## Deployment
 
-## Safety guarantees
+This is a standard Node.js + SQLite app — it runs anywhere that gives you:
 
-* The first file, and any file whose detected structure changed, is processed as a **dry run** that needs approval.
-* Stage or status values that were never approved send only the affected projects to review.
-* A missing fact stays `null`. A passed planned date never marks anything complete.
-* An empty file value never clears a dashboard value. Projects missing from a newer file are never deleted. Photos, attachments, comments and history are never sent.
-* A field edited manually in the dashboard is not overwritten by default; the conflict is reported. This is configurable.
-* A changed identity of a matched project (for example, the model of ENG‑003 suddenly differs because a merged cell shifted) goes to review.
-* One bad row never stops the file. Each project is written atomically, and retried writes are verified so they cannot create duplicates.
-* Report counts come from actual API results.
+- A Node 18+ runtime.
+- A persistent disk (for `data/app.sqlite` and `uploads/` — see "Database"
+  above).
+- The ability to set environment variables (`.env.example` lists all of
+  them).
 
-## Documentation
-
-* [docs/CONFIGURATION.md](docs/CONFIGURATION.md): environment variables, vocabulary, ownership policy, mapping approval
-* [docs/API.md](docs/API.md): backend endpoints and data model
-* [docs/EXTERNAL_AGENT.md](docs/EXTERNAL_AGENT.md): connecting an external file-delivery agent, folder drops, schedules
-
-## Tests
-
-```bash
-pip install -r requirements-dev.txt
-```
-
-```bash
-python -m pytest -q
-```
-
-The tests use **synthetic** representative plans generated by `tests/fixtures/make_fixtures.py`. These include title rows, a two-row merged header, bold manufacturer section rows, vertically merged cells, Russian vocabulary, an unknown stage, an invalid date, a contradictory status, a totals row, an irrelevant lookup sheet, and an activity-per-row CSV. They also run the agent end to end against the real backend over HTTP. These files are not the department's plan.
+Any conventional VM/container host (a small VPS, Render, Railway, Fly.io,
+a Docker host you already run, etc.) works; there's nothing here that
+assumes a specific provider. Point your reverse proxy / platform ingress at
+`PORT` (default `3000`), set `AGENT_API_KEY` and the two path variables as
+real environment variables (not `.env`, which isn't deployed), and run
+`npm ci --omit=dev && npm start`.

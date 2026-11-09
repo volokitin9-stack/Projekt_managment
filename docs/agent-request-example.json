@@ -1,0 +1,90 @@
+{
+  "_comment_create": "POST /api/agent/projects — creates a new project, or updates the existing one if external_project_id already matches a row. Header: Authorization: Bearer <AGENT_API_KEY>",
+  "create_or_update_project": {
+    "method": "POST",
+    "url": "/api/agent/projects",
+    "headers": {
+      "Authorization": "Bearer <AGENT_API_KEY>",
+      "Content-Type": "application/json",
+      "X-Agent-Id": "telegram-watcher-v1"
+    },
+    "body": {
+      "external_project_id": "ENG-2026-001",
+      "manufacturer": "HAVAL",
+      "vehicle_model": "Jolion",
+      "product_type": "Защита радиатора",
+      "assigned_engineer": "Петров И.",
+      "priority": "high",
+      "status": "development",
+      "description": "Собрано из переписки инженерной группы в Telegram.",
+      "planned_deadline": "2026-12-01",
+      "source": "shturman_ai_agent"
+    }
+  },
+
+  "_comment_patch": "PATCH /api/agent/projects/:id — :id can be either the internal project id or the external_project_id.",
+  "update_fields": {
+    "method": "PATCH",
+    "url": "/api/agent/projects/ENG-2026-001",
+    "headers": {
+      "Authorization": "Bearer <AGENT_API_KEY>",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "priority": "critical",
+      "status": "prototype"
+    }
+  },
+
+  "_comment_image": "POST /api/agent/projects/:id/images — multipart/form-data, not JSON. The telegram_message_id + telegram_chat_id pair is what makes redelivery of the same Telegram message a no-op instead of a duplicate.",
+  "attach_image": {
+    "method": "POST",
+    "url": "/api/agent/projects/ENG-2026-001/images",
+    "headers": {
+      "Authorization": "Bearer <AGENT_API_KEY>"
+    },
+    "multipart_fields": {
+      "file": "<binary image bytes>",
+      "caption": "Фото прототипа со стенда",
+      "is_primary": "true",
+      "source": "telegram",
+      "telegram_message_id": "48213",
+      "telegram_chat_id": "-1001234567890"
+    }
+  },
+
+  "_comment_unassigned_image": "POST /api/agent/images/unassigned — use this instead of the endpoint above when the agent is NOT confident which project the photo belongs to. It is stored for manual review (GET /api/review-queue) rather than silently guessing.",
+  "attach_image_unsure": {
+    "method": "POST",
+    "url": "/api/agent/images/unassigned",
+    "headers": {
+      "Authorization": "Bearer <AGENT_API_KEY>"
+    },
+    "multipart_fields": {
+      "file": "<binary image bytes>",
+      "manufacturer": "HAVAL",
+      "vehicle_model": "Jolion",
+      "message_text": "вот фото с замера",
+      "reason": "Could not confidently resolve which open HAVAL Jolion project this message refers to.",
+      "telegram_message_id": "48214",
+      "telegram_chat_id": "-1001234567890"
+    }
+  },
+
+  "_comment_event": "POST /api/agent/projects/:id/events — event_id must be stable per source event (e.g. the Telegram message id) so redelivery is idempotent.",
+  "record_event": {
+    "method": "POST",
+    "url": "/api/agent/projects/ENG-2026-001/events",
+    "headers": {
+      "Authorization": "Bearer <AGENT_API_KEY>",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "event_id": "telegram-chat--1001234567890-msg-48215",
+      "type": "comment",
+      "payload": {
+        "text": "Проверили на стенде — всё в порядке, переводим в оформление."
+      }
+    }
+  }
+}

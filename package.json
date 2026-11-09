@@ -1,0 +1,24 @@
+{
+  "name": "projekt-managment",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Штурман — project management dashboard (migrated from a Claude Artifact) with a REST API for an external AI agent.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "seed": "node server/seed.js",
+    "build": "echo \"No build step: the frontend is plain static HTML/CSS/JS served as-is by Express.\""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "multer": "^2.0.1",
+    "uuid": "^11.1.0"
+  }
+}

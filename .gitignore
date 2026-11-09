@@ -1,8 +1,17 @@
+# --- Node / Штурман ---
+node_modules/
+.env
+# runtime data: SQLite database, uploaded files and uploaded planning files
+data/
+uploads/*
+!uploads/.gitkeep
+# --- Python / planning agent ---
 __pycache__/
 *.pyc
 .pytest_cache/
-# runtime state: inbox copies of planning files, reports, mapping approvals
+# agent runtime state: inbox copies of planning files, reports, mapping approvals
 state/
-# reference backend database
-data/
-.env
+# never commit real planning files
+*.xlsx
+*.xls
+!tests/fixtures/*.py
