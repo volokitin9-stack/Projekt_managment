@@ -127,6 +127,8 @@ class Settings:
     timeout: float = 20.0
     max_retries: int = 4
     target_month: Optional[str] = None      # "YYYY-MM" for monthly workbooks; None = profile default
+    dashboard_url: Optional[str] = None     # dashboard page, if served elsewhere than the API
+    require_verified_deployment: bool = True  # real sync only after verify-deployment reported "ready"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -138,6 +140,8 @@ class Settings:
             timeout=float(os.environ.get("PM_API_TIMEOUT", "20")),
             max_retries=int(os.environ.get("PM_API_MAX_RETRIES", "4")),
             target_month=os.environ.get("PLAN_TARGET_MONTH") or None,
+            dashboard_url=(os.environ.get("PM_DASHBOARD_URL") or "").rstrip("/") or None,
+            require_verified_deployment=os.environ.get("PLAN_AGENT_REQUIRE_VERIFIED_DEPLOYMENT", "1") != "0",
         )
 
     def __repr__(self) -> str:  # never leak the key through logging/repr

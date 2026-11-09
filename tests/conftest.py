@@ -49,7 +49,7 @@ def make_agent(tmp_path):
 
     def _make(api_url=None, api_key="secret-test-key", state="state"):
         s = Settings(api_url=api_url, api_key=api_key, state_dir=tmp_path / state,
-                     config_dir=ROOT / "config", timeout=5, max_retries=1)
+                     config_dir=ROOT / "config", timeout=5, max_retries=1, require_verified_deployment=False)
         agent = PlanAgent(s)
         if agent.client is not None:
             agent.client._sleep = lambda s: None  # no real backoff waits in tests

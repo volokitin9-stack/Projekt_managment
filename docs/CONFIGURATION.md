@@ -15,6 +15,9 @@ Secrets live only in environment variables, or in a secret manager that sets the
 | `PLAN_AGENT_INTAKE_KEY` | agent `serve` | Secret other agents use to upload files |
 | `PLAN_AGENT_HOST`, `PLAN_AGENT_PORT` | agent `serve` | Intake bind address (default `127.0.0.1:8090`) |
 | `PM_DB_PATH`, `PM_HOST`, `PM_PORT` | backend | SQLite path and bind address |
+| `PM_DASHBOARD_URL` | agent `verify-deployment` | dashboard page URL, if it is not served by the API host |
+| `PLAN_TARGET_MONTH` | agent | `YYYY-MM` target month for monthly workbooks (default: profile `target_month`, i.e. `auto`) |
+| `PLAN_AGENT_REQUIRE_VERIFIED_DEPLOYMENT` | agent | `1` (default): a real sync runs only after `verify-deployment` reported READY for the same API URL. `0` disables the gate (tests only) |
 
 See `.env.example`.
 

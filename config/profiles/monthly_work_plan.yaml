@@ -108,8 +108,11 @@ article_invalid_markers: ["ЗАПОЛНИТЬ"]
 # cycles of the same vehicle+product stay ONE project with numbered cycles;
 # cycles WITHOUT a vehicle are not merged and go to review.
 cycle_closing_task_groups: ["Выгрузка в PDM", "Лабаратория, разбор опытников, фотоконтент"]
-# Planned rows of the main section without a vehicle that look like
-# operational work: kept, sent to review so their category can be decided.
+# Planned rows of the main section without a vehicle that are operational work
+# (support, КД/1С checks, independent scanning not tied to a development
+# project).  They go to the category below with their rows, assignees and hours.
+# Other vehicle-less blocks stay in the review queue.
+operational_category: additional_work
 operational_product_groups: ["Прочее", "Доп", "Доп."]
 operational_stages: ["Операционка", "Не профильная работа", "Административка",
                      "Работа по новым проектам компании"]

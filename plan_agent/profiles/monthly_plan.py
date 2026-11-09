@@ -128,6 +128,7 @@ class MonthlyPlanProfile:
         self.unknown_engineers = {norm_header(x) for x in cfg("unknown_engineer_values") or []}
         self.design_types = set(cfg("design_activity_types") or [])
         self.section_categories = cfg("section_categories")
+        self.operational_category = cfg("operational_category") or "review"
         self.id_prefixes = cfg("id_prefixes")
         self.sheet_override = {**(profile.get("sheet_override") or {}), **(src.get("sheet_override") or {})}
         self._norm_rules = [({k: {norm_header(x) for x in v} for k, v in r["when"].items()}, r) for r in self.rules]
@@ -454,9 +455,13 @@ class MonthlyPlanProfile:
             else:
                 cycles.append([t])
         grouped: "OrderedDict[tuple, list[list[TaskRow]]]" = OrderedDict()
+        occ: Counter = Counter()
         for cyc in cycles:
             k = self._key(cyc[0])
             if not k[0] and not k[1]:                     # no vehicle: never merged
+                if self._operational(cyc) and self.operational_category == "additional_work":
+                    records.append(self._operational_record(cyc, sheet, file_name, month_key, occ))
+                    continue
                 rec = self._main_record([cyc], sheet, file_name, month_key)
                 if self._operational(cyc):
                     rec.add_issue(Severity.REVIEW, "operational_work",
@@ -471,7 +476,6 @@ class MonthlyPlanProfile:
         for cycs in grouped.values():
             records.append(self._main_record(cycs, sheet, file_name, month_key))
 
-        occ: Counter = Counter()
         for t in by_section.get("extra_work", []):        # additional work: one record per assignment
             records.append(self._single_record(t, "additional_work", sheet, file_name, month_key, occ))
         for t in by_section.get("backlog", []):           # backlog: one record per item
@@ -749,6 +753,43 @@ class MonthlyPlanProfile:
         self._finish(rec, month_key)
         return rec
 
+    def _operational_record(self, rows: list[TaskRow], sheet: str, file_name: str, month_key: str,
+                            occ: Counter) -> ProjectRecord:
+        """Planned operational work of the main section (no vehicle) -> Additional Work."""
+        first = rows[0]
+        rec = ProjectRecord(source_file=file_name, source_sheet=sheet, source_row=first.row,
+                            source_rows=[t.row for t in rows], record_category="additional_work")
+        rec.manufacturer, rec.vehicle_model, rec.product_type = None, None, first.t("product_type")
+        key_counts: Counter = Counter()
+        for seq, t in enumerate(rows, start=1):
+            rec.activities.append(self._activity(t, rec, month_key, seq, 1, key_counts))
+        ex = rec.extra_attributes
+        ex["source_section"] = "main plan section (planned operational work, moved to Additional Work)"
+        for role in ("sales_channel", "product_group"):
+            vals = list(dict.fromkeys(t.t(role) for t in rows if t.t(role)))
+            if vals:
+                ex[role] = vals[0] if len(vals) == 1 else vals
+        comments = list(dict.fromkeys(t.t("comment") for t in rows if t.t("comment")))
+        if comments:
+            ex["plan_comment"] = " | ".join(comments)
+        self._priority(rec, rows)
+        people = list(dict.fromkeys(a.details["assignee"] for a in rec.activities if a.details["assignee"]))
+        if len(people) == 1:
+            rec.assigned_engineer = people[0]
+        elif len(people) > 1:
+            rec.add_issue(Severity.WARNING, "multiple_assignees",
+                          f"operational work done by several people {people}; record-level engineer left empty")
+        rec.project_name = first.t("product_type") or first.t("comment") or first.t("project_stage")
+        ident = (month_key, "|".join(people), rec.project_name,
+                 "|".join(t.t("task_type") or "" for t in rows))
+        occ[("op",) + ident] += 1
+        rec.external_project_id = f"{self.id_prefixes['additional_work']}-" + _hash(
+            "op", *ident, str(occ[("op",) + ident]))
+        ex["id_source"] = "derived from month + assignee + description + tasks + occurrence"
+        self._finish(rec, month_key)
+        self._derive(rec)
+        return rec
+
     def _derive(self, rec: ProjectRecord) -> None:
         derived = rec.extra_attributes.setdefault("derived_fields", [])
         main = [a for a in rec.activities if a.details["stage"] in STAGE_ORDER]
@@ -844,6 +885,7 @@ class MonthlyPlanProfile:
                         for role, col in (layout.get("columns") or {}).items()},
             "unmapped_headers": layout.get("unmapped_headers"),
             "section_categories": self.section_categories,
+            "operational_category": self.operational_category,
             "id_prefixes": self.id_prefixes,
             "design_activity_types": sorted(self.design_types),
             "unknown_engineer_values": sorted(self.unknown_engineers),

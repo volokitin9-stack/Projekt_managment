@@ -51,6 +51,8 @@ def main(argv=None) -> int:
     p.add_argument("--host", default=os.environ.get("PLAN_AGENT_HOST", "127.0.0.1"))
     p.add_argument("--port", type=int, default=int(os.environ.get("PLAN_AGENT_PORT", "8090")))
     sub.add_parser("status")
+    p = sub.add_parser("verify-deployment", help="check dashboard, API, auth and persistence (no writes)")
+    p.add_argument("--after-restart", action="store_true", help="compare with the snapshot taken before a restart")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO, format="%(levelname)s %(message)s")
 
@@ -64,6 +66,13 @@ def main(argv=None) -> int:
             return 2
         print(f"mapping approved (fingerprint {data['fingerprint']}) -> {store.approved_path}")
         return 0
+
+    if a.cmd == "verify-deployment":
+        from .deployment import render, verify
+        st = Settings.from_env()
+        res = verify(st.api_url, st.api_key, st.state_dir, st.dashboard_url, a.after_restart, timeout=st.timeout)
+        print(render(res))
+        return 0 if res["ready"] else 5
 
     agent = _agent()
     if a.cmd in ("analyze", "sync"):

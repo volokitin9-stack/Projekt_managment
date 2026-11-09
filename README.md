@@ -9,6 +9,8 @@ An agent that reads the engineering department's planning files (Excel, CSV, PDF
 >
 > The agent talks to the backend only through HTTP (`plan_agent/client.py`). If the dashboard team ships a different backend, it only needs the contract in [docs/API.md](docs/API.md).
 
+> **Update - the real dashboard:** branch `main` now contains the production dashboard **Штурман** (Node/Express/SQLite, its own `/api/agent/*` API). That app is the integration target. `backend/` here remains the reference implementation of the data contract the import needs: categories, month-scoped activities, original values and history. The Штурман API does not yet support that contract (see `docs/DEPLOYMENT_VERIFICATION.md`), so the first synchronization stays blocked until it does and a production deployment has been verified.
+
 ## How it works
 
 ```text

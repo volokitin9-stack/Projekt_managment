@@ -237,6 +237,7 @@ def render_profile_analysis(a, plans, report) -> str:
     w("*Sheet's own fact total* = the row «Итого факт в день <name>» of the worksheet (independent cross-check); "
       "Δ shows a difference between the sum of the task rows and that total.")
     w("")
+    _reconciliation(w, recs, acts, daily)
 
     # ------------------------------------------------------------------ 9
     w("## 9. Activities by development stage / activity type")
@@ -265,42 +266,29 @@ def render_profile_analysis(a, plans, report) -> str:
     w("")
 
     # ------------------------------------------------------------------ 10
-    w("## 10. Proposed dashboard data model changes")
+    w("## 10. Dashboard integration: required changes in the Штурман dashboard")
     w("")
-    w("Existing tables and endpoints are unchanged; additions only:")
+    w("The production dashboard is the **Штурман** app (repository branch `main`). Its current agent API was "
+      "tested on a local test copy with synthetic probe records. It cannot yet store what this import produces "
+      "without loss. The additions below are needed in Штурман, keeping the existing UI and endpoints unchanged. "
+      "The reference backend in this repository implements exactly this contract and can serve as the blueprint.")
     w("")
-    w("| Change | Purpose |")
-    w("|---|---|")
-    w("| `projects.record_category` (`main_project` / `additional_work` / `backlog`) | three separate dashboard views; "
-      "duplicate checks never cross categories |")
-    w("| `projects.last_plan_month` | latest monthly plan that set the project fields; an older month never "
-      "overwrites a newer one |")
-    w("| new table `project_activities` | many activities per project and per month: activity type & stage, "
-      "assignee (+ original value), planned/actual hours, hours per date, progress, effort ratio, original ОК/NOK/Факт, "
-      "comment, source file/sheet/row |")
-    w("| activities are month-scoped | December updates only December activities; November activities stay as "
-      "history; a task that disappears from its month is flagged `removed_from_source`, not deleted |")
-    w("| activity history in `project_history` (`activity_added`, `activity_updated`, `activity_removed_from_source`) "
-      "| full trace of agent vs manual changes |")
-    w("| manual activity edits (`PATCH /api/projects/:id/activities/:aid`: progress, note, assignee) | protected: "
-      "the agent never overwrites a manually edited activity field, it reports a conflict |")
-    w("| `GET /api/projects?category=…&include=activities` | dashboard views per category with activities |")
-    w("")
-
-    # ------------------------------------------------------------------ 11
-    w("## 11. Rules applied (your decisions) and open points")
-    w("")
-    w("* Source: «Ноябрь» only; «Сводная Ноябрь» not imported. Other months untouched.")
-    w("* Main stages: Scanning, Development, Test Prototype, Measurement, Documentation. Testing, "
-      "Transfer/Extension and Engineering change are additional activity types and never a project's current stage.")
-    w("* Kits and individual products are separate projects; ambiguous identities stay in the review queue.")
-    w("* Project engineer = design engineer from the file; scanning/fitment people only on their activities; "
-      "empty when no design engineer is found. «Н» kept as original value and sent to review.")
-    w("* Priority: 1/1.1/1.2/1.3 → high, 2 → medium, 3 → low; 0 undefined (dashboard value empty, original kept).")
-    w("* No completion is derived: not from hours, not from ОК > 0. Progress is only *planned* (hours planned) or "
-      "*in progress* (hours logged). ОК/NOK kept as original values.")
-    w("* Open: meaning of «Н», priority 0 and ОК/NOK; category of the 3 operational items; vehicles of the "
-      "records without vehicle.")
+    w("| Needed | Штурман today | Required addition |")
+    w("|---|---|---|")
+    w("| Categories A/B/C | none - every record becomes a Kanban card | `record_category` on projects; Kanban shows A, "
+      "separate lists for B and C |")
+    w("| Activities per project and month (assignee, hours, hours per date, progress, ОК/NOK, source row) | none | "
+      "`project_activities` table + agent upsert per plan month |")
+    w("| Original values, source references, plan month | unknown fields silently dropped | store `extra_attributes`, "
+      "`source_*`, `last_plan_month` |")
+    w("| Unknown priority / stage | shown as «normal» / «scanning» | allow empty values (display «—») |")
+    w("| Priority scale | critical/high/normal/low | agent maps high→high, medium→normal, low→low; never sends "
+      "`critical` (not in the plan) |")
+    w("| Stage keys | `prototype` | agent maps test_prototype→prototype |")
+    w("| Additional work without vehicle | rejected (manufacturer+model required) | relax the requirement for "
+      "category B |")
+    w("| 14 seeded sample projects | present on a fresh database | keep or remove (your decision); the agent never "
+      "deletes them |")
     w("")
 
     # ------------------------------------------------------------------ board
@@ -327,8 +315,95 @@ def render_profile_analysis(a, plans, report) -> str:
     w("")
     w(f"**Review queue ({len(review)})** - shown to the reviewer, not on the dashboard until resolved.")
     w("")
+    w("## Final number of records proposed for synchronisation")
+    w("")
+    w("| Category | Records | Activities |")
+    w("|---|---|---|")
+    for cat, label in CAT_LABEL.items():
+        w(f"| {label} | **{len(ok[cat])}** | {sum(len(r.activities) for r in ok[cat])} |")
+    w(f"| **Total to synchronise** | **{sum(len(v) for v in ok.values())}** | "
+      f"{sum(len(r.activities) for v in ok.values() for r in v)} |")
+    w(f"| Review queue (not synchronised, kept in `state/review_queue.json`) | {len(review)} | "
+      f"{sum(len(r.activities) for r in review)} |")
+    w("")
     w("## Next step")
     w("")
-    w("Nothing has been written. After your approval the mapping (`mapping.proposed.yaml`) is approved and the "
-      "first synchronisation creates the importable records above; the review queue stays out until resolved.")
+    w("Nothing has been written. The first synchronisation stays **blocked** until `verify-deployment` reports "
+      "READY for the production dashboard (reachable, authenticated, persistent across a restart, not a local or "
+      "temporary instance, compatible API).")
     return "\n".join(L) + "\n"
+
+
+def reconcile(recs, acts, daily) -> dict:
+    """Two independent partitions of the same activities; every hour is counted once."""
+    def bucket_cat(r):
+        return "review" if r.needs_review() else r.record_category
+
+    def bucket_person(x):
+        if x.details["assignee"]:
+            return "identified"
+        return "unknown_value" if x.details["assignee_original"] else "no_employee"
+
+    out = {"fact": defaultdict(float), "plan": defaultdict(float), "fact_person": defaultdict(float),
+           "plan_person": defaultdict(float), "cross": defaultdict(float), "unassigned_rows": []}
+    for r, x in acts:
+        f, p_ = x.details["actual_hours"] or 0, x.details["planned_hours"] or 0
+        c, b = bucket_cat(r), bucket_person(x)
+        out["fact"][c] += f
+        out["plan"][c] += p_
+        out["fact_person"][b] += f
+        out["plan_person"][b] += p_
+        out["cross"][(b, c)] += f
+        if b != "identified" and (f or p_):
+            out["unassigned_rows"].append((x.source_row, r.project_name, c, b, x.details["assignee_original"], p_, f))
+    out["total_fact"] = sum(out["fact"].values())
+    out["total_plan"] = sum(out["plan"].values())
+    out["sheet_named_total"] = sum(v or 0 for v in daily.values()) if daily else None
+    return out
+
+
+def _reconciliation(w, recs, acts, daily) -> None:
+    rc = reconcile(recs, acts, daily)
+    labels = {"main_project": "Main projects (importable)", "additional_work": "Additional work",
+              "backlog": "Task backlog", "review": "Records under review"}
+    w("### Workload reconciliation (actual hours; every task row counted exactly once)")
+    w("")
+    w("| Line | Actual h | Planned h |")
+    w("|---|---|---|")
+    w(f"| **Total hours from the Excel task rows** | **{_h(rc['total_fact'])}** | **{_h(rc['total_plan'])}** |")
+    w("| *Split by category:* | | |")
+    for k in ("main_project", "additional_work", "backlog", "review"):
+        w(f"| — {labels[k]} | {_h(rc['fact'][k])} | {_h(rc['plan'][k])} |")
+    w(f"| = sum of categories | {_h(sum(rc['fact'].values()))} | {_h(sum(rc['plan'].values()))} |")
+    w("| *Split by employee:* | | |")
+    w(f"| — Assigned to identified employees | {_h(rc['fact_person']['identified'])} | {_h(rc['plan_person']['identified'])} |")
+    w(f"| — Without an identified employee (empty КО) | {_h(rc['fact_person']['no_employee'])} | "
+      f"{_h(rc['plan_person']['no_employee'])} |")
+    w(f"| — Unknown engineer value (e.g. «Н») | {_h(rc['fact_person']['unknown_value'])} | "
+      f"{_h(rc['plan_person']['unknown_value'])} |")
+    w(f"| = sum of employee split | {_h(sum(rc['fact_person'].values()))} | {_h(sum(rc['plan_person'].values()))} |")
+    if rc["sheet_named_total"] is not None:
+        w(f"| Sheet's own per-engineer totals («Итого факт в день», named engineers only) | "
+          f"{_h(rc['sheet_named_total'])} | |")
+    w("")
+    gap = rc["total_fact"] - rc["fact_person"]["identified"]
+    w(f"**Explanation of the difference:** total {_h(rc['total_fact'])} h − hours of identified employees "
+      f"{_h(rc['fact_person']['identified'])} h = **{_h(gap)} h**, which are task-row hours with no identified "
+      "employee:")
+    w("")
+    for row, name, cat, b, orig, p_, f in sorted(rc["unassigned_rows"]):
+        if f:
+            w(f"* row {row}: {_c(name)} — {labels[cat]}, "
+              f"{'engineer value ' + repr(orig) if orig else 'КО column empty'}: {_h(f)} h actual")
+    w("")
+    if rc["sheet_named_total"] is not None:
+        rest = rc["fact_person"]["identified"] - rc["sheet_named_total"]
+        w(f"The sheet's own per-engineer totals add up to {_h(rc['sheet_named_total'])} h, exactly the hours of the "
+          f"identified employees (remaining difference {_h(rest)} h). Hours without an employee are not in any "
+          "per-engineer total of the sheet, which is why the employee table sums to less than the overall total.")
+        w("")
+    plan_gap = [(row, name, cat, b, orig, p_) for row, name, cat, b, orig, p_, f in rc["unassigned_rows"] if p_]
+    w(f"Planned hours without an identified employee: {_h(rc['plan_person']['no_employee'])} h in "
+      f"{len([x for x in plan_gap if x[3] == 'no_employee'])} task rows, "
+      f"{_h(rc['plan_person']['unknown_value'])} h with the unknown value «Н» (listed per project in section 4/7).")
+    w("")

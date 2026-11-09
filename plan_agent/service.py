@@ -140,6 +140,15 @@ class PlanAgent:
                 if mode == "sync":
                     mode = "dry_run"
 
+        if mode == "sync" and self.settings.require_verified_deployment:
+            from .deployment import load_status
+            dep = load_status(self.settings.state_dir, self.settings.api_url)
+            if not (dep and dep.get("ready")):
+                mode = "dry_run"
+                fatal = fatal or "deployment not verified"
+                notes.append("SYNC BLOCKED: no successful deployment verification for this API "
+                             "(run 'python -m plan_agent verify-deployment'): " +
+                             ("; ".join(dep.get("blocking", [])) if dep else "never verified"))
         plans = build_plan(a.records, existing, self.policy, writable)
         if mode == "sync":
             fatal = SyncExecutor(self.client, writable, run_id, display_name).execute(plans) or fatal
@@ -153,6 +162,8 @@ class PlanAgent:
             status = "Verification required (dry run)"
         elif initial or not a.structure_matches_approved:
             status = "Approval required (dry run)"
+        elif fatal == "deployment not verified":
+            status = "Dry run - deployment not verified"
         else:
             status = "Dry run" if not fatal else "Dry run - dashboard unavailable"
         report["status"] = status
@@ -174,6 +185,16 @@ class PlanAgent:
         (base.with_suffix(".txt")).write_text(text)
         if md:
             (self.reports_dir / f"{run_id}_analysis.md").write_text(md)
+        if a.profile is not None:
+            queue = [{"project": r.project_name, "category": r.record_category, "source_file": r.source_file,
+                      "source_sheet": r.source_sheet, "source_rows": r.source_rows,
+                      "external_project_id": r.external_project_id,
+                      "reasons": [i.message for i in r.issues if i.severity.value in ("review", "error")],
+                      "activities": r.activity_payload}
+                     for r in a.records if r.needs_review()]
+            (self.settings.state_dir / "review_queue.json").write_text(
+                json.dumps({"run_id": run_id, "source_file": report["input_file"], "items": queue},
+                           ensure_ascii=False, indent=2, default=str))
         entry = {"run_id": run_id, "started_at": started,
                  "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                  "source_file": report["input_file"], "file_sha256": report.get("file_sha256"),

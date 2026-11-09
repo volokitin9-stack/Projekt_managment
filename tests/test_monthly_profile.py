@@ -68,9 +68,10 @@ def test_three_categories_and_every_row_accounted(wb):
     a = run(wb / "work_plan_2026.xlsx")
     cats = {c: [r for r in a.records if r.record_category == c] for c in ("main_project", "additional_work",
                                                                           "backlog")}
-    assert [r.project_name for r in cats["additional_work"]] == ["Упаковка защит"]
-    assert cats["additional_work"][0].assigned_engineer == "Иванов"
-    assert cats["additional_work"][0].extra_attributes["actual_hours"] == 3
+    aw = {r.project_name: r for r in cats["additional_work"]}
+    assert set(aw) == {"Упаковка защит", "Техподдержка"}       # ДОП РАБОТЫ + planned operational work
+    assert aw["Упаковка защит"].assigned_engineer == "Иванов"
+    assert aw["Упаковка защит"].extra_attributes["actual_hours"] == 3
     bl = cats["backlog"][0]
     assert bl.project_name == "JETOUR X50 Сетки" and bl.extra_attributes["scheduling_note"] == "На Август"
     assert bl.project_status is None and bl.current_stage is None          # not active, never "done"
@@ -90,8 +91,10 @@ def test_identity_cycles_kits_and_review(wb):
     assert [x.details["sequence"] for x in honda.activities] == [1, 2, 3, 4, 5, 6]
     shtamp = [r for r in a.records if r.project_name == "Проверка, перевод штампованых защит"]
     assert len(shtamp) == 2 and all(r.needs_review() for r in shtamp)          # never merged
-    tech = [r for r in a.records if r.project_name == "Техподдержка"][0]
-    assert tech.needs_review() and any(i.code == "operational_work" for i in tech.issues)
+    tech = one(a, "Техподдержка", "additional_work")         # operational, moved to Additional Work
+    assert not tech.needs_review() and tech.assigned_engineer == "Иванов"
+    assert tech.source_rows == [tech.activities[0].source_row] and tech.extra_attributes["source_section"]
+    assert tech.external_project_id.startswith("AW-")
     assert one(a, "GAC S9 Комплект защит").external_project_id.startswith("PRJ-")
 
 
@@ -213,3 +216,14 @@ def test_december_keeps_november_history(wb, backend, make_agent):
     gac2 = requests.get(f"{backend}/api/projects/{gac['id']}").json()
     assert gac2["last_plan_month"] == "2026-12" and gac2["current_stage"] == gac["current_stage"]
     assert late.report["counts"]["new"] == 0
+
+
+def test_workload_reconciliation_has_no_double_counting(wb):
+    from plan_agent.profiles.report import reconcile
+    a = run(wb / "work_plan_2026.xlsx")
+    acts = [(r, x) for r in a.records for x in r.activities]
+    rc = reconcile(a.records, acts, a.profile.analysis["sheet_totals"]["daily_fact"])
+    total = sum(x.details["actual_hours"] or 0 for _, x in acts)
+    assert abs(sum(rc["fact"].values()) - total) < 1e-9
+    assert abs(sum(rc["fact_person"].values()) - total) < 1e-9
+    assert abs(sum(rc["plan_person"].values()) - rc["total_plan"]) < 1e-9
