@@ -1765,13 +1765,14 @@
 
   function engReviewHtml(){
     if(!engReview.length) return '<div class="eng-empty">Очередь проверки пуста.</div>';
-    var KIND = { plan_record:"Запись плана", image:"Фото", project:"Проект без идентификатора", telegram_photo:"Фото Telegram" };
+    var KIND = { plan_record:"Запись плана", image:"Фото", project:"Проект без идентификатора", telegram_photo:"Фото Telegram",
+      plan_source_issue:"Файл плана", plan_auto_sync_held:"Автосинхронизация: требует утверждения" };
     var rows = engReview.map(function(r){
       var pl = r.payload || {}; var acts = pl.activities || [];
       var hrsP = acts.reduce(function(s,a){ return s+(a.planned_hours||0); },0), hrsF = acts.reduce(function(s,a){ return s+(a.actual_hours||0); },0);
       var who = acts.map(function(a){ return a.assignee || a.assignee_original; }).filter(Boolean);
       who = who.filter(function(v,i){ return who.indexOf(v)===i; }).join(", ");
-      return '<tr><td>'+escapeHtml(KIND[r.kind]||r.kind)+'</td><td>'+escapeHtml(pl.project_name||pl.caption||pl.original_filename||"—")+
+      return '<tr><td>'+escapeHtml(KIND[r.kind]||r.kind)+'</td><td>'+escapeHtml(pl.project_name||pl.caption||pl.original_filename||(pl.file&&pl.file.name)||"—")+
         (pl.url?'<div><a href="'+escapeHtml(pl.url)+'" target="_blank" rel="noopener" style="color:var(--accent-ink);font-size:11px;">открыть файл</a></div>':'')+'</td>' +
         '<td style="max-width:360px;">'+escapeHtml(r.reason||"")+'</td><td>'+escapeHtml(who||"—")+'</td>' +
         '<td class="num">'+(acts.length?fmtH(hrsP)+' / '+fmtH(hrsF):'—')+'</td>' +
@@ -1784,7 +1785,57 @@
 
   var engImports = [];
   var ENG_IMPORT_STATUS = { analyzed:"Пробный анализ выполнен — ожидает утверждения", synced:"Синхронизировано",
-    failed:"Ошибка анализа", sync_failed:"Ошибка синхронизации", analyzing:"Анализ…" };
+    failed:"Ошибка анализа", sync_failed:"Ошибка синхронизации", analyzing:"Анализ…", syncing:"Синхронизация…",
+    interrupted:"Прервано — можно повторить" };
+  var engSource = null, engSourcePreview = null, engSourceBusy = "";
+  var ENG_SOURCE_STATUS = { not_configured:"Источник не настроен", idle:"Ожидание первой проверки", up_to_date:"Актуально",
+    awaiting_approval:"Есть изменения — ожидает утверждения", blocked:"Требуется проверка файла", failed:"Файл не обработан",
+    waiting:"Файл занят или записывается — повтор позже", error:"Ошибка", interrupted:"Прервано — будет повторено" };
+  var ENG_SOURCE_CHANGE = { "new":"Новый", update:"Изменение", review:"На проверку", duplicate:"Дубликат?", error:"Ошибка" };
+  function engSourceHtml(){
+    var st = engSource;
+    if(!st) return "";
+    var cls = st.status === "up_to_date" ? "ok" : (st.status === "error" || st.status === "failed" || st.status === "blocked") ? "err" : "warn";
+    var c = st.last_counts || {};
+    var row = function(k, v){ return '<tr><td>'+k+'</td><td>'+v+'</td></tr>'; };
+    var cv = st.current_version;
+    var html = '<div class="eng-panel" id="engSourcePanel"><h3>Автоматическое обновление плана</h3>';
+    if(!st.configured){
+      return html + '<div style="font-size:12px;color:var(--ink-soft);">Источник файла не настроен. Задайте <code>PLAN_SOURCE_TYPE</code> и <code>PLAN_SOURCE_PATH</code> на сервере (см. docs/FILE_SOURCE.md). Ручная загрузка ниже работает без него.</div></div>';
+    }
+    html += '<div class="eng-form-row"><span class="eng-status '+cls+'">'+escapeHtml(ENG_SOURCE_STATUS[st.status]||st.status)+'</span>' +
+      (st.running ? '<span>идёт обработка ('+escapeHtml(st.running.phase||"")+')…</span>' : '') +
+      '<span style="font-size:12px;">Автосинхронизация: <b>'+(st.auto_sync_enabled ? "включена" : "выключена (ручное утверждение)")+'</b></span></div>' +
+      '<table class="eng-table" style="max-width:640px;">' +
+      row("Источник", escapeHtml(st.source.type+": "+st.source.location+(st.source.pattern ? " ("+st.source.pattern+")" : ""))) +
+      row("Текущий месяц", escapeHtml(st.current_month || st.month_error || "—")+' <span style="color:var(--ink-faint);">('+escapeHtml(st.timezone)+')</span>') +
+      row("Последняя проверка", st.last_check_at ? fmtTs(st.last_check_at) : "—") +
+      row("Последнее изменение файла", st.last_change_at ? fmtTs(st.last_change_at) : "—") +
+      row("Последняя синхронизация", st.last_sync_at ? fmtTs(st.last_sync_at) : "—") +
+      (st.last_file ? row("Файл", escapeHtml(st.last_file.name)+' · SHA-256 '+escapeHtml(String(st.last_file.sha256).slice(0,12))+'…') : "") +
+      row("Создано / обновлено / без изменений / на проверку", (c.new||0)+" / "+(c.updated||0)+" / "+(c.unchanged||0)+" / "+(c.review||0)) +
+      (st.last_error ? row("Последняя ошибка", '<span class="eng-status err">'+escapeHtml(st.last_error)+'</span>') : "") +
+      (st.next_check_at ? row("Следующая проверка", fmtTs(st.next_check_at)) : "") +
+      '</table>' +
+      '<div class="eng-form-row" style="margin-top:10px;">' +
+      '<button type="button" class="btn" data-action="eng-src-check">Проверить обновления</button>' +
+      '<button type="button" class="btn" data-action="eng-src-dryrun">Пробный анализ</button>' +
+      (cv ? '<button type="button" class="btn" data-action="eng-src-preview">Просмотреть изменения</button>' : '') +
+      (cv && (cv.status === "awaiting_approval" || cv.status === "sync_failed" || cv.status === "interrupted") && cv.import_id ? '<button type="button" class="btn primary" data-action="eng-src-approve">Утвердить синхронизацию</button>' : '') +
+      '<button type="button" class="btn" data-action="eng-src-auto" data-enabled="'+(st.auto_sync_enabled ? "0" : "1")+'">'+(st.auto_sync_enabled ? "Выключить автосинхронизацию" : "Включить автосинхронизацию")+'</button>' +
+      '<span style="font-size:12px;">'+escapeHtml(engSourceBusy)+'</span></div>';
+    var pv = engSourcePreview;
+    if(pv){
+      html += '<details open style="margin-top:10px;"><summary style="cursor:pointer;font-size:12px;">Изменения по проектам: '+escapeHtml(pv.version ? pv.version.name+" · "+pv.version.plan_month : "")+' ('+pv.projects.length+')</summary>' +
+        (pv.projects.length ? '<table class="eng-table"><tr><th>Проект</th><th>Тип</th><th>Изменения</th><th>Причина</th></tr>' + pv.projects.slice(0,200).map(function(p){
+          var ch = p.changes.map(function(x){ return x.field+": "+(x.old==null?"—":JSON.stringify(x.old))+" → "+JSON.stringify(x.new); });
+          if(p.activity_changes.length) ch.push("работы: "+p.activity_changes.length);
+          if(p.conflicts.length) ch.push("конфликт с ручной правкой: "+p.conflicts.join(", "));
+          return '<tr><td>'+escapeHtml(p.project||"")+'</td><td>'+escapeHtml(ENG_SOURCE_CHANGE[p.change_type]||p.change_type)+'</td><td style="font-size:11.5px;">'+escapeHtml(ch.join("; ").slice(0,600))+'</td><td style="font-size:11.5px;">'+escapeHtml(p.reason||"")+'</td></tr>';
+        }).join("") + '</table>' : '<div style="font-size:12px;">Изменений нет.</div>') + '</details>';
+    }
+    return html + '</div>';
+  }
   var engImportResult = null;
   function engImportHtml(){
     var now = new Date();
@@ -1822,10 +1873,23 @@
     var hist = engImports.length ? '<div class="eng-panel"><h3>Последние загрузки</h3><table class="eng-table"><tr><th>Файл</th><th>Месяц</th><th>Статус</th><th>Загружен</th><th></th></tr>' +
       engImports.map(function(i){ return '<tr><td>'+escapeHtml(i.original_name||"")+'</td><td>'+escapeHtml(i.plan_month||"")+'</td><td>'+escapeHtml(ENG_IMPORT_STATUS[i.status]||i.status)+'</td><td>'+fmtTs(i.uploaded_at)+'</td>' +
         '<td><button type="button" class="eng-mini-btn" data-action="eng-plan-open" data-id="'+i.id+'">Открыть</button></td></tr>'; }).join("") + '</table></div>' : '';
-    return form + res + hist;
+    return engSourceHtml() + form + res + hist;
   }
   function loadImports(){
-    return apiFetch("/api/plan-imports").then(function(list){ engImports = list || []; renderEngSubviewLists(); }).catch(function(){});
+    return Promise.all([
+      apiFetch("/api/plan-imports").then(function(list){ engImports = list || []; }).catch(function(){}),
+      apiFetch("/api/plan-source/status").then(function(st){ engSource = st; }).catch(function(){})
+    ]).then(renderEngSubviewLists);
+  }
+  function engSourceAction(btn, url, body, label){
+    engSourceBusy = label;
+    btn.disabled = true;
+    document.activeElement && document.activeElement.blur();
+    renderEngSubviewLists();
+    return apiFetch(url, { method:"POST", body: body || {} })
+      .then(function(r){ engSource = r.state || r; var res = r.result || {}; engSourceBusy = res.error ? ("Результат: "+res.error) : ""; })
+      .catch(function(err){ engSourceBusy = err.message; })
+      .then(function(){ document.activeElement && document.activeElement.blur(); return Promise.all([loadImports(), loadEngProjects()]); });
   }
 
   function renderEngSubviewLists(){
@@ -1886,6 +1950,24 @@
         .then(function(r){ engImportResult = r; })
         .catch(function(err){ engImportResult = { status:"failed", error: err.message, original_name: f.name, plan_month: m }; })
         .then(function(){ btn.disabled = false; document.activeElement && document.activeElement.blur(); return loadImports(); });
+      return;
+    }
+    if(act === "eng-src-check"){ engSourcePreview = null; engSourceAction(btn, "/api/plan-source/check", {}, "Проверка…"); return; }
+    if(act === "eng-src-dryrun"){ engSourcePreview = null; engSourceAction(btn, "/api/plan-source/check", { dry_run:true }, "Пробный анализ… (может занять до минуты)"); return; }
+    if(act === "eng-src-preview"){
+      apiFetch("/api/plan-source/preview").then(function(p){ engSourcePreview = p; document.activeElement && document.activeElement.blur(); renderEngSubviewLists(); }).catch(function(err){ showSyncNote(err.message); });
+      return;
+    }
+    if(act === "eng-src-approve"){
+      if(!window.confirm("Синхронизировать новую версию плана с базой?\nБудут записаны изменения согласно пробному анализу. Записи «на проверку» не переносятся, ручные правки сохраняются.")) return;
+      engSourcePreview = null;
+      engSourceAction(btn, "/api/plan-source/approve", { confirm:true, approved_by:"dashboard_user" }, "Синхронизация…");
+      return;
+    }
+    if(act === "eng-src-auto"){
+      var en = btn.getAttribute("data-enabled") === "1";
+      if(!window.confirm(en ? "Включить автоматическую синхронизацию?\nНовые версии файла будут применяться без утверждения, но только безопасные изменения (часы и данные существующих работ, утверждённые поля). Новые проекты, смена идентичности, исполнителей и этапов, конфликты с ручными правками уходят на проверку." : "Выключить автоматическую синхронизацию? Новые версии будут ждать утверждения.")) return;
+      engSourceAction(btn, "/api/plan-source/auto-sync", { enabled:en, confirm:true }, "");
       return;
     }
     if(act === "eng-plan-open"){

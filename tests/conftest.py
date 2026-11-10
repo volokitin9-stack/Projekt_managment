@@ -39,7 +39,7 @@ class ShturmanServer:
     """The real Штурман Node/Express app on a free port with its own temporary
     database, uploads and plan-import folders."""
 
-    def __init__(self, base: Path, key: str = "secret-test-key", seed_demo: bool = False):
+    def __init__(self, base: Path, key: str = "secret-test-key", seed_demo: bool = False, extra_env=None):
         self.base = base
         self.key = key
         self.port = _free_port()
@@ -49,6 +49,7 @@ class ShturmanServer:
         self.uploads = base / "uploads"
         self.plan_dir = base / "plan-imports"
         self.seed_demo = seed_demo
+        self.extra_env = dict(extra_env or {})
         self.proc = None
         self.log = base / "server.log"
 
@@ -57,6 +58,10 @@ class ShturmanServer:
         e.update(PORT=str(self.port), DATA_DIR=str(self.data_dir), UPLOADS_DIR=str(self.uploads),
                  PLAN_IMPORT_DIR=str(self.plan_dir), AGENT_API_KEY=self.key,
                  SEED_DEMO_DATA="true" if self.seed_demo else "false", PLAN_AGENT_PYTHON=sys.executable)
+        for k in [k for k in e if k.startswith("PLAN_SOURCE_") or k in ("PLAN_AUTO_SYNC_ENABLED", "PLAN_TARGET_MONTH",
+                                                                         "PLAN_CHECK_INTERVAL_MINUTES", "PLAN_TIMEZONE")]:
+            del e[k]
+        e.update(self.extra_env)
         return e
 
     def start(self):

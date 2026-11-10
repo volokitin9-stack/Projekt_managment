@@ -22,7 +22,7 @@ from .models import PROJECT_FIELDS
 from .parsers import CorruptFileError, EmptyFileError, UnsupportedFormatError
 from .pipeline import analyze_file
 from .report import build_report, render_initial_analysis, render_text
-from .sync import SyncExecutor, build_plan
+from .sync import SyncExecutor, build_plan, restrict_for_auto
 
 log = logging.getLogger("plan_agent")
 
@@ -58,10 +58,10 @@ class PlanAgent:
     # ------------------------------------------------------------------ #
     def receive(self, path: Path, channel: str, original_name: Optional[str] = None,
                 requested_mode: str = "auto", metadata: Optional[dict] = None,
-                target_month: Optional[str] = None) -> ProcessOutcome:
+                target_month: Optional[str] = None, auto_safe: bool = False) -> ProcessOutcome:
         stored, meta = self.inbox.store(Path(path), channel, original_name, metadata)
         name = original_name or Path(path).name
-        return self.process(stored, name, requested_mode, target_month)
+        return self.process(stored, name, requested_mode, target_month, auto_safe)
 
     def reprocess(self, sha: str, requested_mode: str = "auto", target_month: Optional[str] = None) -> ProcessOutcome:
         stored, meta = self.inbox.get(sha)
@@ -74,7 +74,7 @@ class PlanAgent:
 
     # ------------------------------------------------------------------ #
     def process(self, path: Path, display_name: str, requested_mode: str = "auto",
-                target_month: Optional[str] = None) -> ProcessOutcome:
+                target_month: Optional[str] = None, auto_safe: bool = False) -> ProcessOutcome:
         """requested_mode: 'auto' (sync if approved, else dry run), 'dry_run', 'sync'.
         target_month: 'YYYY-MM' for monthly workbooks (default: PLAN_TARGET_MONTH or profile setting)."""
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:6]
@@ -93,7 +93,8 @@ class PlanAgent:
         notes: list[str] = []
         prof = a.profile
         if prof is not None and not prof.analysis.get("source_sheet"):
-            return self._failed(run_id, display_name, "; ".join(prof.blocking) or "no source worksheet", a)
+            return self._failed(run_id, display_name, "; ".join(prof.blocking) or "no source worksheet", a,
+                                status="Verification required (no source worksheet selected)")
         if prof is None and not any(s.relevant for s in a.schemas):
             return self._failed(run_id, display_name,
                                 "no worksheet/section with project planning data was recognised: " +
@@ -150,10 +151,16 @@ class PlanAgent:
                              "(run 'python -m plan_agent verify-deployment'): " +
                              ("; ".join(dep.get("blocking", [])) if dep else "never verified"))
         plans = build_plan(a.records, existing, self.policy, writable)
+        if auto_safe:
+            restrict_for_auto(plans, self.policy)
+            notes.append("AUTOMATIC MODE: only approved source-owned fields and existing activity data are "
+                         "applied; everything else is held for review")
         if mode == "sync":
             fatal = SyncExecutor(self.client, writable, run_id, display_name).execute(plans) or fatal
 
         report = build_report(a, plans, mode, "", run_id, comparison, notes, fatal)
+        report["sync_scope"] = "automatic" if auto_safe else "full"
+        report["held_for_review"] = sum(1 for p in plans if p.held_for_review)
         c = report["counts"]
         if mode == "sync":
             status = "Failed" if fatal and c["new"] + c["updated"] == 0 and c["sync_errors"] else \
@@ -175,11 +182,11 @@ class PlanAgent:
                 md = render_profile_analysis(a, plans, report)
             else:
                 md = render_initial_analysis(a, plans, report)
-        rp = self._persist(run_id, started, a, report, text, md)
+        rp = self._persist(run_id, started, a, report, text, md, plans)
         return ProcessOutcome(run_id, status, report, text, md, rp)
 
     # ------------------------------------------------------------------ #
-    def _persist(self, run_id, started, a, report, text, md) -> Path:
+    def _persist(self, run_id, started, a, report, text, md, plans=None) -> Path:
         base = self.reports_dir / run_id
         (base.with_suffix(".json")).write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str))
         (base.with_suffix(".txt")).write_text(text)
@@ -218,6 +225,7 @@ class PlanAgent:
                 log.warning("could not store the run on the dashboard: %s", exc)
             if report["mode"] == "sync":
                 self._push_review_queue(a, run_id)
+                self._push_held(plans or [], a, run_id)
         return base.with_suffix(".txt")
 
     def _push_review_queue(self, a, run_id: str) -> None:
@@ -239,16 +247,41 @@ class PlanAgent:
             except ApiError as exc:
                 log.warning("could not queue review record %s: %s", key, exc)
 
-    def _failed(self, run_id, name, error, a=None) -> ProcessOutcome:
-        report = {"run_id": run_id, "input_file": name, "mode": "none", "status": "Failed", "fatal_error": error,
+    def _push_held(self, plans, a, run_id: str) -> None:
+        """Changes the automatic mode did not apply go to the review queue (one item per project
+        and plan month; a later run updates the same item instead of adding another)."""
+        month = a.profile.analysis.get("target_month") if a.profile is not None else ""
+        for p in plans:
+            if not p.held_for_review:
+                continue
+            r = p.record
+            key = f"auto:{month}:{r.external_project_id or r.identity_key()}"
+            payload = {"project_name": r.project_name, "record_category": r.record_category,
+                       "dashboard_id": p.dashboard_id, "external_project_id": r.external_project_id,
+                       "plan_month": month, "source_file": r.source_file, "source_sheet": r.source_sheet,
+                       "source_rows": r.source_rows, "sync_run_id": run_id,
+                       "applied_changes": [{"field": c.field, "old": c.old, "new": c.new} for c in p.changes]
+                       if p.change_type.value == "update" else [],
+                       "changes": [{"field": c.field, "old": c.old, "new": c.new}
+                                   for c in (p.withheld if p.change_type.value == "update" else p.changes + p.withheld)],
+                       "activity_changes": p.activity_changes,
+                       "conflicts": [{"field": c.field, "dashboard": c.dashboard_value, "file": c.file_value}
+                                     for c in p.conflicts]}
+            try:
+                self.client.push_review_item(key, "plan_auto_sync_held", payload, p.reason[:2000])
+            except ApiError as exc:
+                log.warning("could not queue held change %s: %s", key, exc)
+
+    def _failed(self, run_id, name, error, a=None, status: str = "Failed") -> ProcessOutcome:
+        report = {"run_id": run_id, "input_file": name, "mode": "none", "status": status, "fatal_error": error,
                   "counts": {"identified": 0, "new": 0, "updated": 0, "unchanged": 0, "review": 0,
                              "duplicate_candidates": 0, "invalid_records": 0, "sync_errors": 0},
                   "projects": [], "row_errors": [], "notes": [], "file_warnings": []}
         text = ("ENGINEERING PLAN SYNCHRONIZATION\n\n"
-                f"Input file: {name}\nRun id: {run_id}\n\nStatus: Failed\n\nError: {error}\n")
+                f"Input file: {name}\nRun id: {run_id}\n\nStatus: {status}\n\nError: {error}\n")
         (self.reports_dir / f"{run_id}.json").write_text(json.dumps(report, ensure_ascii=False, indent=2))
         (self.reports_dir / f"{run_id}.txt").write_text(text)
         with open(self.history_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"run_id": run_id, "source_file": name, "status": "Failed", "error": error},
+            fh.write(json.dumps({"run_id": run_id, "source_file": name, "status": status, "error": error},
                                 ensure_ascii=False) + "\n")
-        return ProcessOutcome(run_id, "Failed", report, text, report_path=self.reports_dir / f"{run_id}.txt")
+        return ProcessOutcome(run_id, status, report, text, report_path=self.reports_dir / f"{run_id}.txt")

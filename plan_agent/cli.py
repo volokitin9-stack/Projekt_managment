@@ -43,6 +43,8 @@ def main(argv=None) -> int:
     p = sub.add_parser("sync")
     p.add_argument("file")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--auto-safe", action="store_true",
+                   help="unattended mode: apply only safe changes, hold the rest for review")
     p.add_argument("--month", help="target month YYYY-MM for monthly workbooks (default: auto)")
     p.add_argument("--name", help="original file name to record (default: the path's name)")
     p.add_argument("--json", action="store_true", help="print a one-line JSON summary at the end")
@@ -100,13 +102,15 @@ def main(argv=None) -> int:
     if a.cmd in ("analyze", "sync"):
         mode = "dry_run" if a.cmd == "analyze" or a.dry_run else "auto"
         name = a.name or Path(a.file).name
-        out = agent.receive(Path(a.file), "cli", name, mode, target_month=a.month)
+        out = agent.receive(Path(a.file), "cli", name, mode, target_month=a.month,
+                            auto_safe=bool(getattr(a, "auto_safe", False)))
         md = agent.reports_dir / f"{out.run_id}_analysis.md"
         if a.json:
             r = out.report
             print(json.dumps({"run_id": out.run_id, "status": out.status, "mode": r.get("mode"),
                               "counts": r.get("counts"), "fingerprint": r.get("structure_fingerprint"),
                               "fatal_error": r.get("fatal_error"), "notes": r.get("notes"),
+                              "sync_scope": r.get("sync_scope"), "held_for_review": r.get("held_for_review"),
                               "report_path": str(out.report_path),
                               "report_json_path": str(out.report_path.with_suffix(".json")),
                               "analysis_path": str(md) if md.exists() else None}, ensure_ascii=False))

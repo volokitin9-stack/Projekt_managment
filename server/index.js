@@ -14,6 +14,8 @@ const stagesRouter = require("./routes/stages");
 const agentRouter = require("./routes/agent");
 const reviewQueueRouter = require("./routes/reviewQueue");
 const planImportsRouter = require("./routes/planImports");
+const planSourceRouter = require("./routes/planSource");
+const planSourceMonitor = require("./planSource/monitor");
 const store = require("./store");
 
 seed();
@@ -37,6 +39,7 @@ app.use("/api/projects", projectsRouter);
 app.use("/api/stages", stagesRouter);
 app.use("/api/review-queue", reviewQueueRouter);
 app.use("/api/plan-imports", planImportsRouter);
+app.use("/api/plan-source", planSourceRouter);
 
 // Synchronisation runs recorded by the planning agent (read-only for the dashboard).
 app.get("/api/sync-runs", (req, res) => {
@@ -76,6 +79,8 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Штурман dashboard listening on http://localhost:${PORT}`); // eslint-disable-line no-console
+    // Automatic plan retrieval: starts only when PLAN_SOURCE_TYPE and PLAN_SOURCE_PATH are set.
+    planSourceMonitor.start();
   });
 }
 

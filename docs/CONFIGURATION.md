@@ -16,7 +16,12 @@ Secrets live only in environment variables, or in a secret manager that sets the
 | `MAX_UPLOAD_BYTES`, `MAX_PLAN_UPLOAD_BYTES` | app | upload limits |
 | `PM_API_URL`, `PM_AGENT_API_KEY` | agent CLI | the Штурман server and key. Set automatically for in-app imports |
 | `PLAN_AGENT_STATE_DIR` | agent CLI | agent state directory (in-app: `PLAN_IMPORT_DIR/state`) |
-| `PLAN_TARGET_MONTH` | agent CLI | `YYYY-MM` target month for monthly workbooks |
+| `PLAN_TARGET_MONTH` | app, agent CLI | `YYYY-MM` target month for monthly workbooks, or `auto` (current month in `PLAN_TIMEZONE`) |
+| `PLAN_SOURCE_TYPE`, `PLAN_SOURCE_PATH`, `PLAN_SOURCE_PATTERN` | app | automatic plan retrieval source (see `docs/FILE_SOURCE.md`). Monitoring is off while the type or path is empty |
+| `PLAN_CHECK_INTERVAL_MINUTES` | app | minutes between checks (default 30) |
+| `PLAN_AUTO_SYNC_ENABLED` | app | `false` (default): manual approval; `true`: automatic mode with safe changes only. Switchable in the UI |
+| `PLAN_TIMEZONE` | app | time zone that decides the current month (default `UTC`; set it explicitly) |
+| `PLAN_SOURCE_SETTLE_SECONDS`, `PLAN_SOURCE_INITIAL_DELAY_SECONDS` | app | file must be unchanged this long before it is read (default 5); first check after start (default 15) |
 | `PM_DASHBOARD_URL` | `verify-deployment` | dashboard page URL, if it differs from the API |
 | `PLAN_AGENT_REQUIRE_VERIFIED_DEPLOYMENT` | agent CLI | `1` (default): a command-line sync runs only after `verify-deployment` reported READY. In-app imports set `0`, because the agent talks to its own server |
 
@@ -43,6 +48,7 @@ When the department uses a new term, add it here. No code change is needed.
 | anything else (`image_agent`, …) | Never touches the field |
 
 * `on_manual_edit`: `report_and_keep` (default) or `overwrite_and_report`. This applies when the backend's `field_sources` shows that a planning-owned field was last changed **manually**.
+* `auto_sync.project_fields`: the only project fields the **automatic** mode may change on existing projects. Other changes are withheld and sent to review (see `docs/FILE_SOURCE.md`).
 * `identity_fields`: if one of these differs (after normalization) on an already-matched project, the project goes to review instead of being changed.
 
 These rules apply regardless of configuration: an empty value never clears data, projects are never deleted, and attachments, comments and history are never sent.

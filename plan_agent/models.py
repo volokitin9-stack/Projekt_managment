@@ -314,9 +314,13 @@ class ChangePlan:
     reason: str = ""
     result: Optional[str] = None     # filled after execution: ok / failed / skipped
     error: Optional[str] = None
+    held_for_review: bool = False    # automatic mode held (part of) this change for approval
+    withheld: list[FieldChange] = field(default_factory=list)   # automatic mode: changes not applied
 
     def to_dict(self) -> dict:
         return {
+            "held_for_review": self.held_for_review,
+            "withheld": [asdict(c) for c in self.withheld],
             "project": self.record.project_name,
             "identity": self.record.identity_key(),
             "source": f"{self.record.source_sheet}!{self.record.source_row}",

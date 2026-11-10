@@ -72,6 +72,45 @@ def build_plan(records: list[ProjectRecord], existing: list[dict], policy: Owner
     return plans
 
 
+def restrict_for_auto(plans: list[ChangePlan], policy: OwnershipPolicy) -> list[ChangePlan]:
+    """Automatic (unattended) mode: apply only safe changes, hold the rest for review.
+
+    * new projects and projects whose activities were added or removed are not
+      written at all (REVIEW);
+    * for other updates, only the fields in policy.auto_sync_fields and the data
+      of existing activities are applied; any other field change is withheld
+      (not written) and, like conflicts with manual edits, sent to review.
+    Other projects are processed normally."""
+    allowed = set(policy.auto_sync_fields)
+    for p in plans:
+        if p.change_type == ChangeType.NEW:
+            p.change_type = ChangeType.REVIEW
+            p.reason = "automatic mode: new project - created only after manual approval"
+            p.held_for_review = True
+            continue
+        if p.change_type not in (ChangeType.UPDATE, ChangeType.UNCHANGED):
+            continue
+        structural = [a for a in p.activity_changes if a.startswith(("+", "-"))]
+        if p.change_type == ChangeType.UPDATE and structural:
+            p.change_type = ChangeType.REVIEW
+            p.reason = f"automatic mode: activities added/removed ({len(structural)}) - needs approval"
+            p.held_for_review = True
+            continue
+        p.withheld = [c for c in p.changes if c.field not in allowed]
+        p.changes = [c for c in p.changes if c.field in allowed]
+        notes = []
+        if p.withheld:
+            notes.append("not applied, needs approval: " + ", ".join(sorted(c.field for c in p.withheld)))
+        if p.conflicts and p.change_type == ChangeType.UPDATE:
+            notes.append("manual edits kept: " + ", ".join(c.field for c in p.conflicts))
+        if notes:
+            p.held_for_review = True
+            p.reason = "automatic mode: " + "; ".join(notes)
+        if p.change_type == ChangeType.UPDATE and not p.changes and not p.activity_changes:
+            p.change_type = ChangeType.REVIEW
+    return plans
+
+
 def diff_activities(existing: dict, rec: ProjectRecord) -> tuple[list[str], list[Conflict]]:
     """Compare the record's activities of its plan month with the dashboard's.
     Other months are never compared (their history is kept as is)."""

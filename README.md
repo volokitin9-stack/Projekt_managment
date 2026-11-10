@@ -23,7 +23,7 @@ Everything (application, agent, configuration templates, tests and documentation
 ```text
 Projekt_managment/
 ├── public/        # Штурман interface (index.html: Доска, Глобально, Инж. проекты)
-├── server/        # backend and API (Express) + JSON storage layer (store.js)
+├── server/        # backend and API (Express) + JSON storage layer (store.js) + planSource/ (file monitor)
 ├── plan_agent/    # Excel processing agent (Python)
 ├── config/        # mapping configuration: vocabulary, ownership policy, monthly-plan profile
 ├── data/          # local operational data (git-ignored; README and empty template committed)
@@ -95,6 +95,25 @@ PM_API_URL=http://127.0.0.1:3000 PM_AGENT_API_KEY=<key> PLAN_AGENT_STATE_DIR=./d
 ```
 
 Command-line syncs to a remote dashboard also require `python3 -m plan_agent verify-deployment` to report READY (see `docs/DEPLOYMENT_VERIFICATION.md`).
+
+## Automatic plan updates (file source)
+
+The server can watch a planning file and process new versions itself. Set on the server (see `docs/FILE_SOURCE.md`):
+
+```bash
+PLAN_SOURCE_TYPE=local
+PLAN_SOURCE_PATH=../plan-inbox          # file or folder; relative to the application folder
+PLAN_CHECK_INTERVAL_MINUTES=30
+PLAN_AUTO_SYNC_ENABLED=false
+PLAN_TARGET_MONTH=auto
+PLAN_TIMEZONE=Europe/Moscow
+```
+
+* Monitoring starts with the server when type and path are set. There is one monitor per server, and checks never overlap each other or a manual import.
+* A version counts as new only when its **SHA-256** differs; size and modification time are reported. Unchanged files are skipped. Locked, still-being-written, empty or corrupt files are never imported.
+* **Manual mode (default):** a new version is analysed (dry run) and waits. In **Импорт плана → Автоматическое обновление плана** use «Просмотреть изменения», then «Утвердить синхронизацию».
+* **Automatic mode:** only safe changes are written (hours and other data of existing activities, plus the approved fields in `config/ownership_policy.yaml → auto_sync`). New projects, identity, engineer or suggested-stage changes, added or removed activities and conflicts with manual edits go to **На проверке**. The confirmed stage is never changed. The first import of a file structure always needs manual approval.
+* Ambiguous month sheets or an unexpected structure stop the run and create a review item. Earlier months are never overwritten.
 
 ## Stages: confirmed vs. planned
 
@@ -175,6 +194,7 @@ npm test
 * `docs/CONFIGURATION.md`: environment variables, mapping configuration and the monthly-plan profile
 * `docs/EXTERNAL_AGENT.md`: connecting an automatic file-delivery agent
 * `docs/DEPLOYMENT_VERIFICATION.md`: checks before syncing to a production server
+* `docs/FILE_SOURCE.md`: automatic plan retrieval, file-source configuration and troubleshooting
 
 ## Production
 

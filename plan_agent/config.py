@@ -112,6 +112,10 @@ class OwnershipPolicy:
     fields: dict[str, str]
     on_manual_edit: str
     identity_fields: list[str]
+    # Fields the automatic (unattended) sync mode may change on EXISTING projects.
+    # Everything else (identity, engineer, suggested stage, new projects, new or
+    # removed activities, manual-edit conflicts) is held for review.
+    auto_sync_fields: list[str] = field(default_factory=list)
 
     def owner(self, field_name: str) -> str:
         return self.fields.get(field_name, self.default_owner)
@@ -163,4 +167,5 @@ def load_policy(config_dir: Path = DEFAULT_CONFIG_DIR) -> OwnershipPolicy:
         on_manual_edit=d.get("on_manual_edit", "report_and_keep"),
         identity_fields=d.get("identity_fields", ["external_project_id", "article_number", "manufacturer",
                                                    "vehicle_model", "product_type"]),
+        auto_sync_fields=list((d.get("auto_sync") or {}).get("project_fields") or []),
     )

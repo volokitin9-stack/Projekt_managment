@@ -26,6 +26,18 @@ There is no user authentication, as in the original app. Protect them at the net
 | POST | `/api/plan-imports/:id/approve` | `{confirm: true, approved_by}` approves this analysis's mapping and synchronizes |
 | GET/POST/PATCH/DELETE | `/api/tasks`, `/api/globals` | the original Доска and Глобально collections (unchanged) |
 
+## Automatic plan retrieval (`/api/plan-source`)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/plan-source/status` | source, current month, last check / change / sync, status, counts, last error, current version, recent versions and events |
+| GET | `/api/plan-source/preview[?version=ID]` | project-level changes of a version's dry run (new / update / review, changed fields, activity changes, conflicts) |
+| POST | `/api/plan-source/check` | check the source now. `{"dry_run": true}` analyses the current file again even when unchanged (never writes) |
+| POST | `/api/plan-source/approve` | `{"confirm": true, "approved_by": "..."}`: manual mode, approve and sync the pending version |
+| POST | `/api/plan-source/auto-sync` | `{"enabled": true|false, "confirm": true}`: switch automatic mode (stored; overrides `PLAN_AUTO_SYNC_ENABLED`) |
+
+`check` returns `{result, state}`; `result.status` is one of `not_configured`, `busy` (HTTP 409, another run is active), `unchanged`, `awaiting_approval`, `blocked`, `dry_run`, `synced`, `failed`, `sync_failed`, `waiting` (file locked/being written; retried) or `error` (with `code`).
+
 ## Agent endpoints
 
 These require `Authorization: Bearer <AGENT_API_KEY>`.

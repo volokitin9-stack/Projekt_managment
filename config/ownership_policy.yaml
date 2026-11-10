@@ -59,3 +59,29 @@ on_manual_edit: report_and_keep
 # reads "Jolion" instead of "Dargo" - typically a shifted merged cell), the
 # change is not applied: the project goes to review.
 identity_fields: [external_project_id, article_number, manufacturer, vehicle_model, product_type]
+
+# Automatic (unattended) synchronisation - PLAN_AUTO_SYNC_ENABLED=true.
+# For a project that already exists, the automatic mode applies ONLY:
+#   * changes of the fields listed below, and
+#   * changed values (hours, dates, progress, ...) of activities that already
+#     exist for the plan month.
+# Everything else is held for review in the dashboard and is NOT written:
+#   new projects, identity changes, engineer changes, suggested-stage changes,
+#   new or removed activities, records with ambiguities, and fields that were
+#   edited manually (conflicts). The confirmed stage is never changed.
+auto_sync:
+  project_fields:
+    - priority
+    - priority_original
+    - work_status
+    - planned_start_date
+    - planned_deadline
+    - actual_completion_date
+    - stages
+    - dependencies
+    - extra_attributes
+    - source_file
+    - source_sheet
+    - source_row
+    - source_rows
+    - last_plan_month

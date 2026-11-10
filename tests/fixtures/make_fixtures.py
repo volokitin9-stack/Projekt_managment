@@ -171,7 +171,7 @@ def month_tasks(variant: int = 1):
     gac = [("Орлов/Соколов",) + fit, ("Иванов",) + kd, ("Иванов",) + c1, ("Иванов",) + pdm]
     t = []
     for i, (eng, task, stage, group) in enumerate(gac):
-        fact = 5 if (variant == 2 and task == "КД") else 0
+        fact = 5 if (variant in (2, 4) and task == "КД") else 0
         t.append(_task(eng, "CIS", "ЗК", 1, "GAC", "S9", "Комплект защит", task, stage, group, plan=8, fact=fact,
                        days={3: 5} if fact else None))
     for eng, task, stage, group in [("Петров",) + dev, ("Петров",) + order, ("Петров",) + lab,
@@ -198,6 +198,9 @@ def month_tasks(variant: int = 1):
                    "Улучшения конструктивов (запрос пр-во, акты, рекламации)", "Изменения (запросы, акты, рекламации)"))
     if variant == 2:
         t.append(_task("Петров", "OEM", "ТСУ", 1, "Lada", "Azimut", "ТСУ", "Верификация", "Серия", "Тесты"))
+    if variant == 4:     # hours of an existing activity change + a new project with known values only
+        t.append(_task("Петров", "CIS", "ЗК", 2, "Chery", "Tiggo 4", "Защита картера", "Разработать", "Разработка",
+                       "Разработка", plan=16))
     if variant == 3:     # December: GAC S9 continues, Honda is finished/absent, a new project starts
         t = [_task("Иванов", "CIS", "ЗК", 1, "GAC", "S9", "Комплект защит", "1С", "Серия", "Разработка", plan=6,
                    fact=2, days={2: 2}),

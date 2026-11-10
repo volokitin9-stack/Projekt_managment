@@ -29,7 +29,9 @@ const LOCK = path.join(DATA_DIR, ".shturman.lock");
 const TEMPLATE = path.join(DATA_DIR, "templates", "shturman.empty.json");
 const SCHEMA_VERSION = 1;
 const COLLECTIONS = ["stages", "docs", "projects", "project_activities", "project_history", "project_files",
-  "agent_events", "review_queue", "sync_runs", "plan_imports"];
+  "agent_events", "review_queue", "sync_runs", "plan_imports", "plan_source_versions", "plan_source_events"];
+// Single-object sections (added without a format change: missing = empty).
+const OBJECTS = ["plan_source"];
 
 const DEFAULT_STAGES = [
   { key: "scanning", label: "Сканирование", sort_order: 1 },
@@ -54,6 +56,7 @@ function emptyState() {
   const ts = nowIso();
   const state = { meta: { format: "shturman-json", schema_version: SCHEMA_VERSION, created_at: ts, updated_at: ts } };
   COLLECTIONS.forEach((c) => { state[c] = base && Array.isArray(base[c]) ? base[c] : []; });
+  OBJECTS.forEach((o) => { state[o] = {}; });
   if (!state.stages.length) state.stages = DEFAULT_STAGES.map((s) => Object.assign({}, s));
   return state;
 }
@@ -108,6 +111,7 @@ function load() {
       `v${SCHEMA_VERSION} - update the application instead of overwriting newer data`);
   }
   COLLECTIONS.forEach((c) => { if (!Array.isArray(state[c])) state[c] = []; });
+  OBJECTS.forEach((o) => { if (!state[o] || typeof state[o] !== "object" || Array.isArray(state[o])) state[o] = {}; });
   if (!state.stages.length) state.stages = DEFAULT_STAGES.map((s) => Object.assign({}, s));
   return { state, created: false };
 }

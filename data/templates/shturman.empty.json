@@ -15,5 +15,8 @@
   "agent_events": [],
   "review_queue": [],
   "sync_runs": [],
-  "plan_imports": []
+  "plan_imports": [],
+  "plan_source": {},
+  "plan_source_versions": [],
+  "plan_source_events": []
 }
