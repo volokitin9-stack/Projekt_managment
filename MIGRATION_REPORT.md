@@ -1,3 +1,5 @@
+> **Note (later change):** storage has since moved from SQLite to a JSON data file (`server/store.js`, `data/shturman.json`). The SQLite details below describe the original migration and are kept for history. Old SQLite databases can be imported with `npm run import-sqlite`.
+
 # Migration Report — Штурман Artifact → Standalone App
 
 ## Source of truth

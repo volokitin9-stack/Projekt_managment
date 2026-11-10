@@ -1,0 +1,19 @@
+{
+  "meta": { "format": "shturman-json", "schema_version": 1, "note": "Empty template. The application creates data/shturman.json from it on first start." },
+  "stages": [
+    { "key": "scanning", "label": "Сканирование", "sort_order": 1 },
+    { "key": "development", "label": "Разработка", "sort_order": 2 },
+    { "key": "prototype", "label": "Тестовый образец", "sort_order": 3 },
+    { "key": "measurement", "label": "Замер", "sort_order": 4 },
+    { "key": "documentation", "label": "Оформление", "sort_order": 5 }
+  ],
+  "docs": [],
+  "projects": [],
+  "project_activities": [],
+  "project_history": [],
+  "project_files": [],
+  "agent_events": [],
+  "review_queue": [],
+  "sync_runs": [],
+  "plan_imports": []
+}

@@ -1,7 +1,7 @@
 "use strict";
 
 // Project read/write/validation logic shared by the dashboard routes, the agent
-// routes and the planning-file import.
+// routes and the planning-file import. Storage: server/store.js (JSON file).
 //
 // Stage semantics (important):
 // * `status` is the CONFIRMED current stage - the Kanban column. It is only set
@@ -10,10 +10,10 @@
 // * `planned_stage` is what a planning file suggests. It is shown as a
 //   suggestion and never moves a card by itself.
 // * `stage_entered_at` is the timestamp of the confirmed transition into the
-//   current stage. NULL = unknown -> the dashboard shows "Длительность неизвестна".
+//   current stage. null = unknown -> the dashboard shows "Длительность неизвестна".
 
 const { v4: uuidv4 } = require("uuid");
-const db = require("./db");
+const store = require("./store");
 
 const VALID_PRIORITIES = ["critical", "high", "normal", "low"];
 const CATEGORIES = ["main_project", "additional_work", "backlog"];
@@ -50,10 +50,13 @@ const ACTIVITY_AGENT_FIELDS = [
   "details", "source_file", "source_sheet", "source_row"
 ];
 const ACTIVITY_MANUAL_FIELDS = ["progress_status", "manual_note", "assignee"];
-const ACTIVITY_JSON = ["hours_by_date", "details"];
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function clone(v) {
+  return v === undefined ? undefined : JSON.parse(JSON.stringify(v));
 }
 
 // Identity normalisation, identical to the planning agent's norm_key():
@@ -67,7 +70,7 @@ function normKey(v) {
 }
 
 function validStageKeys() {
-  return db.prepare("SELECT key FROM stages ORDER BY sort_order ASC").all().map((r) => r.key);
+  return store.read((s) => s.stages.slice().sort((a, b) => a.sort_order - b.sort_order).map((r) => r.key));
 }
 
 function canonical(input) {
@@ -159,31 +162,11 @@ function validateActivity(a, allowed) {
   return errors;
 }
 
-// ---------------------------------------------------------------- statements
-const getStmt = db.prepare("SELECT * FROM projects WHERE id = ?");
-const getByExternalStmt = db.prepare("SELECT * FROM projects WHERE external_project_id = ?");
-const listStmt = db.prepare("SELECT * FROM projects ORDER BY created_at ASC");
-const insertStmt = db.prepare(`
-  INSERT INTO projects (id, external_project_id, data, version, needs_review, created_at, updated_at,
-                        record_category, stage_entered_at, field_sources, last_plan_month)
-  VALUES (@id, @externalId, @data, 1, @needsReview, @createdAt, @updatedAt,
-          @category, @stageEnteredAt, @fieldSources, @lastPlanMonth)
-`);
-const updateStmt = db.prepare(`
-  UPDATE projects SET data = @data, version = version + 1, needs_review = @needsReview, updated_at = @updatedAt,
-         record_category = @category, stage_entered_at = @stageEnteredAt, field_sources = @fieldSources,
-         last_plan_month = @lastPlanMonth
-  WHERE id = @id AND version = @expectedVersion
-`);
-const bumpStmt = db.prepare("UPDATE projects SET version = version + 1, updated_at = ? WHERE id = ?");
-const filesForProjectStmt = db.prepare("SELECT * FROM project_files WHERE project_id = ? ORDER BY uploaded_at ASC");
-const activityForProjectStmt = db.prepare("SELECT * FROM project_activity WHERE project_id = ? ORDER BY at ASC, rowid ASC");
-const insertActivityStmt = db.prepare(`
-  INSERT INTO project_activity (id, project_id, action, source, actor, previous_value, new_value, at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-`);
-const activitiesForProjectStmt = db.prepare(
-  "SELECT * FROM project_activities WHERE project_id = ? ORDER BY plan_month ASC, sequence ASC, created_at ASC");
+// ---------------------------------------------------------------- lookups
+function findRecord(s, idOrExternal) {
+  return s.projects.find((r) => r.id === idOrExternal) ||
+    s.projects.find((r) => r.external_project_id && r.external_project_id === idOrExternal) || null;
+}
 
 function fileToApi(row) {
   const storage = require("./storage");
@@ -192,36 +175,27 @@ function fileToApi(row) {
     project_id: row.project_id,
     kind: row.kind,
     url: storage.urlForStorageKey(row.storage_key),
-    original_filename: row.original_filename,
-    mime_type: row.mime_type,
-    size: row.size,
+    original_filename: row.original_filename || null,
+    mime_type: row.mime_type || null,
+    size: row.size || null,
     is_primary: !!row.is_primary,
-    caption: row.caption,
+    caption: row.caption || null,
     technical_comment: row.technical_comment || null,
     event_at: row.event_at || null,
-    source: row.source,
-    telegram_message_id: row.telegram_message_id,
-    telegram_chat_id: row.telegram_chat_id,
+    source: row.source || null,
+    telegram_message_id: row.telegram_message_id || null,
+    telegram_chat_id: row.telegram_chat_id || null,
     telegram_ref: row.telegram_ref || null,
-    uploaded_by: row.uploaded_by,
+    uploaded_by: row.uploaded_by || null,
     uploaded_at: row.uploaded_at
   };
 }
 
-function activityRowToApi(row) {
-  const a = Object.assign({}, row);
-  ACTIVITY_JSON.forEach((f) => { a[f] = row[f] ? JSON.parse(row[f]) : null; });
-  a.field_sources = row.field_sources ? JSON.parse(row.field_sources) : {};
-  a.removed_from_source = !!row.removed_from_source;
-  return a;
-}
-
-function historyRowToApi(row) {
-  const parse = (v) => {
-    if (v == null) return null;
-    try { return JSON.parse(v); } catch (e) { return v; }
-  };
-  return Object.assign({}, row, { previous_value: parse(row.previous_value), new_value: parse(row.new_value) });
+function activityToApi(a) {
+  const out = clone(a);
+  out.field_sources = out.field_sources || {};
+  out.removed_from_source = !!out.removed_from_source;
+  return out;
 }
 
 function workloadSummary(activities) {
@@ -266,13 +240,36 @@ function daysInStage(stageEnteredAt) {
   return Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 86400000)) : null;
 }
 
-function rowToApi(row, { includeRelations = true } = {}) {
-  const data = JSON.parse(row.data);
-  const files = includeRelations ? filesForProjectStmt.all(row.id).map(fileToApi) : [];
+function groupBy(list, key) {
+  const m = new Map();
+  list.forEach((x) => {
+    const k = x[key];
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(x);
+  });
+  return m;
+}
+
+function buildIndex(s) {
+  return {
+    files: groupBy(s.project_files, "project_id"),
+    history: groupBy(s.project_history, "project_id"),
+    activities: groupBy(s.project_activities, "project_id")
+  };
+}
+
+function rowToApi(row, { includeRelations = true, index = null } = {}) {
+  const idx = includeRelations ? (index || store.read(buildIndex)) : null;
+  const data = clone(row.data) || {};
+  const files = includeRelations ? (idx.files.get(row.id) || []).slice()
+    .sort((a, b) => (a.uploaded_at < b.uploaded_at ? -1 : 1)).map(fileToApi) : [];
   const images = files.filter((f) => f.kind === "image");
   const attachments = files.filter((f) => f.kind !== "image");
-  const history = includeRelations ? activityForProjectStmt.all(row.id).map(historyRowToApi) : [];
-  const activities = includeRelations ? activitiesForProjectStmt.all(row.id).map(activityRowToApi) : [];
+  const history = includeRelations ? (idx.history.get(row.id) || []).map(clone) : [];
+  const activities = includeRelations ? (idx.activities.get(row.id) || []).slice()
+    .sort((a, b) => String(a.plan_month || "").localeCompare(String(b.plan_month || "")) ||
+      (a.sequence || 0) - (b.sequence || 0) || String(a.created_at).localeCompare(String(b.created_at)))
+    .map(activityToApi) : [];
 
   const manufacturer = data.manufacturer || "";
   const vehicleModel = data.vehicle_model || "";
@@ -308,7 +305,7 @@ function rowToApi(row, { includeRelations = true } = {}) {
     source: data.source || "manual",
     comments: data.comments || [],
     last_plan_month: row.last_plan_month || null,
-    field_sources: row.field_sources ? JSON.parse(row.field_sources) : {},
+    field_sources: clone(row.field_sources || {}),
     images,
     attachments,
     activity: history,          // existing name: the append-only change log
@@ -330,40 +327,53 @@ function rowToApi(row, { includeRelations = true } = {}) {
 }
 
 function getProject(id) {
-  const row = getStmt.get(id);
-  return row ? rowToApi(row) : null;
+  return store.read((s) => {
+    const row = s.projects.find((r) => r.id === id);
+    return row ? rowToApi(row, { index: buildIndex(s) }) : null;
+  });
 }
 
 function getProjectRow(id) {
-  return getStmt.get(id);
+  return store.read((s) => clone(s.projects.find((r) => r.id === id) || null));
 }
 
 function getProjectByExternalId(externalId) {
   if (!externalId) return null;
-  return getByExternalStmt.get(externalId);
+  return store.read((s) => clone(s.projects.find((r) => r.external_project_id === externalId) || null));
 }
 
 function findRow(idOrExternal) {
-  return getStmt.get(idOrExternal) || getByExternalStmt.get(idOrExternal) || null;
+  return store.read((s) => clone(findRecord(s, idOrExternal)));
+}
+
+function allRows() {
+  return store.read((s) => clone(s.projects));
 }
 
 function listProjects({ category, includeRelations = true } = {}) {
-  let rows = listStmt.all();
-  if (category) rows = rows.filter((r) => (r.record_category || "main_project") === category);
-  return rows.map((row) => rowToApi(row, { includeRelations }));
+  return store.read((s) => {
+    const index = includeRelations ? buildIndex(s) : null;
+    let rows = s.projects.slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    if (category) rows = rows.filter((r) => (r.record_category || "main_project") === category);
+    return rows.map((row) => rowToApi(row, { includeRelations, index }));
+  });
 }
 
-function recordActivity(projectId, action, source, actor, previousValue, newValue, at) {
-  insertActivityStmt.run(
-    uuidv4(),
-    projectId,
+function pushHistory(s, projectId, action, source, actor, previousValue, newValue) {
+  s.project_history.push({
+    id: uuidv4(),
+    project_id: projectId,
     action,
-    source || null,
-    actor || null,
-    previousValue == null ? null : JSON.stringify(previousValue),
-    newValue == null ? null : JSON.stringify(newValue),
-    at || nowIso()
-  );
+    source: source || null,
+    actor: actor || null,
+    previous_value: previousValue === undefined ? null : clone(previousValue),
+    new_value: newValue === undefined ? null : clone(newValue),
+    at: nowIso()
+  });
+}
+
+function recordActivity(projectId, action, source, actor, previousValue, newValue) {
+  store.tx((s) => pushHistory(s, projectId, action, source, actor, previousValue, newValue));
 }
 
 // ---------------------------------------------------------------- activities
@@ -371,9 +381,9 @@ function recordActivity(projectId, action, source, actor, previousValue, newValu
  * Upsert the activities of ONE plan month.  Other months are never touched.
  * An activity of that month that is missing from the new payload is flagged
  * removed_from_source (never deleted).  Fields last edited manually are kept
- * and reported.  Must be called inside a transaction.
+ * and reported.  Runs inside the caller's transaction (state `s`).
  */
-function applyActivities(projectId, activities, scope, sync) {
+function applyActivities(s, projectId, activities, scope, sync) {
   if (!Array.isArray(activities)) return { error: "activities must be a list" };
   const month = scope && scope.plan_month;
   if (!month || !MONTH_RX.test(String(month))) return { error: "activity_scope.plan_month (YYYY-MM) is required with activities" };
@@ -388,57 +398,54 @@ function applyActivities(projectId, activities, scope, sync) {
   if (errors.length) return { error: "Validation failed", details: errors };
 
   const existing = {};
-  db.prepare("SELECT * FROM project_activities WHERE project_id = ? AND plan_month = ?").all(projectId, month)
+  s.project_activities.filter((r) => r.project_id === projectId && r.plan_month === month)
     .forEach((r) => { existing[r.activity_key] = r; });
   const summary = { added: 0, updated: 0, removed_from_source: 0, kept_manual: [] };
   const ts = nowIso();
-  const src = (sync && sync.source_file) || null;
+  const actor = (sync && sync.actor) || "agent";
   activities.forEach((raw) => {
-    const a = Object.assign({}, raw, { plan_month: month });
+    const a = Object.assign({}, clone(raw), { plan_month: month });
     const row = existing[a.activity_key];
-    const stored = {};
-    Object.keys(a).forEach((k) => { stored[k] = ACTIVITY_JSON.includes(k) && a[k] != null ? JSON.stringify(a[k]) : a[k]; });
     if (!row) {
-      const cols = Object.keys(stored).concat(["id", "project_id", "field_sources", "created_at", "updated_at"]);
       const fs = {};
       Object.keys(a).forEach((k) => { fs[k] = "agent"; });
-      const vals = Object.values(stored).concat([uuidv4(), projectId, JSON.stringify(fs), ts, ts]);
-      db.prepare(`INSERT INTO project_activities (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`).run(vals);
-      recordActivity(projectId, "activity_added", "agent", (sync && sync.actor) || "agent", null,
-        { activity_key: a.activity_key, name: a.name, plan_month: month, source_file: src, sync_run_id: sync && sync.run_id });
+      s.project_activities.push(Object.assign({}, a, { id: uuidv4(), project_id: projectId, removed_from_source: false,
+        field_sources: fs, created_at: ts, updated_at: ts }));
+      pushHistory(s, projectId, "activity_added", "agent", actor, null,
+        { activity_key: a.activity_key, name: a.name, plan_month: month, source_file: (sync && sync.source_file) || null,
+          sync_run_id: sync && sync.run_id });
       summary.added += 1;
       return;
     }
-    const cur = activityRowToApi(row);
-    const sources = cur.field_sources;
-    const sets = [];
-    const args = [];
+    const sources = row.field_sources || {};
+    let changed = false;
     Object.keys(a).forEach((k) => {
-      if (JSON.stringify(cur[k]) === JSON.stringify(a[k])) return;
+      if (JSON.stringify(row[k] === undefined ? null : row[k]) === JSON.stringify(a[k] === undefined ? null : a[k])) return;
       if (sources[k] === "manual") {
-        summary.kept_manual.push({ activity_key: a.activity_key, field: k, dashboard_value: cur[k], file_value: a[k] });
+        summary.kept_manual.push({ activity_key: a.activity_key, field: k, dashboard_value: row[k], file_value: a[k] });
         return;
       }
-      sets.push(`${k} = ?`);
-      args.push(stored[k]);
+      pushHistory(s, projectId, `activity_updated:${a.activity_key}.${k}`, "agent", actor, row[k], a[k]);
+      row[k] = a[k];
       sources[k] = "agent";
-      recordActivity(projectId, `activity_updated:${a.activity_key}.${k}`, "agent", (sync && sync.actor) || "agent",
-        cur[k], a[k]);
+      changed = true;
     });
-    if (cur.removed_from_source) {
-      sets.push("removed_from_source = 0");
-      recordActivity(projectId, `activity_updated:${a.activity_key}.removed_from_source`, "agent", "agent", true, false);
+    if (row.removed_from_source) {
+      row.removed_from_source = false;
+      pushHistory(s, projectId, `activity_updated:${a.activity_key}.removed_from_source`, "agent", actor, true, false);
+      changed = true;
     }
-    if (sets.length) {
-      db.prepare(`UPDATE project_activities SET ${sets.join(", ")}, field_sources = ?, updated_at = ? WHERE id = ?`)
-        .run(args.concat([JSON.stringify(sources), ts, row.id]));
+    if (changed) {
+      row.field_sources = sources;
+      row.updated_at = ts;
       summary.updated += 1;
     }
   });
   Object.values(existing).forEach((row) => {
     if (!seen.has(row.activity_key) && !row.removed_from_source) {
-      db.prepare("UPDATE project_activities SET removed_from_source = 1, updated_at = ? WHERE id = ?").run(ts, row.id);
-      recordActivity(projectId, "activity_removed_from_source", "agent", "agent", null, { activity_key: row.activity_key });
+      row.removed_from_source = true;
+      row.updated_at = ts;
+      pushHistory(s, projectId, "activity_removed_from_source", "agent", actor, null, { activity_key: row.activity_key });
       summary.removed_from_source += 1;
     }
   });
@@ -448,35 +455,40 @@ function applyActivities(projectId, activities, scope, sync) {
 function updateActivityManual(projectId, activityId, changes, actor) {
   const errors = validateActivity(changes, ACTIVITY_MANUAL_FIELDS);
   if (errors.length) return { error: "Validation failed", details: errors };
-  const row = db.prepare("SELECT * FROM project_activities WHERE id = ? AND project_id = ?").get(activityId, projectId);
-  if (!row) return { error: "not_found" };
-  return db.transaction(() => {
-    const cur = activityRowToApi(row);
-    const sources = cur.field_sources;
-    const sets = [];
-    const args = [];
+  return store.tx((s) => {
+    const row = s.project_activities.find((a) => a.id === activityId && a.project_id === projectId);
+    if (!row) return { error: "not_found" };
+    const sources = row.field_sources || {};
+    let changed = false;
     Object.keys(changes).forEach((k) => {
-      if (cur[k] === changes[k]) return;
-      sets.push(`${k} = ?`);
-      args.push(changes[k]);
+      if ((row[k] === undefined ? null : row[k]) === changes[k]) return;
+      pushHistory(s, projectId, `activity_updated:${row.activity_key}.${k}`, "manual", actor || "dashboard_user", row[k], changes[k]);
+      row[k] = changes[k];
       sources[k] = "manual";
-      recordActivity(projectId, `activity_updated:${cur.activity_key}.${k}`, "manual", actor || "dashboard_user",
-        cur[k], changes[k]);
+      changed = true;
     });
-    if (sets.length) {
+    if (changed) {
       const ts = nowIso();
-      db.prepare(`UPDATE project_activities SET ${sets.join(", ")}, field_sources = ?, updated_at = ? WHERE id = ?`)
-        .run(args.concat([JSON.stringify(sources), ts, activityId]));
-      bumpStmt.run(ts, projectId);
+      row.field_sources = sources;
+      row.updated_at = ts;
+      const p = s.projects.find((r) => r.id === projectId);
+      if (p) { p.version += 1; p.updated_at = ts; }
     }
-    return { activity: activityRowToApi(db.prepare("SELECT * FROM project_activities WHERE id = ?").get(activityId)) };
-  })();
+    return { activity: activityToApi(row) };
+  });
 }
 
 // ---------------------------------------------------------------- projects
+function failWith(status, message, details) {
+  const err = new Error(message);
+  err.status = status;
+  err.details = details;
+  return err;
+}
+
 function createProject(input, { externalId = null, needsReview = false, source = null, actor = null,
   activities = null, activityScope = null, sync = null } = {}) {
-  const data = canonical(input);
+  const data = canonical(clone(input));
   const src = source || data.source || "manual";
   data.source = data.source || src;
   delete data.external_project_id;
@@ -489,37 +501,21 @@ function createProject(input, { externalId = null, needsReview = false, source =
   delete data.last_plan_month;
   const fieldSources = {};
   Object.keys(data).forEach((k) => { if (!isEmpty(data[k])) fieldSources[k] = src; });
-  return db.transaction(() => {
-    insertStmt.run({
-      id,
-      externalId,
-      data: JSON.stringify(data),
-      needsReview: needsReview ? 1 : 0,
-      createdAt: ts,
-      updatedAt: ts,
-      category,
-      stageEnteredAt: data.status ? ts : null,
-      fieldSources: JSON.stringify(fieldSources),
-      lastPlanMonth
-    });
-    recordActivity(id, "created", src, actor, null, { record_category: category, source_file: data.source_file || null,
+  const summary = store.tx((s) => {
+    s.projects.push({ id, external_project_id: externalId, data, version: 1, needs_review: !!needsReview, created_at: ts,
+      updated_at: ts, record_category: category, stage_entered_at: data.status ? ts : null, field_sources: fieldSources,
+      last_plan_month: lastPlanMonth });
+    pushHistory(s, id, "created", src, actor, null, { record_category: category, source_file: data.source_file || null,
       sync_run_id: sync && sync.run_id });
-    if (data.status) recordActivity(id, "stage_transition", src, actor, null, data.status, ts);
-    let summary = null;
-    if (activities) {
-      const r = applyActivities(id, activities, activityScope, sync);
-      if (r.error) {
-        const err = new Error(r.error);
-        err.details = r.details;
-        err.status = 400;
-        throw err;
-      }
-      summary = r.summary;
-    }
-    const project = getProject(id);
-    if (summary) project.activity_summary = summary;
-    return project;
-  })();
+    if (data.status) pushHistory(s, id, "stage_transition", src, actor, null, data.status);
+    if (!activities) return null;
+    const r = applyActivities(s, id, activities, activityScope, sync);
+    if (r.error) throw failWith(400, r.error, r.details);
+    return r.summary;
+  });
+  const project = getProject(id);
+  if (summary) project.activity_summary = summary;
+  return project;
 }
 
 /**
@@ -529,101 +525,80 @@ function createProject(input, { externalId = null, needsReview = false, source =
  */
 function updateProject(id, patch, { actor = null, source = "manual", expectedVersion = null, activities = null,
   activityScope = null, sync = null, stageAt = null, protectManual = true } = {}) {
-  const row = getStmt.get(id);
-  if (!row) return { error: "not_found" };
-  const current = JSON.parse(row.data);
-  const version = expectedVersion != null ? Number(expectedVersion)
-    : (patch && patch.version != null ? Number(patch.version) : row.version);
-  const incoming = canonical(patch);
-  const fieldSources = row.field_sources ? JSON.parse(row.field_sources) : {};
-  const conflicts = [];
-  const merged = Object.assign({}, current);
-  let category = row.record_category || "main_project";
-  let lastPlanMonth = row.last_plan_month || null;
-  let stageEnteredAt = row.stage_entered_at || null;
-  const changes = [];
-
-  Object.keys(incoming).forEach((k) => {
-    const v = incoming[k];
-    if (v === undefined) return;
-    if (k === "external_project_id") return;
-    if (source === "agent" && isEmpty(v)) return;                   // never blank out data
-    if (k === "record_category") {
-      if (v !== category) { changes.push([k, category, v]); category = v; }
-      return;
-    }
-    if (k === "last_plan_month") {
-      if (v !== lastPlanMonth) { changes.push([k, lastPlanMonth, v]); lastPlanMonth = v; }
-      return;
-    }
-    if (JSON.stringify(current[k]) === JSON.stringify(v)) return;
-    if (protectManual && source === "agent" && fieldSources[k] === "manual" && !isEmpty(current[k])) {
-      conflicts.push({ field: k, dashboard_value: current[k], incoming_value: v, resolution: "kept_dashboard",
-        reason: "edited manually in the dashboard" });
-      return;
-    }
-    merged[k] = v;
-    fieldSources[k] = source;
-    changes.push([k, current[k], v]);
-  });
-
-  return db.transaction(() => {
-    let summary = null;
-    if (activities) {
-      const r = applyActivities(row.id, activities, activityScope, sync);
-      if (r.error) {
-        const err = new Error(r.error);
-        err.details = r.details;
-        err.status = 400;
-        throw err;
-      }
-      summary = r.summary;
-    }
-    const statusChange = changes.find((c) => c[0] === "status");
-    if (statusChange) stageEnteredAt = stageAt || nowIso();
-    const actChanged = summary && (summary.added || summary.updated || summary.removed_from_source);
-    if (changes.length || actChanged) {
-      const result = updateStmt.run({
-        id: row.id,
-        data: JSON.stringify(merged),
-        needsReview: row.needs_review,
-        updatedAt: nowIso(),
-        expectedVersion: version,
-        category,
-        stageEnteredAt,
-        fieldSources: JSON.stringify(fieldSources),
-        lastPlanMonth
-      });
-      if (result.changes === 0) {
-        const err = new Error("version_conflict");
-        err.code = "version_conflict";
-        throw err;
-      }
-    } else if (version !== row.version) {
+  return store.tx((s) => {
+    const row = s.projects.find((r) => r.id === id);
+    if (!row) return { error: "not_found" };
+    const version = expectedVersion != null ? Number(expectedVersion)
+      : (patch && patch.version != null ? Number(patch.version) : row.version);
+    if (version !== row.version) {
       const err = new Error("version_conflict");
       err.code = "version_conflict";
       throw err;
     }
+    const current = row.data || {};
+    const incoming = canonical(patch);
+    const fieldSources = row.field_sources || {};
+    const conflicts = [];
+    const changes = [];
+    Object.keys(incoming).forEach((k) => {
+      const v = incoming[k];
+      if (v === undefined || k === "external_project_id") return;
+      if (source === "agent" && isEmpty(v)) return;                   // never blank out data
+      if (k === "record_category") {
+        if (v !== (row.record_category || "main_project")) { changes.push([k, row.record_category, v]); row.record_category = v; }
+        return;
+      }
+      if (k === "last_plan_month") {
+        if (v !== (row.last_plan_month || null)) { changes.push([k, row.last_plan_month || null, v]); row.last_plan_month = v; }
+        return;
+      }
+      if (JSON.stringify(current[k] === undefined ? null : current[k]) === JSON.stringify(v)) return;
+      if (protectManual && source === "agent" && fieldSources[k] === "manual" && !isEmpty(current[k])) {
+        conflicts.push({ field: k, dashboard_value: clone(current[k]), incoming_value: clone(v), resolution: "kept_dashboard",
+          reason: "edited manually in the dashboard" });
+        return;
+      }
+      changes.push([k, clone(current[k]), clone(v)]);
+      current[k] = clone(v);
+      fieldSources[k] = source;
+    });
+    let summary = null;
+    if (activities) {
+      const r = applyActivities(s, row.id, activities, activityScope, sync);
+      if (r.error) throw failWith(400, r.error, r.details);
+      summary = r.summary;
+    }
+    const statusChange = changes.find((c) => c[0] === "status");
+    if (statusChange) row.stage_entered_at = stageAt || nowIso();
+    const actChanged = summary && (summary.added || summary.updated || summary.removed_from_source);
+    if (changes.length || actChanged) {
+      row.data = current;
+      row.field_sources = fieldSources;
+      row.version += 1;
+      row.updated_at = nowIso();
+    }
     changes.forEach(([k, prev, next]) => {
       if (k === "status") {
         // logged when it is recorded; a verified earlier entry time is kept as its own event
-        recordActivity(row.id, "stage_transition", source, actor, prev || null, next);
-        if (stageAt) recordActivity(row.id, "stage_entered_at", source, actor, null, stageEnteredAt);
+        pushHistory(s, row.id, "stage_transition", source, actor, prev || null, next);
+        if (stageAt) pushHistory(s, row.id, "stage_entered_at", source, actor, null, row.stage_entered_at);
       } else {
-        recordActivity(row.id, `updated:${k}`, source, actor, prev, next);
+        pushHistory(s, row.id, `updated:${k}`, source, actor, prev, next);
       }
     });
     if (sync && sync.run_id && (changes.length || actChanged)) {
-      recordActivity(row.id, "agent_sync", "agent", actor, null, { sync_run_id: sync.run_id,
+      pushHistory(s, row.id, "agent_sync", "agent", actor, null, { sync_run_id: sync.run_id,
         source_file: sync.source_file || null, fields: changes.map((c) => c[0]), activities: summary });
     }
-    return { project: getProject(row.id), conflicts, activity_summary: summary };
-  })();
+    return { id: row.id, conflicts, activity_summary: summary };
+  });
 }
 
 function safeUpdate(id, patch, opts) {
   try {
-    return updateProject(id, patch, opts);
+    const r = updateProject(id, patch, opts);
+    if (r.error) return r;
+    return { project: getProject(r.id), conflicts: r.conflicts, activity_summary: r.activity_summary };
   } catch (e) {
     if (e.code === "version_conflict") return { error: "version_conflict", current: getProject(id) };
     if (e.status === 400) return { error: e.message, details: e.details };
@@ -638,8 +613,7 @@ function moveStage(id, stage, { source = "manual", actor = null, expectedVersion
   if (stage !== null && !validStageKeys().includes(stage)) {
     return { error: "Validation failed", details: [`"stage" must be one of: ${validStageKeys().join(", ")}`] };
   }
-  const current = JSON.parse(row.data);
-  if ((current.status || null) === stage) return { project: getProject(row.id), unchanged: true };
+  if (((row.data || {}).status || null) === stage) return { project: getProject(row.id), unchanged: true };
   // an explicit, confirmed transition is not a planning sync: manual-edit protection does not apply
   const r = safeUpdate(row.id, { status: stage }, { source, actor, expectedVersion, stageAt: at, protectManual: false });
   if (!r.error && note) recordActivity(row.id, "comment:stage_transition", source, actor, null, note);
@@ -663,6 +637,7 @@ module.exports = {
   getProjectRow,
   getProjectByExternalId,
   findRow,
+  allRows,
   listProjects,
   createProject,
   updateProject,
@@ -670,6 +645,7 @@ module.exports = {
   moveStage,
   updateActivityManual,
   recordActivity,
+  pushHistory,
   rowToApi,
   workloadSummary
 };

@@ -1,10 +1,33 @@
 # --- Node / Штурман ---
 node_modules/
 .env
-# runtime data: SQLite database, uploaded files and uploaded planning files
-data/
+# runtime data: JSON data file, backups, run reports, uploaded planning files
+# (only the folder structure and the empty templates are committed)
+data/*
+!data/.gitkeep
+!data/README.md
+!data/templates/
+data/templates/*
+!data/templates/shturman.empty.json
+# uploaded photos and attachments
 uploads/*
 !uploads/.gitkeep
+# credentials and private data
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.sqlite
+*.sqlite-*
+*.db
+*.bak
+# planning files and exports with real employee data
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+!tests/fixtures/*.csv
 # --- Python / planning agent ---
 __pycache__/
 *.pyc

@@ -3,14 +3,14 @@
 One application:
 
 * **Штурман dashboard** (`public/`): the existing board with its Доска, Глобально and Инж. проекты views. The Kanban columns are Сканирование → Разработка → Тестовый образец → Замер → Оформление.
-* **Штурман backend** (`server/`): Node.js/Express with **one SQLite database**. This is the system of record for tasks, projects, activities, history, photos, the review queue and import runs.
+* **Штурман backend** (`server/`): Node.js/Express with **one data store**, a JSON file (`data/shturman.json`, see "Data storage"). This is the system of record for tasks, projects, activities, workload, stage history, photo/attachment metadata, the review queue and import runs.
 * **Engineering planning agent** (`plan_agent/`): Python. It reads the department's Excel plans, recognizes projects, activities, engineers, priorities and hours, runs a dry run, and after approval writes **only through the Штурман agent API**. It has no database of its own.
 
 ```text
 Browser ── Штурман UI (public/index.html)
              │ fetch, polling every 20 s
              ▼
-        Express (server/) ─── SQLite (DATABASE_PATH) · uploads (UPLOADS_DIR)
+        Express (server/) ─── data/shturman.json (DATA_DIR) · uploads/ (UPLOADS_DIR)
              │  /api/plan-imports: stores the file, starts the agent
              ▼
         python -m plan_agent analyze | approve | sync
@@ -18,7 +18,24 @@ Browser ── Штурман UI (public/index.html)
              └──────────► /api/agent/* of the same server
 ```
 
-The original standalone migration notes are in `MIGRATION_REPORT.md`.
+Everything (application, agent, configuration templates, tests and documentation) lives in this one repository:
+
+```text
+Projekt_managment/
+├── public/        # Штурман interface (index.html: Доска, Глобально, Инж. проекты)
+├── server/        # backend and API (Express) + JSON storage layer (store.js)
+├── plan_agent/    # Excel processing agent (Python)
+├── config/        # mapping configuration: vocabulary, ownership policy, monthly-plan profile
+├── data/          # local operational data (git-ignored; README and empty template committed)
+├── uploads/       # local photos and attachments (git-ignored)
+├── scripts/       # maintenance: demo data, import of an old SQLite database
+├── tests/         # automated tests (synthetic data only)
+├── docs/          # documentation
+├── package.json   # Node app; requirements.txt for the agent
+└── README.md
+```
+
+The notes from the original Artifact-to-app migration are kept in `MIGRATION_REPORT.md`. Its SQLite parts are historical: storage is now JSON.
 
 ## Quick start (local)
 
@@ -98,7 +115,7 @@ Hours are effort, not completion. Nothing is marked done automatically, and manu
 
 ## Data protection rules
 
-* The database schema is upgraded by **versioned migrations** (`server/migrations.js`). They are additive only, and a backup copy of a non-empty database is written before upgrading: `<db>.pre-migration-vN-<time>.bak`.
+* See "Data storage" for atomic writes, backups, the single-process lock and versioned format upgrades.
 * Demo projects are inserted **only** with `SEED_DEMO_DATA=true` (or `npm run seed:demo`), and only into an empty database. `npm run demo-data` lists them; `npm run demo-data -- --remove` removes only demo projects nobody has touched.
 * Agent writes:
   * unknown fields are rejected, not dropped;
@@ -108,6 +125,29 @@ Hours are effort, not completion. Nothing is marked done automatically, and manu
   * creates are duplicate-safe;
   * updates use version checks.
 * Uploaded planning files are stored in `PLAN_IMPORT_DIR` (not publicly served). Do not commit planning files, databases or photos; `.gitignore` excludes them.
+
+## Data storage
+
+For the initial launch all operational data is kept in **one JSON file**, `data/shturman.json`. The application creates it on first start from `data/templates/shturman.empty.json`. Full reports of import runs are kept in `data/sync-runs/`, uploaded planning files in `data/plan-imports/`, and photos and attachments in `uploads/`.
+
+* **Atomic writes:** each change is written to a temporary file, flushed to disk and renamed over the data file, so a crash never leaves a half-written file. The previous version is kept as `shturman.json.bak`.
+* **All-or-nothing:** a change that fails validation part-way (for example, a project and its activities) is rolled back completely.
+* **One writer:** a lock file stops a second server process from using the same `data/` folder. The planning agent never touches the files; it goes through the server's API.
+* **Versioned format:** `meta.schema_version`. Future format upgrades copy the file first (`shturman.json.pre-migration-vN-*.bak`). A file from a newer application version is refused, not overwritten.
+* **Backup:** copy `data/` and `uploads/` together. See `data/README.md`.
+* **Earlier SQLite installations:** stop the server, then run a dry run first and add `--write` to import.
+
+```bash
+npm run import-sqlite -- path/to/app.sqlite
+```
+
+```bash
+npm run import-sqlite -- path/to/app.sqlite --write
+```
+
+The import never merges into a data file that already holds projects, and it only reads the SQLite file (Node.js 22.13 or newer).
+
+Only the folder structure, `data/README.md` and the empty template are in Git. Real data, planning files, photos, credentials (`.env`) and backups are excluded by `.gitignore`.
 
 ## Telegram photos (receiving side prepared)
 
@@ -139,7 +179,7 @@ npm test
 ## Production
 
 This version is meant to be verified locally first. For production:
-* run on a host with a **persistent disk** for `DATABASE_PATH`, `UPLOADS_DIR` and `PLAN_IMPORT_DIR`;
+* run on a host with a **persistent disk** for `DATA_DIR`, `UPLOADS_DIR` and `PLAN_IMPORT_DIR` (the defaults are inside `data/` and `uploads/`);
 * set the variables in the host environment;
 * put a TLS reverse proxy in front of the app.
 

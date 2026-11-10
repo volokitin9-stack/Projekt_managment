@@ -16,7 +16,7 @@
 const express = require("express");
 const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
-const db = require("../db");
+const store = require("../store");
 const storage = require("../storage");
 const projectsModel = require("../projectsModel");
 const reviewQueue = require("../reviewQueueModel");
@@ -39,19 +39,19 @@ function validationError(res, errors, unknown) {
 
 /** Existing projects with the same identity (external id, article, or make+model+product within a category). */
 function findDuplicates(data, excludeId = null) {
-  const all = db.prepare("SELECT * FROM projects").all();
+  const all = projectsModel.allRows();
   const ids = new Set();
   const ext = data.external_project_id;
   if (ext) all.filter((r) => r.external_project_id === ext).forEach((r) => ids.add(r.id));
   if (data.article_number) {
     const art = projectsModel.normKey(data.article_number);
-    all.filter((r) => projectsModel.normKey(JSON.parse(r.data).article_number) === art && art).forEach((r) => ids.add(r.id));
+    all.filter((r) => art && projectsModel.normKey((r.data || {}).article_number) === art).forEach((r) => ids.add(r.id));
   }
   if (!ids.size && !ext && !data.article_number && data.manufacturer && data.vehicle_model && data.product_type) {
     const cat = data.record_category || "main_project";
     const want = [data.manufacturer, data.vehicle_model, data.product_type].map(projectsModel.normKey).join("|");
     all.filter((r) => {
-      const d = JSON.parse(r.data);
+      const d = r.data || {};
       return (r.record_category || "main_project") === cat &&
         [d.manufacturer, d.vehicle_model, d.product_type].map(projectsModel.normKey).join("|") === want;
     }).forEach((r) => ids.add(r.id));
@@ -65,7 +65,7 @@ router.get("/schema", (req, res) => {
   res.json({
     version: 2,
     app: "shturman",
-    schema_version: db.schemaVersion(),
+    schema_version: store.schemaVersion(),
     writable_fields: projectsModel.AGENT_WRITABLE,
     activity_fields: projectsModel.ACTIVITY_AGENT_FIELDS,
     record_categories: projectsModel.CATEGORIES,
@@ -189,30 +189,32 @@ function storeProjectFile(row, req, { source, uploadedBy }) {
   const telegramMessageId = req.body.telegram_message_id || null;
   const telegramChatId = req.body.telegram_chat_id || null;
   if (telegramMessageId && telegramChatId) {
-    const existing = db.prepare("SELECT * FROM project_files WHERE telegram_chat_id = ? AND telegram_message_id = ?")
-      .get(telegramChatId, telegramMessageId);
+    const existing = store.read((s) => s.project_files.find((f) => f.telegram_chat_id === String(telegramChatId) &&
+      f.telegram_message_id === String(telegramMessageId)));
     if (existing) return { duplicate: true, id: existing.id };
   }
-  const { storageKey } = storage.saveProjectFile(row.id, req.file);
-  const fileId = uuidv4();
-  const kind = req.file.mimetype === "application/pdf" ? "attachment" : "image";
-  const isPrimary = String(req.body.is_primary || "").toLowerCase() === "true" ? 1 : 0;
   if (req.body.event_at && Number.isNaN(Date.parse(req.body.event_at))) {
     const err = new Error('"event_at" must be an ISO timestamp');
     err.status = 400;
     throw err;
   }
-  db.prepare(`
-    INSERT INTO project_files
-      (id, project_id, kind, storage_key, original_filename, mime_type, size, is_primary, caption, source,
-       telegram_message_id, telegram_chat_id, uploaded_by, uploaded_at, technical_comment, event_at, telegram_ref)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(fileId, row.id, kind, storageKey, req.file.originalname || null, req.file.mimetype, req.file.size, isPrimary,
-    req.body.caption || req.body.description || null, req.body.source || source, telegramMessageId, telegramChatId,
-    uploadedBy, nowIso(), req.body.technical_comment || null, req.body.event_at || null, req.body.telegram_ref || null);
-  if (isPrimary) db.prepare("UPDATE project_files SET is_primary = 0 WHERE project_id = ? AND id != ?").run(row.id, fileId);
-  projectsModel.recordActivity(row.id, "file_uploaded", source, uploadedBy, null,
-    { fileId, kind, caption: req.body.caption || req.body.description || null, telegram_message_id: telegramMessageId });
+  const { storageKey } = storage.saveProjectFile(row.id, req.file);
+  const fileId = uuidv4();
+  const kind = req.file.mimetype === "application/pdf" ? "attachment" : "image";
+  const isPrimary = String(req.body.is_primary || "").toLowerCase() === "true";
+  const caption = req.body.caption || req.body.description || null;
+  store.tx((s) => {
+    if (isPrimary) s.project_files.filter((f) => f.project_id === row.id).forEach((f) => { f.is_primary = false; });
+    s.project_files.push({ id: fileId, project_id: row.id, kind, storage_key: storageKey,
+      original_filename: req.file.originalname || null, mime_type: req.file.mimetype, size: req.file.size,
+      is_primary: isPrimary, caption, source: req.body.source || source,
+      telegram_message_id: telegramMessageId ? String(telegramMessageId) : null,
+      telegram_chat_id: telegramChatId ? String(telegramChatId) : null, uploaded_by: uploadedBy, uploaded_at: nowIso(),
+      technical_comment: req.body.technical_comment || null, event_at: req.body.event_at || null,
+      telegram_ref: req.body.telegram_ref || null });
+    projectsModel.pushHistory(s, row.id, "file_uploaded", source, uploadedBy, null,
+      { fileId, kind, caption, telegram_message_id: telegramMessageId });
+  });
   const updated = projectsModel.getProject(row.id);
   return updated.images.concat(updated.attachments).find((f) => f.id === fileId);
 }
@@ -279,7 +281,7 @@ router.post("/telegram/photos", upload.single("file"), (req, res) => {
   if (!(h.telegram_message_id && h.telegram_chat_id)) {
     return res.status(400).json({ error: '"telegram_chat_id" and "telegram_message_id" are required (idempotency)' });
   }
-  const rows = db.prepare("SELECT * FROM projects").all();
+  const rows = projectsModel.allRows();
   let matches = [];
   let method = null;
   if (h.external_project_id) {
@@ -288,13 +290,13 @@ router.post("/telegram/photos", upload.single("file"), (req, res) => {
   }
   if (!matches.length && h.article_number) {
     const art = projectsModel.normKey(h.article_number);
-    matches = rows.filter((r) => art && projectsModel.normKey(JSON.parse(r.data).article_number) === art);
+    matches = rows.filter((r) => art && projectsModel.normKey((r.data || {}).article_number) === art);
     method = "article_number";
   }
   if (!matches.length && h.manufacturer && h.vehicle_model && h.product_type) {
     const want = [h.manufacturer, h.vehicle_model, h.product_type].map(projectsModel.normKey).join("|");
     matches = rows.filter((r) => {
-      const d = JSON.parse(r.data);
+      const d = r.data || {};
       return (r.record_category || "main_project") === "main_project" &&
         [d.manufacturer, d.vehicle_model, d.product_type].map(projectsModel.normKey).join("|") === want;
     });
@@ -322,11 +324,11 @@ router.post("/projects/:id/events", (req, res) => {
   if (!row) return res.status(404).json({ error: "Not found" });
   const eventId = req.body.event_id || req.body.eventId;
   if (!eventId) return res.status(400).json({ error: '"event_id" is required for idempotent processing' });
-  const existing = db.prepare("SELECT * FROM agent_events WHERE event_id = ?").get(eventId);
+  const existing = store.read((s) => s.agent_events.find((e) => e.event_id === eventId));
   if (existing) return res.status(200).json({ duplicate: true, event_id: eventId, received_at: existing.received_at });
   const eventType = req.body.type || req.body.event_type || "note";
-  db.prepare("INSERT INTO agent_events (event_id, project_id, event_type, payload, received_at) VALUES (?, ?, ?, ?, ?)")
-    .run(eventId, row.id, eventType, JSON.stringify(req.body.payload || {}), nowIso());
+  store.tx((s) => s.agent_events.push({ event_id: eventId, project_id: row.id, event_type: eventType,
+    payload: req.body.payload || {}, received_at: nowIso() }));
   if (eventType === "comment" && req.body.payload && req.body.payload.text) {
     const project = projectsModel.getProject(row.id);
     const comments = (project.comments || []).concat([{ id: uuidv4(), text: req.body.payload.text, source: "agent", at: nowIso() }]);
@@ -355,21 +357,26 @@ router.post("/sync-runs", (req, res) => {
   const unknown = Object.keys(b).filter((k) => !SYNC_FIELDS.includes(k));
   if (unknown.length) return validationError(res, [`unsupported fields: ${unknown.join(", ")}`], unknown);
   if (!b.id || !b.mode || !b.status || !b.started_at) return validationError(res, ['"id", "mode", "status", "started_at" are required']);
-  const j = (v) => (v == null ? null : JSON.stringify(v));
-  db.prepare(`INSERT INTO sync_runs (id, source_file, file_sha256, plan_month, mode, status, started_at, finished_at,
-      counts, report, error, review_status) VALUES (@id, @source_file, @file_sha256, @plan_month, @mode, @status,
-      @started_at, @finished_at, @counts, @report, @error, @review_status)
-    ON CONFLICT(id) DO UPDATE SET status = excluded.status, finished_at = excluded.finished_at, counts = excluded.counts,
-      report = excluded.report, error = excluded.error, review_status = excluded.review_status`)
-    .run({ id: b.id, source_file: b.source_file || null, file_sha256: b.file_sha256 || null, plan_month: b.plan_month || null,
-      mode: b.mode, status: b.status, started_at: b.started_at, finished_at: b.finished_at || null, counts: j(b.counts),
-      report: j(b.report), error: b.error || null, review_status: b.review_status || null });
+  store.tx((s) => {
+    const run = { id: b.id, source_file: b.source_file || null, file_sha256: b.file_sha256 || null,
+      plan_month: b.plan_month || null, mode: b.mode, status: b.status, started_at: b.started_at,
+      finished_at: b.finished_at || null, counts: b.counts || null, error: b.error || null,
+      review_status: b.review_status || null };
+    const i = s.sync_runs.findIndex((r) => r.id === b.id);
+    if (i === -1) s.sync_runs.push(run); else s.sync_runs[i] = Object.assign(s.sync_runs[i], run);
+  });
+  if (b.report) store.saveRunReport(b.id, b.report);
   res.status(201).json({ id: b.id });
 });
 
 router.get("/sync-runs", (req, res) => {
-  res.json({ sync_runs: db.prepare("SELECT id, source_file, plan_month, mode, status, started_at, finished_at, counts, review_status FROM sync_runs ORDER BY started_at DESC LIMIT 100")
-    .all().map((r) => Object.assign({}, r, { counts: r.counts ? JSON.parse(r.counts) : null })) });
+  res.json({ sync_runs: listSyncRuns() });
 });
 
+function listSyncRuns() {
+  return store.read((s) => s.sync_runs.slice().sort((a, b) => String(b.started_at).localeCompare(String(a.started_at)))
+    .slice(0, 100).map((r) => JSON.parse(JSON.stringify(r))));
+}
+
 module.exports = router;
+module.exports.listSyncRuns = listSyncRuns;

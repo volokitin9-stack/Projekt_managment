@@ -1,6 +1,7 @@
 "use strict";
 
 // Inspect or remove demonstration projects (source = "seed").
+// Stop the server first: the data directory can only be used by one process.
 //
 //   node scripts/demo-data.js            # list them (default, changes nothing)
 //   node scripts/demo-data.js --remove   # delete ONLY seeded projects that were
@@ -10,23 +11,25 @@
 // activities is never removed automatically - it is listed instead.
 
 require("dotenv").config();
-const db = require("../server/db");
+const store = require("../server/store");
 
-const rows = db.prepare("SELECT * FROM projects").all();
-const seeded = rows.filter((r) => JSON.parse(r.data).source === "seed");
-const report = seeded.map((r) => {
-  const data = JSON.parse(r.data);
-  const touched = db.prepare("SELECT COUNT(*) AS n FROM project_activity WHERE project_id = ? AND (source IS NULL OR source != 'seed')").get(r.id).n;
-  const files = db.prepare("SELECT COUNT(*) AS n FROM project_files WHERE project_id = ?").get(r.id).n;
-  const acts = db.prepare("SELECT COUNT(*) AS n FROM project_activities WHERE project_id = ?").get(r.id).n;
-  return { id: r.id, name: `${data.manufacturer} ${data.vehicle_model} — ${data.product_type}`, touched, files, acts,
-    removable: touched === 0 && files === 0 && acts === 0 && !(data.comments || []).length };
-});
-console.log(`${rows.length} projects in the database, ${seeded.length} are demonstration projects (source "seed").`);
+const report = store.read((s) => s.projects.filter((r) => (r.data || {}).source === "seed").map((r) => {
+  const d = r.data || {};
+  const touched = s.project_history.filter((h) => h.project_id === r.id && h.source !== "seed").length;
+  const files = s.project_files.filter((f) => f.project_id === r.id).length;
+  const acts = s.project_activities.filter((a) => a.project_id === r.id).length;
+  return { id: r.id, name: `${d.manufacturer} ${d.vehicle_model} — ${d.product_type}`, touched, files, acts,
+    removable: touched === 0 && files === 0 && acts === 0 && !(d.comments || []).length };
+}));
+const total = store.read((s) => s.projects.length);
+console.log(`${total} projects in the data file, ${report.length} are demonstration projects (source "seed").`);
 report.forEach((r) => console.log(`  ${r.removable ? "removable " : "KEEP      "} ${r.name}` +
   (r.removable ? "" : ` (has changes=${r.touched}, files=${r.files}, activities=${r.acts})`)));
 if (process.argv.includes("--remove")) {
-  const del = db.prepare("DELETE FROM projects WHERE id = ?");
-  const n = db.transaction(() => report.filter((r) => r.removable).map((r) => del.run(r.id)).length)();
-  console.log(`removed ${n} untouched demonstration projects`);
+  const ids = new Set(report.filter((r) => r.removable).map((r) => r.id));
+  store.tx((s) => {
+    s.projects = s.projects.filter((p) => !ids.has(p.id));
+    s.project_history = s.project_history.filter((h) => !ids.has(h.project_id));
+  });
+  console.log(`removed ${ids.size} untouched demonstration projects`);
 }

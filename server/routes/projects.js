@@ -3,7 +3,6 @@
 const express = require("express");
 const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
-const db = require("../db");
 const storage = require("../storage");
 const projectsModel = require("../projectsModel");
 
@@ -95,11 +94,15 @@ router.post("/:id/files", upload.single("file"), (req, res) => {
   const fileId = uuidv4();
   const kind = req.file.mimetype === "application/pdf" ? "attachment" : "image";
   const actor = req.get("x-dashboard-user") || "dashboard_user";
-  db.prepare(`INSERT INTO project_files (id, project_id, kind, storage_key, original_filename, mime_type, size, is_primary,
-      caption, source, uploaded_by, uploaded_at, technical_comment, event_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 'manual', ?, ?, ?, ?)`)
-    .run(fileId, row.id, kind, storageKey, req.file.originalname || null, req.file.mimetype, req.file.size,
-      req.body.caption || null, actor, new Date().toISOString(), req.body.technical_comment || null, null);
-  projectsModel.recordActivity(row.id, "file_uploaded", "manual", actor, null, { fileId, kind, caption: req.body.caption || null });
+  const store = require("../store");
+  store.tx((st) => {
+    st.project_files.push({ id: fileId, project_id: row.id, kind, storage_key: storageKey,
+      original_filename: req.file.originalname || null, mime_type: req.file.mimetype, size: req.file.size, is_primary: false,
+      caption: req.body.caption || null, source: "manual", telegram_message_id: null, telegram_chat_id: null,
+      uploaded_by: actor, uploaded_at: new Date().toISOString(), technical_comment: req.body.technical_comment || null,
+      event_at: null, telegram_ref: null });
+    projectsModel.pushHistory(st, row.id, "file_uploaded", "manual", actor, null, { fileId, kind, caption: req.body.caption || null });
+  });
   const p = projectsModel.getProject(row.id);
   res.status(201).json(p.images.concat(p.attachments).find((f) => f.id === fileId));
 });

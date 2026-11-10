@@ -15,7 +15,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
-const db = require("../db");
+const store = require("../store");
 
 const router = express.Router();
 const REPO_ROOT = path.join(__dirname, "..", "..");
@@ -34,7 +34,19 @@ function nowIso() {
 }
 
 function rowToApi(r) {
-  return Object.assign({}, r, { summary: r.summary ? JSON.parse(r.summary) : null, stored_path: undefined });
+  if (!r) return null;
+  const copy = JSON.parse(JSON.stringify(r));
+  delete copy.stored_path;          // never expose server paths
+  return copy;
+}
+function getImport(id) {
+  return store.read((s) => {
+    const r = s.plan_imports.find((x) => x.id === id);
+    return r ? JSON.parse(JSON.stringify(r)) : null;
+  });
+}
+function updateImport(id, fields) {
+  store.tx((s) => Object.assign(s.plan_imports.find((x) => x.id === id), fields));
 }
 
 function runAgent(args) {
@@ -92,11 +104,12 @@ function guard(res) {
 
 // GET /api/plan-imports — recent imports
 router.get("/", (req, res) => {
-  res.json(db.prepare("SELECT * FROM plan_imports ORDER BY uploaded_at DESC LIMIT 50").all().map(rowToApi));
+  res.json(store.read((s) => s.plan_imports.slice().sort((a, b) => String(b.uploaded_at).localeCompare(String(a.uploaded_at)))
+    .slice(0, 50).map(rowToApi)));
 });
 
 router.get("/:id", (req, res) => {
-  const r = db.prepare("SELECT * FROM plan_imports WHERE id = ?").get(req.params.id);
+  const r = getImport(req.params.id);
   if (!r) return res.status(404).json({ error: "Not found" });
   const api = rowToApi(r);
   const s = api.summary || {};
@@ -117,18 +130,19 @@ router.post("/", upload.single("file"), async (req, res) => {
   const stored = path.join(FILES_DIR, `${id}.upload`);
   fs.writeFileSync(stored, req.file.buffer);
   const name = path.basename(req.file.originalname || "plan.xlsx");
-  db.prepare(`INSERT INTO plan_imports (id, original_name, sha256, stored_path, size, plan_month, status, uploaded_at)
-              VALUES (?, ?, ?, ?, ?, ?, 'analyzing', ?)`).run(id, name, sha, stored, req.file.size, month, nowIso());
+  store.tx((s) => s.plan_imports.push({ id, original_name: name, sha256: sha, stored_path: stored, size: req.file.size,
+    plan_month: month, status: "analyzing", fingerprint: null, dry_run_id: null, sync_run_id: null, summary: null,
+    error: null, uploaded_at: nowIso(), approved_at: null, approved_by: null }));
   busy = true;
   try {
     const r = await runAgent(["analyze", stored, "--month", month, "--name", name, "--json"]);
     const json = r.json;
     const ok = json && json.status && json.status !== "Failed";
     const summary = { dry_run: json, stderr: r.code !== 0 && !json ? r.err.slice(-4000) : undefined };
-    db.prepare("UPDATE plan_imports SET status = ?, fingerprint = ?, dry_run_id = ?, summary = ?, error = ? WHERE id = ?")
-      .run(ok ? "analyzed" : "failed", json ? json.fingerprint || null : null, json ? json.run_id : null,
-        JSON.stringify(summary), ok ? null : ((json && json.fatal_error) || r.err.slice(-2000) || "analysis failed"), id);
-    const row = rowToApi(db.prepare("SELECT * FROM plan_imports WHERE id = ?").get(id));
+    updateImport(id, { status: ok ? "analyzed" : "failed", fingerprint: json ? json.fingerprint || null : null,
+      dry_run_id: json ? json.run_id : null, summary,
+      error: ok ? null : ((json && json.fatal_error) || r.err.slice(-2000) || "analysis failed") });
+    const row = rowToApi(getImport(id));
     res.status(ok ? 201 : 422).json(Object.assign(row, readReport(json)));
   } finally {
     busy = false;
@@ -139,7 +153,7 @@ router.post("/", upload.single("file"), async (req, res) => {
 // analysis (fingerprint-bound) and runs the synchronisation.
 router.post("/:id/approve", async (req, res) => {
   if (!guard(res)) return;
-  const imp = db.prepare("SELECT * FROM plan_imports WHERE id = ?").get(req.params.id);
+  const imp = getImport(req.params.id);
   if (!imp) return res.status(404).json({ error: "Not found" });
   if (!req.body || req.body.confirm !== true) {
     return res.status(400).json({ error: "Требуется явное подтверждение: {\"confirm\": true}" });
@@ -151,17 +165,17 @@ router.post("/:id/approve", async (req, res) => {
   try {
     const appr = await runAgent(["approve", "--by", by, "--fingerprint", imp.fingerprint || "", "--json"]);
     if (!appr.json || !appr.json.approved) {
-      db.prepare("UPDATE plan_imports SET error = ? WHERE id = ?").run((appr.json && appr.json.error) || appr.err.slice(-2000), imp.id);
+      updateImport(imp.id, { error: (appr.json && appr.json.error) || appr.err.slice(-2000) });
       return res.status(409).json({ error: "Не удалось утвердить сопоставление", details: appr.json || appr.err.slice(-2000) });
     }
     const r = await runAgent(["sync", imp.stored_path, "--month", imp.plan_month, "--name", imp.original_name, "--json"]);
     const json = r.json;
     const synced = json && /^Completed/.test(json.status || "");
-    const summary = Object.assign(JSON.parse(imp.summary || "{}"), { approval: appr.json, sync: json });
-    db.prepare(`UPDATE plan_imports SET status = ?, sync_run_id = ?, summary = ?, error = ?, approved_at = ?, approved_by = ?
-                WHERE id = ?`).run(synced ? "synced" : "sync_failed", json ? json.run_id : null, JSON.stringify(summary),
-      synced ? null : ((json && (json.fatal_error || json.status)) || r.err.slice(-2000)), nowIso(), by, imp.id);
-    const row = rowToApi(db.prepare("SELECT * FROM plan_imports WHERE id = ?").get(imp.id));
+    const summary = Object.assign({}, imp.summary || {}, { approval: appr.json, sync: json });
+    updateImport(imp.id, { status: synced ? "synced" : "sync_failed", sync_run_id: json ? json.run_id : null, summary,
+      error: synced ? null : ((json && (json.fatal_error || json.status)) || r.err.slice(-2000)), approved_at: nowIso(),
+      approved_by: by });
+    const row = rowToApi(getImport(imp.id));
     res.status(synced ? 200 : 422).json(Object.assign(row, { sync_report: readReport(json).report || null }));
   } finally {
     busy = false;

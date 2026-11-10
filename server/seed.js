@@ -5,7 +5,7 @@
 // install isn't empty. Safe to run multiple times: every statement is
 // idempotent (INSERT OR IGNORE / existence checks).
 
-const db = require("./db");
+const store = require("./store");
 const projectsModel = require("./projectsModel");
 
 const DEFAULT_STAGES = [
@@ -34,11 +34,12 @@ const SAMPLE_PROJECTS = [
 ];
 
 function seedStages() {
-  const insert = db.prepare("INSERT OR IGNORE INTO stages (key, label, sort_order) VALUES (?, ?, ?)");
-  const tx = db.transaction((stages) => {
-    stages.forEach((s) => insert.run(s.key, s.label, s.sort_order));
+  // The five workflow stages are configurable data (not hard-coded); missing ones are added.
+  store.tx((s) => {
+    DEFAULT_STAGES.forEach((st) => {
+      if (!s.stages.some((x) => x.key === st.key)) s.stages.push(Object.assign({}, st));
+    });
   });
-  tx(DEFAULT_STAGES);
 }
 
 // Demonstration projects are inserted ONLY when explicitly requested
@@ -49,7 +50,7 @@ function seedStages() {
 function seedProjects({ force = false } = {}) {
   const wanted = force || String(process.env.SEED_DEMO_DATA || "").toLowerCase() === "true";
   if (!wanted) return 0;
-  const count = db.prepare("SELECT COUNT(*) AS n FROM projects").get().n;
+  const count = store.read((s) => s.projects.length);
   if (count > 0) return 0;
   SAMPLE_PROJECTS.forEach((p) => projectsModel.createProject(Object.assign({}, p, { source: "seed" }),
     { source: "seed", actor: "seed" }));

@@ -44,7 +44,8 @@ class ShturmanServer:
         self.key = key
         self.port = _free_port()
         self.url = f"http://127.0.0.1:{self.port}"
-        self.db_path = base / "data" / "app.sqlite"
+        self.data_dir = base / "data"
+        self.data_file = self.data_dir / "shturman.json"
         self.uploads = base / "uploads"
         self.plan_dir = base / "plan-imports"
         self.seed_demo = seed_demo
@@ -53,7 +54,7 @@ class ShturmanServer:
 
     def env(self):
         e = dict(os.environ)
-        e.update(PORT=str(self.port), DATABASE_PATH=str(self.db_path), UPLOADS_DIR=str(self.uploads),
+        e.update(PORT=str(self.port), DATA_DIR=str(self.data_dir), UPLOADS_DIR=str(self.uploads),
                  PLAN_IMPORT_DIR=str(self.plan_dir), AGENT_API_KEY=self.key,
                  SEED_DEMO_DATA="true" if self.seed_demo else "false", PLAN_AGENT_PYTHON=sys.executable)
         return e

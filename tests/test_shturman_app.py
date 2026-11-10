@@ -2,7 +2,9 @@
 
 All data is synthetic. The real server is started per test (see conftest.ShturmanServer).
 """
+import json
 import sqlite3
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -26,10 +28,11 @@ def create(url, **fields):
 
 # --------------------------------------------------------------------------- application & git layout
 def test_both_systems_live_in_one_repository():
-    for f in ("server/index.js", "server/migrations.js", "public/index.html", "plan_agent/service.py",
+    for f in ("server/index.js", "server/store.js", "data/templates/shturman.empty.json", "public/index.html", "plan_agent/service.py",
               "config/profiles/monthly_work_plan.yaml", "package.json"):
         assert (ROOT / f).exists(), f
     assert not (ROOT / "backend").exists()                                  # no second backend/database
+    assert "better-sqlite3" not in (ROOT / "package.json").read_text()      # one storage layer: JSON
 
 
 def test_dashboard_page_and_api_run(shturman):
@@ -39,7 +42,7 @@ def test_dashboard_page_and_api_run(shturman):
                   "Фотографии", "План, ч", "Факт, ч", "На стадии", "Не назначен"):
         assert label in page.text, label
     h = requests.get(shturman.url + "/api/health").json()
-    assert h["ok"] is True and h["schema_version"] == 6
+    assert h["ok"] is True and h["storage"] == "json"
     stages = requests.get(shturman.url + "/api/stages").json()
     assert [s["key"] for s in stages] == ["scanning", "development", "prototype", "measurement", "documentation"]
     assert [s["label"] for s in stages] == ["Сканирование", "Разработка", "Тестовый образец", "Замер", "Оформление"]
@@ -74,29 +77,79 @@ CREATE TABLE project_activity (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, ac
 CREATE TABLE agent_events (event_id TEXT PRIMARY KEY, project_id TEXT, event_type TEXT, payload TEXT, received_at TEXT NOT NULL);
 CREATE TABLE review_queue (id TEXT PRIMARY KEY, kind TEXT NOT NULL, payload TEXT NOT NULL, reason TEXT, created_at TEXT NOT NULL,
   resolved INTEGER NOT NULL DEFAULT 0);
+INSERT INTO stages VALUES ('scanning','Сканирование',1),('development','Разработка',2),('prototype','Тестовый образец',3),
+  ('measurement','Замер',4),('documentation','Оформление',5);
 INSERT INTO projects VALUES ('p-real', 'ENG-REAL', '{"manufacturer":"HAVAL","vehicle_model":"Jolion","product_type":"Защита радиатора","priority":"high","status":"development","source":"manual","comments":[{"text":"важно"}]}', 3, 0, '2026-10-01T00:00:00Z', '2026-10-02T00:00:00Z');
+INSERT INTO project_activity VALUES ('h1', 'p-real', 'created', 'manual', 'user', NULL, NULL, '2026-10-01T00:00:00Z');
 INSERT INTO docs VALUES ('tasks', 't1', '{"title":"Задача"}', 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
 """
 
 
-def test_migration_preserves_existing_data_and_backs_up(tmp_path):
-    srv = ShturmanServer(tmp_path / "old")
-    srv.db_path.parent.mkdir(parents=True)
-    con = sqlite3.connect(srv.db_path)
+def test_legacy_sqlite_database_can_be_imported(tmp_path):
+    legacy = tmp_path / "old-app.sqlite"
+    con = sqlite3.connect(legacy)
     con.executescript(V1_SCHEMA)
     con.close()
+    srv = ShturmanServer(tmp_path / "imported")
+    env = srv.env()
+    dry = subprocess.run(["node", "scripts/import-sqlite.js", str(legacy)], cwd=ROOT, env=env, capture_output=True, text=True)
+    assert dry.returncode == 0 and "dry run" in dry.stdout and not srv.data_file.exists()
+    done = subprocess.run(["node", "scripts/import-sqlite.js", str(legacy), "--write"], cwd=ROOT, env=env,
+                          capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    again = subprocess.run(["node", "scripts/import-sqlite.js", str(legacy), "--write"], cwd=ROOT, env=env,
+                           capture_output=True, text=True)
+    assert again.returncode == 3 and "refusing" in again.stderr                  # never merges or overwrites
     srv.start()
     try:
         p = requests.get(srv.url + "/api/projects/p-real").json()
         assert p["external_project_id"] == "ENG-REAL" and p["status"] == "development" and p["priority"] == "high"
-        assert p["comments"] == [{"text": "важно"}] and p["version"] == 3
+        assert p["comments"] == [{"text": "важно"}] and p["version"] == 3 and p["history"][0]["action"] == "created"
         assert p["stage_entered_at"] is None and p["days_in_stage"] is None   # entry date was never recorded
         assert requests.get(srv.url + "/api/tasks").json()[0]["title"] == "Задача"
-        backups = list(srv.db_path.parent.glob("app.sqlite.pre-migration-v2-*.bak"))
-        assert len(backups) == 1
-        assert sqlite3.connect(backups[0]).execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 1
     finally:
         srv.stop()
+    assert sqlite3.connect(legacy).execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 1   # source untouched
+
+
+# --------------------------------------------------------------------------- JSON storage guarantees
+def test_json_storage_is_atomic_versioned_and_single_writer(shturman, tmp_path):
+    h = requests.get(shturman.url + "/api/health").json()
+    assert h["storage"] == "json" and h["schema_version"] == 1
+    data = json.loads(shturman.data_file.read_text())
+    assert data["meta"]["format"] == "shturman-json" and [s["key"] for s in data["stages"]][0] == "scanning"
+    create(shturman.url, external_project_id="J-1")
+    assert (shturman.data_dir / "shturman.json.bak").exists()                 # previous version kept on each write
+    assert not list(shturman.data_dir.glob("shturman.json.tmp-*"))           # no half-written files left
+    assert json.loads(shturman.data_file.read_text())["projects"][0]["external_project_id"] == "J-1"
+    # a second server on the same data folder is refused
+    second = subprocess.run(["node", "server/index.js"], cwd=ROOT, env={**shturman.env(), "PORT": "0"},
+                            capture_output=True, text=True, timeout=20)
+    assert second.returncode != 0 and "in use by another" in second.stderr
+    # a failed change leaves nothing behind (all-or-nothing)
+    bad = requests.post(shturman.url + "/api/agent/projects", headers=H, json={
+        "project": {"manufacturer": "A", "vehicle_model": "B", "product_type": "C", "external_project_id": "J-2"},
+        "activities": [{"activity_key": "k1", "planned_hours": "много"}], "activity_scope": {"plan_month": "2026-11"}})
+    assert bad.status_code == 400
+    assert [p["external_project_id"] for p in requests.get(shturman.url + "/api/projects").json()] == ["J-1"]
+
+
+def test_newer_data_format_is_refused(tmp_path):
+    srv = ShturmanServer(tmp_path / "newer")
+    srv.data_dir.mkdir(parents=True)
+    srv.data_file.write_text(json.dumps({"meta": {"format": "shturman-json", "schema_version": 99}, "projects": []}))
+    run = subprocess.run(["node", "server/index.js"], cwd=ROOT, env=srv.env(), capture_output=True, text=True, timeout=20)
+    assert run.returncode != 0 and "supports up to" in run.stderr
+    assert json.loads(srv.data_file.read_text())["meta"]["schema_version"] == 99              # untouched
+
+
+def test_board_tasks_collection_still_works(backend):
+    t = requests.post(backend + "/api/tasks", json={"title": "Проверить КД", "quadrant": "q1"}).json()
+    upd = requests.patch(f"{backend}/api/tasks/{t['id']}", json={"done": True, "version": t["version"]})
+    assert upd.status_code == 200 and upd.json()["version"] == 2
+    assert requests.patch(f"{backend}/api/tasks/{t['id']}", json={"done": False, "version": 1}).status_code == 409
+    assert requests.delete(f"{backend}/api/tasks/{t['id']}").status_code == 204
+    assert requests.get(f"{backend}/api/tasks/{t['id']}").status_code == 404
 
 
 # --------------------------------------------------------------------------- stages

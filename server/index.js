@@ -14,7 +14,7 @@ const stagesRouter = require("./routes/stages");
 const agentRouter = require("./routes/agent");
 const reviewQueueRouter = require("./routes/reviewQueue");
 const planImportsRouter = require("./routes/planImports");
-const db = require("./db");
+const store = require("./store");
 
 seed();
 
@@ -40,15 +40,19 @@ app.use("/api/plan-imports", planImportsRouter);
 
 // Synchronisation runs recorded by the planning agent (read-only for the dashboard).
 app.get("/api/sync-runs", (req, res) => {
-  res.json(db.prepare("SELECT id, source_file, plan_month, mode, status, started_at, finished_at, counts, review_status FROM sync_runs ORDER BY started_at DESC LIMIT 100")
-    .all().map((r) => Object.assign({}, r, { counts: r.counts ? JSON.parse(r.counts) : null })));
+  res.json(agentRouter.listSyncRuns());
+});
+app.get("/api/sync-runs/:id", (req, res) => {
+  const run = agentRouter.listSyncRuns().find((r) => r.id === req.params.id);
+  if (!run) return res.status(404).json({ error: "Not found" });
+  res.json(Object.assign({}, run, { report: store.loadRunReport(run.id) }));
 });
 
 // Agent-facing write API — everything under here requires AGENT_API_KEY auth (see server/auth.js).
 app.use("/api/agent", agentRouter);
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, time: new Date().toISOString(), schema_version: db.schemaVersion() });
+  res.json({ ok: true, time: new Date().toISOString(), schema_version: store.schemaVersion(), storage: "json" });
 });
 
 // Uploaded files (see server/storage.js — swap this mount if you move to an

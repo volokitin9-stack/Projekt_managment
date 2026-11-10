@@ -7,7 +7,7 @@ Secrets live only in environment variables, or in a secret manager that sets the
 | Variable | Used by | Purpose |
 |---|---|---|
 | `PORT` | app | HTTP port (default 3000) |
-| `DATABASE_PATH` | app | SQLite file. Put it on a **persistent** disk |
+| `DATA_DIR` | app | folder of the JSON data file `shturman.json`, its backups and run reports (default `./data`). Put it on a **persistent** disk |
 | `UPLOADS_DIR` | app | photos and attachments. Must be persistent |
 | `AGENT_API_KEY` | app | shared secret for `/api/agent/*`. The plan import is disabled until it is set |
 | `SEED_DEMO_DATA` | app | `true` inserts the 14 demo projects into an EMPTY database (development only) |

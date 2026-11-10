@@ -2,10 +2,10 @@
 
 // Review queue: items that must be confirmed by a person before they become
 // (or attach to) a project - unmatched photos, ambiguous planning records,
-// projects created without a stable identifier.
+// projects created without a stable identifier. Storage: server/store.js.
 
 const { v4: uuidv4 } = require("uuid");
-const db = require("./db");
+const store = require("./store");
 
 function nowIso() {
   return new Date().toISOString();
@@ -15,8 +15,8 @@ function toApi(r) {
   return {
     id: r.id,
     kind: r.kind,
-    payload: JSON.parse(r.payload),
-    reason: r.reason,
+    payload: JSON.parse(JSON.stringify(r.payload)),
+    reason: r.reason || null,
     source: r.source || null,
     dedupe_key: r.dedupe_key || null,
     created_at: r.created_at,
@@ -29,34 +29,42 @@ function toApi(r) {
 
 /** Insert, or update the open item with the same dedupe key (idempotent). */
 function upsert({ kind, payload, reason = null, source = null, dedupeKey = null }) {
-  if (dedupeKey) {
-    const existing = db.prepare("SELECT * FROM review_queue WHERE dedupe_key = ?").get(dedupeKey);
-    if (existing) {
-      if (!existing.resolved) {
-        db.prepare("UPDATE review_queue SET payload = ?, reason = ?, updated_at = ? WHERE id = ?")
-          .run(JSON.stringify(payload), reason, nowIso(), existing.id);
+  return store.tx((s) => {
+    if (dedupeKey) {
+      const existing = s.review_queue.find((r) => r.dedupe_key === dedupeKey);
+      if (existing) {
+        if (!existing.resolved) {
+          existing.payload = JSON.parse(JSON.stringify(payload));
+          existing.reason = reason;
+          existing.updated_at = nowIso();
+        }
+        return { id: existing.id, duplicate: true, resolved: !!existing.resolved };
       }
-      return { id: existing.id, duplicate: true, resolved: !!existing.resolved };
     }
-  }
-  const id = uuidv4();
-  const ts = nowIso();
-  db.prepare("INSERT INTO review_queue (id, kind, payload, reason, created_at, dedupe_key, source, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(id, kind, JSON.stringify(payload), reason, ts, dedupeKey, source, ts);
-  return { id, duplicate: false };
+    const ts = nowIso();
+    const item = { id: uuidv4(), kind, payload: JSON.parse(JSON.stringify(payload)), reason, created_at: ts,
+      updated_at: ts, resolved: false, dedupe_key: dedupeKey, source, resolved_at: null, resolution: null };
+    s.review_queue.push(item);
+    return { id: item.id, duplicate: false };
+  });
 }
 
 function list({ includeResolved = false, kind = null } = {}) {
-  let rows = db.prepare("SELECT * FROM review_queue ORDER BY created_at ASC").all();
-  if (!includeResolved) rows = rows.filter((r) => !r.resolved);
-  if (kind) rows = rows.filter((r) => r.kind === kind);
-  return rows.map(toApi);
+  return store.read((s) => s.review_queue
+    .filter((r) => (includeResolved || !r.resolved) && (!kind || r.kind === kind))
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+    .map(toApi));
 }
 
 function resolve(id, resolution) {
-  const r = db.prepare("UPDATE review_queue SET resolved = 1, resolved_at = ?, resolution = ? WHERE id = ? AND resolved = 0")
-    .run(nowIso(), resolution || "resolved", id);
-  return r.changes > 0;
+  return store.tx((s) => {
+    const r = s.review_queue.find((x) => x.id === id && !x.resolved);
+    if (!r) return false;
+    r.resolved = true;
+    r.resolved_at = nowIso();
+    r.resolution = resolution || "resolved";
+    return true;
+  });
 }
 
 module.exports = { upsert, list, resolve };
