@@ -426,6 +426,21 @@
     font-family:"Inter",sans-serif; font-size:12px; padding:8px 10px; border:1px solid var(--line);
     border-radius:8px; background:var(--surface-2); color:var(--ink); flex:0 1 150px; min-width:120px;
   }
+  .eng-update-btn{
+    flex-shrink:0; height:34px; padding:0 14px; border-radius:8px; border:1px solid var(--accent);
+    background:var(--accent); color:#fff; font-size:12px; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:6px;
+  }
+  .eng-update-btn:disabled{ cursor:progress; opacity:.85; }
+  .eng-update-btn[data-state="no_changes"], .eng-update-btn[data-state="updated"]{ background:var(--good-soft); border-color:var(--good); color:var(--good); }
+  .eng-update-btn[data-state="review_required"]{ background:var(--warn-soft); border-color:var(--warn); color:var(--warn); }
+  .eng-update-btn[data-state="error"]{ background:var(--crit-soft); border-color:var(--crit); color:var(--crit); }
+  .eng-update-status{ font-size:11px; color:var(--ink-soft); line-height:1.35; flex:1 1 100%; }
+  .eng-update-status b{ color:var(--ink); font-weight:600; }
+  .eng-update-note{ margin:8px 20px 0; padding:8px 12px; border-radius:8px; font-size:12px; display:none;
+    border:1px solid var(--line); background:var(--surface-2); color:var(--ink); }
+  .eng-update-note.show{ display:block; }
+  .eng-update-note.err{ border-color:var(--crit); color:var(--crit); }
+  .eng-update-note.warn{ border-color:var(--warn); }
   .eng-clear-btn{
     flex-shrink:0; height:34px; padding:0 12px; border-radius:8px; border:1px solid var(--line);
     background:none; color:var(--ink-soft); font-size:11.5px; font-weight:600; cursor:pointer;
@@ -714,7 +729,10 @@
         <option value="none">Не указан</option>
       </select>
       <button type="button" class="eng-clear-btn" id="engFilterClearBtn">Сбросить фильтры</button>
+      <button type="button" class="eng-update-btn" id="engUpdateBtn" data-state="ready" title="Проверить файл плана и применить разрешённые изменения">Обновить</button>
+      <div class="eng-update-status" id="engUpdateStatus"></div>
     </div>
+    <div class="eng-update-note" id="engUpdateNote" role="status" aria-live="polite"></div>
 
     <div class="eng-unconfirmed" id="engUnconfirmed" style="display:none;"></div>
 
@@ -1275,7 +1293,68 @@
     }).catch(function(){ /* keep client-side defaults */ });
   }
 
+  // ---- «Обновить»: manual plan update + status indicator (Yekaterinburg time) ----
+  var ENG_UPDATE_LABEL = { ready:"Обновить", busy:"Обновление...", updated:"Обновлено", no_changes:"Изменений нет",
+    review_required:"Требуется проверка", error:"Ошибка обновления" };
+  var engUpdateRunning = false, engUpdateResetTimer = null, engUpdateStatusData = null;
+  function fmtTz(iso, tz){
+    if(!iso) return "—";
+    var d = new Date(iso); if(isNaN(d.getTime())) return "—";
+    try {
+      var p = {}; new Intl.DateTimeFormat("ru-RU", { timeZone: tz || undefined, day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit", hourCycle:"h23" })
+        .formatToParts(d).forEach(function(x){ p[x.type] = x.value; });
+      return p.day+"."+p.month+"."+p.year+", "+p.hour+":"+p.minute;
+    } catch(e){ return fmtTs(iso); }
+  }
+  function setEngUpdateBtn(state){
+    var b = document.getElementById("engUpdateBtn"); if(!b) return;
+    b.setAttribute("data-state", state);
+    b.textContent = ENG_UPDATE_LABEL[state] || ENG_UPDATE_LABEL.ready;
+    b.disabled = state === "busy";
+  }
+  function renderEngUpdateStatus(){
+    var el = document.getElementById("engUpdateStatus"); if(!el) return;
+    var st = engUpdateStatusData;
+    if(!st){ el.textContent = ""; return; }
+    var sc = st.schedule || {}, tz = sc.timezone || st.timezone;
+    if(!st.configured){ el.innerHTML = "Источник файла плана не настроен — кнопка «Обновить» недоступна до настройки сервера."; return; }
+    var parts = ["Последняя проверка: <b>"+fmtTz(st.last_check_at, tz)+"</b>",
+      "Последняя синхронизация данных: <b>"+fmtTz(st.last_sync_at, tz)+"</b>"];
+    if(sc.schedule_active) parts.push(sc.next_run_at ? "Следующее обновление: <b>"+fmtTz(sc.next_run_at, tz)+"</b>" : "Следующее обновление: <b>не запланировано</b>");
+    var tail = ' <span style="color:var(--ink-faint);">('+escapeHtml(tz||"")+')</span>';
+    var err = sc.schedule_error ? '<div style="color:var(--crit);">Расписание остановлено: '+escapeHtml(sc.schedule_error)+'</div>' : "";
+    el.innerHTML = parts.join(" · ") + tail + err;
+  }
+  function loadEngUpdateStatus(){
+    return apiFetch("/api/plan-source/status").then(function(st){ engUpdateStatusData = st; renderEngUpdateStatus(); }).catch(function(){});
+  }
+  function showEngUpdateNote(text, kind){
+    var n = document.getElementById("engUpdateNote"); if(!n) return;
+    n.textContent = text; n.className = "eng-update-note show" + (kind ? " "+kind : "");
+    clearTimeout(n._t); n._t = setTimeout(function(){ n.className = "eng-update-note"; }, 9000);
+  }
+  function runEngUpdate(){
+    if(engUpdateRunning) return;
+    engUpdateRunning = true; clearTimeout(engUpdateResetTimer);
+    setEngUpdateBtn("busy");
+    apiFetch("/api/plan-source/update", { method:"POST", body:{} })
+      .then(function(r){
+        var ui = r.ui || { state:"error", message:"Нет ответа" };
+        engUpdateStatusData = r.state || engUpdateStatusData;
+        setEngUpdateBtn(ui.state === "busy" ? "ready" : ui.state);
+        showEngUpdateNote(ui.message, ui.state === "error" ? "err" : ui.state === "review_required" || ui.state === "busy" ? "warn" : "");
+        return loadEngProjects();
+      })
+      .catch(function(err){ setEngUpdateBtn("error"); showEngUpdateNote("Ошибка обновления: "+err.message, "err"); })
+      .then(function(){
+        engUpdateRunning = false; renderEngUpdateStatus();
+        engUpdateResetTimer = setTimeout(function(){ setEngUpdateBtn("ready"); }, 8000);
+      });
+  }
+  document.getElementById("engUpdateBtn").addEventListener("click", function(e){ e.stopPropagation(); runEngUpdate(); });
+
   function loadEngProjects(){
+    loadEngUpdateStatus();
     var ready = engStagesLoaded ? Promise.resolve() : loadStages().then(function(){ engStagesLoaded = true; });
     return ready.then(function(){
       return Promise.all([apiFetch("/api/projects"), apiFetch("/api/review-queue").catch(function(){ return []; })]);
@@ -1815,7 +1894,10 @@
       (st.last_file ? row("Файл", escapeHtml(st.last_file.name)+' · SHA-256 '+escapeHtml(String(st.last_file.sha256).slice(0,12))+'…') : "") +
       row("Создано / обновлено / без изменений / на проверку", (c.new||0)+" / "+(c.updated||0)+" / "+(c.unchanged||0)+" / "+(c.review||0)) +
       (st.last_error ? row("Последняя ошибка", '<span class="eng-status err">'+escapeHtml(st.last_error)+'</span>') : "") +
-      (st.next_check_at ? row("Следующая проверка", fmtTs(st.next_check_at)) : "") +
+      (function(){ var sc = st.schedule || {}; var tz = sc.timezone || st.timezone;
+        return row("Расписание", sc.schedule_active ? ("рабочие дни (календарь "+escapeHtml(sc.work_calendar)+") в "+escapeHtml(sc.schedule_time||"—")+" "+escapeHtml(tz)+
+          (sc.next_run_at ? " · следующее: "+fmtTz(sc.next_run_at, tz) : "")+(sc.schedule_error ? ' <span class="eng-status err">'+escapeHtml(sc.schedule_error)+'</span>' : ""))
+          : "выключено (только кнопка «Обновить»)"); })() +
       '</table>' +
       '<div class="eng-form-row" style="margin-top:10px;">' +
       '<button type="button" class="btn" data-action="eng-src-check">Проверить обновления</button>' +
@@ -1887,7 +1969,7 @@
     document.activeElement && document.activeElement.blur();
     renderEngSubviewLists();
     return apiFetch(url, { method:"POST", body: body || {} })
-      .then(function(r){ engSource = r.state || r; var res = r.result || {}; engSourceBusy = res.error ? ("Результат: "+res.error) : ""; })
+      .then(function(r){ engSource = r.state || r; var res = r.result || {}; engSourceBusy = r.ui ? r.ui.message : (res.error ? ("Результат: "+res.error) : ""); })
       .catch(function(err){ engSourceBusy = err.message; })
       .then(function(){ document.activeElement && document.activeElement.blur(); return Promise.all([loadImports(), loadEngProjects()]); });
   }
@@ -1952,7 +2034,7 @@
         .then(function(){ btn.disabled = false; document.activeElement && document.activeElement.blur(); return loadImports(); });
       return;
     }
-    if(act === "eng-src-check"){ engSourcePreview = null; engSourceAction(btn, "/api/plan-source/check", {}, "Проверка…"); return; }
+    if(act === "eng-src-check"){ engSourcePreview = null; engSourceAction(btn, "/api/plan-source/update", {}, "Проверка…"); return; }
     if(act === "eng-src-dryrun"){ engSourcePreview = null; engSourceAction(btn, "/api/plan-source/check", { dry_run:true }, "Пробный анализ… (может занять до минуты)"); return; }
     if(act === "eng-src-preview"){
       apiFetch("/api/plan-source/preview").then(function(p){ engSourcePreview = p; document.activeElement && document.activeElement.blur(); renderEngSubviewLists(); }).catch(function(err){ showSyncNote(err.message); });

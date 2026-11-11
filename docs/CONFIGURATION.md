@@ -17,11 +17,14 @@ Secrets live only in environment variables, or in a secret manager that sets the
 | `PM_API_URL`, `PM_AGENT_API_KEY` | agent CLI | the Штурман server and key. Set automatically for in-app imports |
 | `PLAN_AGENT_STATE_DIR` | agent CLI | agent state directory (in-app: `PLAN_IMPORT_DIR/state`) |
 | `PLAN_TARGET_MONTH` | app, agent CLI | `YYYY-MM` target month for monthly workbooks, or `auto` (current month in `PLAN_TIMEZONE`) |
-| `PLAN_SOURCE_TYPE`, `PLAN_SOURCE_PATH`, `PLAN_SOURCE_PATTERN` | app | automatic plan retrieval source (see `docs/FILE_SOURCE.md`). Monitoring is off while the type or path is empty |
-| `PLAN_CHECK_INTERVAL_MINUTES` | app | minutes between checks (default 30) |
-| `PLAN_AUTO_SYNC_ENABLED` | app | `false` (default): manual approval; `true`: automatic mode with safe changes only. Switchable in the UI |
-| `PLAN_TIMEZONE` | app | time zone that decides the current month (default `UTC`; set it explicitly) |
-| `PLAN_SOURCE_SETTLE_SECONDS`, `PLAN_SOURCE_INITIAL_DELAY_SECONDS` | app | file must be unchanged this long before it is read (default 5); first check after start (default 15) |
+| `PLAN_SOURCE_TYPE`, `PLAN_SOURCE_PATH`, `PLAN_SOURCE_PATTERN` | app | the planning workbook for the daily check and the «Обновить» button (see `docs/FILE_SOURCE.md`) |
+| `PLAN_AUTO_MONITOR_ENABLED`, `PLAN_SCHEDULE_ENABLED` | app | scheduled check on/off (default `true`) |
+| `PLAN_SCHEDULE_TIME`, `PLAN_TIMEZONE` | app | run time and time zone (default `09:00`, `Asia/Yekaterinburg`) |
+| `PLAN_WORK_CALENDAR` | app | production calendar `config/work_calendar/<ID>.json` (default `RU`) |
+| `PLAN_SCHEDULE_GRACE_MINUTES` | app | a run later than this is recorded as missed (default 30) |
+| `PLAN_AUTO_SYNC_ENABLED` | app | apply permitted changes automatically; others go to review. Switchable in the UI |
+| `PLAN_REQUIRE_APPROVAL` | app | must be `true`: changes outside the automatic rules always need approval |
+| `PLAN_SOURCE_SETTLE_SECONDS` | app | the file must be unchanged this long before it is read (default 5) |
 | `PM_DASHBOARD_URL` | `verify-deployment` | dashboard page URL, if it differs from the API |
 | `PLAN_AGENT_REQUIRE_VERIFIED_DEPLOYMENT` | agent CLI | `1` (default): a command-line sync runs only after `verify-deployment` reported READY. In-app imports set `0`, because the agent talks to its own server |
 

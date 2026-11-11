@@ -15,7 +15,7 @@ const agentRouter = require("./routes/agent");
 const reviewQueueRouter = require("./routes/reviewQueue");
 const planImportsRouter = require("./routes/planImports");
 const planSourceRouter = require("./routes/planSource");
-const planSourceMonitor = require("./planSource/monitor");
+const planScheduler = require("./planSource/scheduler");
 const store = require("./store");
 
 seed();
@@ -79,8 +79,9 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Штурман dashboard listening on http://localhost:${PORT}`); // eslint-disable-line no-console
-    // Automatic plan retrieval: starts only when PLAN_SOURCE_TYPE and PLAN_SOURCE_PATH are set.
-    planSourceMonitor.start();
+    // Daily working-day plan check: active only when PLAN_SOURCE_TYPE and PLAN_SOURCE_PATH are set
+    // and PLAN_AUTO_MONITOR_ENABLED / PLAN_SCHEDULE_ENABLED are not false.
+    planScheduler.start();
   });
 }
 

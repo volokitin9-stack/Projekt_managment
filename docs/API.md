@@ -30,7 +30,8 @@ There is no user authentication, as in the original app. Protect them at the net
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/plan-source/status` | source, current month, last check / change / sync, status, counts, last error, current version, recent versions and events |
+| GET | `/api/plan-source/status` | source, current month, last check / change / sync, status, counts, last error, current version, recent versions and events; `schedule`: time, time zone, calendar, next run, schedule error, execution history |
+| POST | `/api/plan-source/update` | the board's «Обновить»: check now (any day), apply permitted changes, record the execution. Returns `{ui: {state, message}, run, result, state}`; `ui.state` is one of `updated`, `no_changes`, `review_required`, `error`, `busy` |
 | GET | `/api/plan-source/preview[?version=ID]` | project-level changes of a version's dry run (new / update / review, changed fields, activity changes, conflicts) |
 | POST | `/api/plan-source/check` | check the source now. `{"dry_run": true}` analyses the current file again even when unchanged (never writes) |
 | POST | `/api/plan-source/approve` | `{"confirm": true, "approved_by": "..."}`: manual mode, approve and sync the pending version |

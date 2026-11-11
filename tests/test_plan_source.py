@@ -17,9 +17,10 @@ PLAN = "work_plan_2026.xlsx"
 
 
 def _server(tmp_path, inbox, **env):
+    # Scheduler under test control: no real timer, start-up before 09:00 local time.
     e = {"PLAN_SOURCE_TYPE": "local", "PLAN_SOURCE_PATH": str(inbox), "PLAN_TARGET_MONTH": "2026-11",
-         "PLAN_TIMEZONE": "Europe/Moscow", "PLAN_SOURCE_SETTLE_SECONDS": "0", "PLAN_CHECK_INTERVAL_MINUTES": "600",
-         "PLAN_SOURCE_INITIAL_DELAY_SECONDS": "3600"}
+         "PLAN_TIMEZONE": "Asia/Yekaterinburg", "PLAN_SOURCE_SETTLE_SECONDS": "0", "PLAN_WORK_CALENDAR": "RU",
+         "PLAN_SCHEDULER_TEST_HOOKS": "1", "PLAN_SCHEDULER_TEST_NOW": "2026-11-11T02:00:00Z"}
     e.update(env)
     return ShturmanServer(tmp_path / "srv", extra_env=e).start()
 
@@ -89,7 +90,8 @@ def test_adapter_and_month_unit_checks(tmp_path):
 # ---------------------------------------------------------------- configuration
 def test_not_configured_by_default(shturman):
     st = status(shturman)
-    assert st["configured"] is False and st["status"] == "not_configured" and st["monitoring"] is False
+    assert st["configured"] is False and st["status"] == "not_configured"
+    assert st["schedule"]["schedule_active"] is False
     code, r = check(shturman)
     assert r["result"]["status"] == "not_configured"
 
@@ -97,7 +99,7 @@ def test_not_configured_by_default(shturman):
 def test_status_shows_configuration_without_secrets(srv, inbox):
     st = status(srv)
     assert st["configured"] and st["source"] == {"type": "local", "location": str(inbox), "pattern": None}
-    assert st["auto_sync_enabled"] is False and st["current_month"] == "2026-11" and st["timezone"] == "Europe/Moscow"
+    assert st["auto_sync_enabled"] is False and st["current_month"] == "2026-11" and st["timezone"] == "Asia/Yekaterinburg"
     assert "secret-test-key" not in json.dumps(st)
 
 
@@ -340,26 +342,6 @@ def test_versions_and_status_survive_restart(srv, inbox):
     assert after["current_version"]["sha256"] == before["current_version"]["sha256"]
     assert after["last_sync_at"] == before["last_sync_at"] and after["status"] == "up_to_date"
     assert check(srv)[1]["result"]["status"] == "unchanged"
-
-
-def test_monitor_starts_with_the_backend(tmp_path, inbox):
-    put(inbox, 1)
-    s = _server(tmp_path, inbox, PLAN_SOURCE_INITIAL_DELAY_SECONDS="0", PLAN_CHECK_INTERVAL_MINUTES="0.05")
-    try:
-        deadline = time.time() + 90
-        st = status(s)
-        while time.time() < deadline and st["last_check_result"] is None:
-            time.sleep(0.5)
-            st = status(s)
-        assert st["monitoring"] is True
-        assert st["last_check_result"] == "changed" and st["status"] == "awaiting_approval"
-        time.sleep(5)                                                # further scheduled checks: unchanged
-        st = status(s)
-        assert st["last_check_result"] == "unchanged"
-        assert len(requests.get(s.url + "/api/plan-imports").json()) == 1
-        assert projects(s) == []                                     # manual mode: nothing written
-    finally:
-        s.stop()
 
 
 def test_import_view_has_sync_status_section():

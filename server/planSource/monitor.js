@@ -28,7 +28,8 @@ const { createSource, SourceError } = require("./adapters");
 const REPO_ROOT = path.join(__dirname, "..", "..");
 const MAX_EVENTS = 300;
 const FINAL = ["synced", "awaiting_approval", "blocked", "failed"];   // same bytes are not processed again
-const DEFAULT_TZ = "UTC";
+const DEFAULT_TZ = "Asia/Yekaterinburg";
+const MAX_RUNS = 1000;
 
 function nowIso() {
   return new Date().toISOString();
@@ -43,18 +44,27 @@ function bool(v, dflt) {
 function config(env = process.env) {
   const type = (env.PLAN_SOURCE_TYPE || "").trim();
   const p = (env.PLAN_SOURCE_PATH || "").trim();
-  const minutes = Number(env.PLAN_CHECK_INTERVAL_MINUTES || 30);
+  const time = (env.PLAN_SCHEDULE_TIME || "09:00").trim();
   return {
     type,
     path: p,
     pattern: (env.PLAN_SOURCE_PATTERN || "").trim() || null,
     configured: !!(type && p),
-    intervalMinutes: Number.isFinite(minutes) && minutes > 0 ? minutes : 30,
+    monitorEnabled: bool(env.PLAN_AUTO_MONITOR_ENABLED, true),
+    scheduleEnabled: bool(env.PLAN_SCHEDULE_ENABLED, true),
+    scheduleTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(time) ? time : null,
+    scheduleTimeRaw: time,
+    graceMinutes: env.PLAN_SCHEDULE_GRACE_MINUTES === undefined ? 30 : Number(env.PLAN_SCHEDULE_GRACE_MINUTES),
+    workCalendar: (env.PLAN_WORK_CALENDAR || "RU").trim(),
     settleSeconds: env.PLAN_SOURCE_SETTLE_SECONDS === undefined ? 5 : Number(env.PLAN_SOURCE_SETTLE_SECONDS),
     autoSyncDefault: bool(env.PLAN_AUTO_SYNC_ENABLED, false),
+    // Changes outside the automatic policy always need approval. "false" is not
+    // supported (it would bypass review) and is reported as a configuration warning.
+    requireApproval: true,
+    requireApprovalWarning: bool(env.PLAN_REQUIRE_APPROVAL, true) ? null
+      : "PLAN_REQUIRE_APPROVAL=false не поддерживается: изменения вне правил автосинхронизации всегда требуют утверждения",
     targetMonth: (env.PLAN_TARGET_MONTH || "auto").trim() || "auto",
-    timezone: (env.PLAN_TIMEZONE || DEFAULT_TZ).trim(),
-    initialDelaySeconds: env.PLAN_SOURCE_INITIAL_DELAY_SECONDS === undefined ? 15 : Number(env.PLAN_SOURCE_INITIAL_DELAY_SECONDS)
+    timezone: (env.PLAN_TIMEZONE || DEFAULT_TZ).trim()
   };
 }
 
@@ -152,7 +162,14 @@ function classifyDryRun(json) {
  *   approve: in manual mode, approve and sync the pending version (full scope, like
  *            «Синхронизировать» in the import view)
  */
-async function check({ trigger = "manual", force = false } = {}) {
+async function check(opts = {}) {
+  const ph = { check: "not_run", analysis: "not_run", sync: "not_run" };
+  const r = await checkInner(opts, ph);
+  r.phases = ph;
+  return r;
+}
+
+async function checkInner({ trigger = "manual", force = false } = {}, ph) {
   const cfg = config();
   const startedAt = nowIso();
   if (!cfg.configured) {
@@ -178,6 +195,8 @@ async function check({ trigger = "manual", force = false } = {}) {
     fs.mkdirSync(imports.FILES_DIR, { recursive: true });
     tmp = path.join(imports.FILES_DIR, `.incoming-${uuidv4()}`);
     const snap = await source.fetchTo(tmp, probe);
+    ph.check = "ok";
+    setState({ last_successful_check_at: nowIso() });
 
     let version = findVersion(snap.sha256, month);
     const auto = autoSyncEnabled(cfg);
@@ -221,6 +240,7 @@ async function check({ trigger = "manual", force = false } = {}) {
       setState({ running: { started_at: startedAt, trigger, phase: "analyze" } });
       const r = await imports.analyzeImport(importId);
       const outcome = classifyDryRun(r.json);
+      ph.analysis = outcome === "ready" ? "ok" : outcome;
       const counts = r.json ? r.json.counts : null;
       setState({ last_counts: counts });
       if (outcome === "failed") {
@@ -274,10 +294,11 @@ async function check({ trigger = "manual", force = false } = {}) {
       return { status: "awaiting_approval", version: findVersion(version.sha256, month) };
     }
     if (tmp) { fs.unlinkSync(tmp); tmp = null; }
-    return await syncVersion(version.id, { autoSafe: true, by: "plan_source_auto", startedAt, trigger });
+    return await syncVersion(version.id, { autoSafe: true, by: "plan_source_auto", startedAt, trigger }, ph);
   } catch (e) {
     if (tmp) { try { fs.unlinkSync(tmp); } catch (x) { /* ignore */ } }
     const se = e instanceof SourceError ? e : new SourceError("internal", `${e.name}: ${e.message}`);
+    if (ph.check !== "ok") ph.check = "failed";
     const level = se.transient ? "warn" : "error";
     logEvent(level, se.code, se.message);
     if (!se.transient && se.code !== "not_found" && se.code !== "not_configured") {
@@ -293,13 +314,14 @@ async function check({ trigger = "manual", force = false } = {}) {
 }
 
 /** Sync a version. Caller holds the job lock. */
-async function syncVersion(versionId, { autoSafe, by, startedAt, trigger }) {
+async function syncVersion(versionId, { autoSafe, by, startedAt, trigger }, ph) {
   const version = store.read((s) => JSON.parse(JSON.stringify(s.plan_source_versions.find((x) => x.id === versionId))));
   const imp = imports.getImport(version.import_id);
   updateVersion(version.id, { status: "syncing", phase: autoSafe ? "auto_sync" : "sync" });
   setState({ running: { started_at: startedAt || nowIso(), trigger, phase: "sync" } });
   const r = await imports.approveAndSync(imp, by, { autoSafe });
   const counts = r.json ? r.json.counts : null;
+  if (ph) ph.sync = r.complete ? "ok" : "failed";
   if (r.complete) {
     const v = updateVersion(version.id, { status: "synced", phase: null, synced_at: nowIso(), sync_import_id: imp.id,
       sync_run_id: r.json.run_id, counts, sync_scope: autoSafe ? "automatic" : "full", error: null,
@@ -365,8 +387,8 @@ function status() {
   return {
     configured: cfg.configured,
     source: cfg.configured ? { type: cfg.type, location: cfg.path, pattern: cfg.pattern } : null,
-    monitoring: timer.running,
-    interval_minutes: cfg.intervalMinutes,
+    require_approval: true,
+    config_warnings: [cfg.requireApprovalWarning].filter(Boolean),
     auto_sync_enabled: autoSyncEnabled(cfg),
     auto_sync_default: cfg.autoSyncDefault,
     timezone: cfg.timezone,
@@ -385,7 +407,7 @@ function status() {
     last_file: st.last_file || null,
     current_version: versions.find((v) => v.id === st.current_version_id) || null,
     pending_import_id: st.pending_import_id || null,
-    next_check_at: timer.nextAt,
+    last_successful_check_at: st.last_successful_check_at || null,
     versions,
     events
   };
@@ -415,40 +437,52 @@ function setAutoSync(enabled) {
   logEvent("info", "auto_sync", enabled ? "автоматическая синхронизация включена" : "автоматическая синхронизация выключена");
 }
 
-// --------------------------------------------------------------------- timer
-const timer = { running: false, handle: null, nextAt: null };
-
-function schedule(ms) {
-  clearTimeout(timer.handle);
-  timer.nextAt = new Date(Date.now() + ms).toISOString();
-  timer.handle = setTimeout(async () => {
-    timer.nextAt = null;
-    try {
-      await check({ trigger: "schedule" });
-    } catch (e) {
-      console.error("[plan-source] check crashed:", e); // eslint-disable-line no-console
-    }
-    if (timer.running) schedule(config().intervalMinutes * 60 * 1000);
-  }, ms);
-  if (timer.handle.unref) timer.handle.unref();
+// ------------------------------------------------------------ execution history
+/**
+ * Record one execution (scheduled or manual) with its phases kept apart:
+ * check (file located, stable copy, SHA-256) / analysis (dry run) / sync (data written).
+ * outcome summarises it; "synced" only when a sync completed.
+ */
+function outcomeOf(r) {
+  const v = r.version || {};
+  switch (r.status) {
+    case "unchanged":
+      return v.status === "synced" ? "unchanged" : "review_required";
+    case "synced":
+      return v.held_for_review ? "synced_review_required" : "synced";
+    case "awaiting_approval":
+    case "dry_run":
+    case "blocked":
+      return "review_required";
+    case "busy":
+      return "busy";
+    case "not_configured":
+      return "not_configured";
+    default:
+      return "error";
+  }
 }
 
-/** Start periodic checks (once per process). Returns false when no source is configured. */
-function start() {
-  const cfg = config();
-  if (timer.running) return true;
-  if (!cfg.configured) return false;
-  timer.running = true;
-  logEvent("info", "monitor_started", `мониторинг источника ${cfg.type}:${cfg.path} каждые ${cfg.intervalMinutes} мин` +
-    `, автосинхронизация ${autoSyncEnabled(cfg) ? "включена" : "выключена"}`);
-  schedule(Math.max(0, cfg.initialDelaySeconds) * 1000);
-  return true;
+function recordRun(fields) {
+  const run = Object.assign({ id: uuidv4(), at: nowIso() }, fields);
+  store.tx((s) => {
+    s.plan_source_runs.push(run);
+    if (s.plan_source_runs.length > MAX_RUNS) s.plan_source_runs.splice(0, s.plan_source_runs.length - MAX_RUNS);
+  });
+  return run;
 }
 
-function stop() {
-  timer.running = false;
-  clearTimeout(timer.handle);
-  timer.nextAt = null;
+/** Run a check and record it. trigger: "schedule" | "manual". */
+async function runRecorded({ trigger, scheduledDate = null, scheduledFor = null }) {
+  const startedAt = nowIso();
+  const r = await check({ trigger });
+  const v = r.version || {};
+  const run = recordRun({ trigger, scheduled_date: scheduledDate, scheduled_for: scheduledFor, started_at: startedAt,
+    finished_at: nowIso(), outcome: outcomeOf(r), result: r.status, phases: r.phases || null,
+    version_id: v.id || null, sha256: v.sha256 || null, counts: v.counts || null, held_for_review: v.held_for_review || 0,
+    error: r.error || null, error_code: r.code || null });
+  return { run, result: r };
 }
 
-module.exports = { config, targetMonth, check, approvePending, status, preview, setAutoSync, start, stop, classifyDryRun };
+module.exports = { config, targetMonth, check, runRecorded, recordRun, outcomeOf, approvePending, status, preview, setAutoSync,
+  classifyDryRun, logEvent };

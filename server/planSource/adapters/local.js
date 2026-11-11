@@ -51,6 +51,9 @@ class LocalFileSource {
   constructor(o) {
     if (!o.path) throw new SourceError("not_configured", "PLAN_SOURCE_PATH не задан");
     this.configured = o.path;
+    // A Windows network path (\\server\share\...) can be opened directly only on Windows.
+    this.unc = /^(\\\\|\/\/)[^\\/]/.test(o.path);
+    this.platform = o.platform || process.platform;
     this.full = path.resolve(o.baseDir || process.cwd(), o.path);
     this.pattern = o.pattern ? globToRegex(o.pattern) : null;
     this.settleMs = Math.max(0, Number(o.settleSeconds == null ? 5 : o.settleSeconds)) * 1000;
@@ -61,15 +64,42 @@ class LocalFileSource {
     return { type: "local", location: this.configured, pattern: this.pattern ? String(this.pattern) : null };
   }
 
+  /**
+   * A configured path without a plan-file extension that does not exist as such
+   * (e.g. "...\\AfM СIS+OEM 2026") is resolved to <path>.xlsx / .xlsm / .xls / .csv,
+   * provided exactly one of them exists.
+   */
+  async resolvePath() {
+    if (this.unc && this.platform !== "win32") {
+      throw new SourceError("unavailable", `сетевой путь ${this.configured} открывается напрямую только на Windows; ` +
+        "на Linux смонтируйте папку (CIFS) и укажите в PLAN_SOURCE_PATH путь монтирования");
+    }
+    try {
+      return { file: this.full, st: await fs.promises.stat(this.full) };
+    } catch (e) {
+      if (e.code !== "ENOENT" || PLAN_EXTENSIONS.includes(path.extname(this.full).toLowerCase())) {
+        throw mapFsError(e, this.configured);
+      }
+    }
+    const found = [];
+    for (const ext of PLAN_EXTENSIONS) {
+      try {
+        found.push({ file: this.full + ext, st: await fs.promises.stat(this.full + ext) });
+      } catch (e) {
+        if (e.code !== "ENOENT") throw mapFsError(e, this.configured + ext);
+      }
+    }
+    if (!found.length) throw new SourceError("not_found", `не найдено: ${this.configured} (проверены расширения ${PLAN_EXTENSIONS.join(", ")})`);
+    if (found.length > 1) {
+      throw new SourceError("ambiguous", `${this.configured}: найдено несколько файлов (${found.map((f) => path.basename(f.file)).join(", ")}) — укажите расширение в PLAN_SOURCE_PATH`);
+    }
+    this.resolvedExtension = path.extname(found[0].file);
+    return found[0];
+  }
+
   /** Locate the planning file and check that it can be read safely now. */
   async probe() {
-    let st;
-    try {
-      st = await fs.promises.stat(this.full);
-    } catch (e) {
-      throw mapFsError(e, this.configured);
-    }
-    let file = this.full;
+    let { file, st } = await this.resolvePath();
     if (st.isDirectory()) {
       let names;
       try {
@@ -84,7 +114,7 @@ class LocalFileSource {
         throw new SourceError("ambiguous", `в папке ${this.configured} несколько файлов плана: ${candidates.sort().join(", ")} — ` +
           "оставьте один файл или задайте PLAN_SOURCE_PATTERN", { candidates });
       }
-      file = path.join(this.full, candidates[0]);
+      file = path.join(file, candidates[0]);
       try {
         st = await fs.promises.stat(file);
       } catch (e) {

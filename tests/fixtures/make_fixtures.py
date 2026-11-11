@@ -176,7 +176,9 @@ def month_tasks(variant: int = 1):
                        days={3: 5} if fact else None))
     for eng, task, stage, group in [("Петров",) + dev, ("Петров",) + order, ("Петров",) + lab,
                                     ("Петров",) + kd, ("Петров",) + c1, ("Петров",) + pdm]:
-        t.append(_task(eng, "CIS", "ЗК", 3, "Honda", "CR-V (1995-2001)", "Защита картера+КПП", task, stage, group))
+        plan = 12 if (variant == 5 and task == "Разработать") else 8     # variant 5: only planned hours change
+        t.append(_task(eng, "CIS", "ЗК", 3, "Honda", "CR-V (1995-2001)", "Защита картера+КПП", task, stage, group,
+                       plan=plan))
     t.append(_task("Сидоров", "CIS", "ЗК", 2, "Belgee", "X80 (P145)", "Защита батареи", "1С", "Серия перевод",
                    "Перевод", art="XX10TEST01", ok=1, plan=4, fact=4))
     t.append(_task("Сидоров", "CIS", "ЗК", 2, "Belgee", "X80 (P145)", "Защита батареи", "Прочее", "Оформление",
