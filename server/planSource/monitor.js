@@ -57,6 +57,8 @@ function config(env = process.env) {
     graceMinutes: env.PLAN_SCHEDULE_GRACE_MINUTES === undefined ? 30 : Number(env.PLAN_SCHEDULE_GRACE_MINUTES),
     workCalendar: (env.PLAN_WORK_CALENDAR || "RU").trim(),
     settleSeconds: env.PLAN_SOURCE_SETTLE_SECONDS === undefined ? 5 : Number(env.PLAN_SOURCE_SETTLE_SECONDS),
+    readAttempts: env.PLAN_SOURCE_READ_ATTEMPTS === undefined ? 3 : Number(env.PLAN_SOURCE_READ_ATTEMPTS),
+    retrySeconds: env.PLAN_SOURCE_RETRY_SECONDS === undefined ? 5 : Number(env.PLAN_SOURCE_RETRY_SECONDS),
     autoSyncDefault: bool(env.PLAN_AUTO_SYNC_ENABLED, false),
     // Changes outside the automatic policy always need approval. "false" is not
     // supported (it would bypass review) and is reported as a configuration warning.
@@ -190,17 +192,23 @@ async function checkInner({ trigger = "manual", force = false } = {}, ph) {
     const month = targetMonth(cfg);
     setState({ current_month: month });
     const source = createSource(cfg.type, { path: cfg.path, baseDir: REPO_ROOT, pattern: cfg.pattern,
-      settleSeconds: cfg.settleSeconds });
+      settleSeconds: cfg.settleSeconds, readAttempts: cfg.readAttempts, retrySeconds: cfg.retrySeconds });
     const probe = await source.probe();
     fs.mkdirSync(imports.FILES_DIR, { recursive: true });
     tmp = path.join(imports.FILES_DIR, `.incoming-${uuidv4()}`);
     const snap = await source.fetchTo(tmp, probe);
     ph.check = "ok";
-    setState({ last_successful_check_at: nowIso() });
+    ph.snapshot = { attempts: snap.attempts, retried: snap.retried, open_in_excel: !!snap.open_in_excel };
+    if (snap.retried) {
+      logEvent("info", "snapshot_retried", `${snap.name}: снимок получен с попытки ${snap.attempts} (${snap.retried})`);
+    }
+    setState({ last_successful_check_at: nowIso(), last_check_message: "Проверка файла выполнена" });
 
     let version = findVersion(snap.sha256, month);
     const auto = autoSyncEnabled(cfg);
-    const fileInfo = { name: snap.name, size: snap.size, mtime: snap.mtime, sha256: snap.sha256 };
+    // open_in_excel is informational only; change detection uses the SHA-256 of the saved content.
+    const fileInfo = { name: snap.name, size: snap.size, mtime: snap.mtime, sha256: snap.sha256,
+      open_in_excel: !!snap.open_in_excel };
     if (version && FINAL.includes(version.status) && !force &&
         !(version.status === "awaiting_approval" && auto && version.dry_run_ready)) {
       fs.unlinkSync(tmp);

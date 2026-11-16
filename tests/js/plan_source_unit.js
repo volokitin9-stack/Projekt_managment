@@ -1,6 +1,6 @@
 "use strict";
 // Unit checks of the file-source adapters and month logic (run by tests/test_plan_source.py).
-// Usage: node tests/js/plan_source_unit.js <scratch dir>
+// Usage: node tests/js/plan_source_unit.js <scratch dir> <valid .xlsx file>
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
@@ -11,7 +11,7 @@ const { createSource, SourceError } = require("../../server/planSource/adapters"
 const { isTempName } = require("../../server/planSource/adapters/local");
 const monitor = require("../../server/planSource/monitor");
 
-const XLSX_HEAD = Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4, 5, 6]);
+const XLSX_HEAD = fs.readFileSync(process.argv[3]);   // a real (synthetic) workbook
 const results = {};
 
 async function expectCode(promise, code) {
@@ -39,20 +39,22 @@ async function expectCode(promise, code) {
   results.relative_path_and_sha256 = true;
 
   // a modification between probe and the end of the copy = incomplete transfer -> copy discarded
-  const p2 = await rel.probe();
+  const once = createSource("local", { path: "src/plan.xlsx", baseDir: dir, settleSeconds: 0, readAttempts: 1 });
+  const p2 = await once.probe();
   fs.appendFileSync(path.join(src, "plan.xlsx"), Buffer.from("more"));
-  await expectCode(rel.fetchTo(path.join(dir, "copy2"), p2), "unstable");
+  await expectCode(once.fetchTo(path.join(dir, "copy2"), p2), "unstable");
   assert.ok(!fs.existsSync(path.join(dir, "copy2")), "partial copy must be removed");
   results.incomplete_transfer = true;
 
-  // file modified just now: wait until it has settled
-  const fresh = createSource("local", { path: path.join(src, "plan.xlsx"), settleSeconds: 3600 });
-  await expectCode(fresh.probe(), "unstable");
+  // file saved just now: not read until it has settled
+  const fresh = createSource("local", { path: path.join(src, "plan.xlsx"), settleSeconds: 3600, readAttempts: 1 });
+  await expectCode(fresh.fetchTo(path.join(dir, "copy_fresh")), "unstable");
   results.settle_time = true;
 
-  // Excel lock file
+  // an Excel owner file (~$) is NOT a reason to refuse the workbook
   fs.writeFileSync(path.join(src, "~$plan.xlsx"), "lock");
-  await expectCode(rel.probe(), "locked");
+  const lp = await rel.probe();
+  assert.strictEqual(lp.open_in_excel, true);
   fs.unlinkSync(path.join(src, "~$plan.xlsx"));
   results.locked = true;
 
@@ -86,7 +88,7 @@ async function expectCode(promise, code) {
   fs.writeFileSync(path.join(dir, "empty.xlsx"), "");
   await expectCode(createSource("local", { path: path.join(dir, "empty.xlsx"), settleSeconds: 0 }).probe(), "empty");
   fs.writeFileSync(path.join(dir, "bad.xlsx"), "this is not a workbook");
-  const bad = createSource("local", { path: path.join(dir, "bad.xlsx"), settleSeconds: 0 });
+  const bad = createSource("local", { path: path.join(dir, "bad.xlsx"), settleSeconds: 0, retrySeconds: 0 });
   await expectCode(bad.fetchTo(path.join(dir, "copy3")), "corrupt");
   results.missing_empty_corrupt = true;
 

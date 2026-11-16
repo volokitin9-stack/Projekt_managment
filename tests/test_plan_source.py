@@ -20,7 +20,8 @@ def _server(tmp_path, inbox, **env):
     # Scheduler under test control: no real timer, start-up before 09:00 local time.
     e = {"PLAN_SOURCE_TYPE": "local", "PLAN_SOURCE_PATH": str(inbox), "PLAN_TARGET_MONTH": "2026-11",
          "PLAN_TIMEZONE": "Asia/Yekaterinburg", "PLAN_SOURCE_SETTLE_SECONDS": "0", "PLAN_WORK_CALENDAR": "RU",
-         "PLAN_SCHEDULER_TEST_HOOKS": "1", "PLAN_SCHEDULER_TEST_NOW": "2026-11-11T02:00:00Z"}
+         "PLAN_SCHEDULER_TEST_HOOKS": "1", "PLAN_SCHEDULER_TEST_NOW": "2026-11-11T02:00:00Z",
+         "PLAN_SOURCE_RETRY_SECONDS": "0"}
     e.update(env)
     return ShturmanServer(tmp_path / "srv", extra_env=e).start()
 
@@ -80,8 +81,10 @@ def by_name(ps, name):
 
 # ---------------------------------------------------------------- unit level
 def test_adapter_and_month_unit_checks(tmp_path):
-    out = subprocess.run(["node", "tests/js/plan_source_unit.js", str(tmp_path)], cwd=ROOT, capture_output=True,
-                         text=True, timeout=60)
+    wb = tmp_path / "valid.xlsx"
+    make_fixtures.make_monthly_workbook(wb, 1)
+    out = subprocess.run(["node", "tests/js/plan_source_unit.js", str(tmp_path / "u"), str(wb)], cwd=ROOT,
+                         capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
     assert all(res.values()) and len(res) == 10
@@ -271,17 +274,17 @@ def test_unexpected_structure_fails_safely(srv, inbox):
     assert status(srv)["current_version"] is None or status(srv)["status"] == "failed"
 
 
-def test_missing_file_and_locked_file(srv, inbox):
+def test_missing_file_and_workbook_open_in_excel(srv, inbox):
     c, r = check(srv)
     assert r["result"]["status"] == "error" and r["result"]["code"] == "not_found"
     put(inbox, 1)
-    (inbox / ("~$" + PLAN)).write_text("owner")
-    c, r = check(srv)
-    assert r["result"]["status"] == "waiting" and r["result"]["code"] == "locked"
-    assert requests.get(srv.url + "/api/plan-imports").json() == []      # file not read
-    (inbox / ("~$" + PLAN)).unlink()
+    (inbox / ("~$" + PLAN)).write_text("owner")                          # open in Excel: still read
     c, r = check(srv)
     assert r["result"]["status"] == "awaiting_approval"
+    assert len(requests.get(srv.url + "/api/plan-imports").json()) == 1
+    (inbox / ("~$" + PLAN)).unlink()                                     # closing Excel changes nothing
+    c, r = check(srv)
+    assert r["result"]["status"] == "unchanged"
 
 
 def test_file_still_being_written_is_not_read(tmp_path, inbox):

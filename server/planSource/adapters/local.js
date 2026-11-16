@@ -3,14 +3,24 @@
 // Local filesystem source: a file, or a folder with exactly one planning file.
 // A mounted network share (SMB/NFS) is used through this adapter, too.
 //
-// Safe-read rules:
-// * Office lock files (~$name.xlsx) and temporary/partial files (.tmp, .part,
-//   .crdownload, hidden files) are never read.
-// * A file is read only once its size and modification time have not changed
-//   for PLAN_SOURCE_SETTLE_SECONDS, and it is copied while being hashed. If the
-//   size or modification time changed during the copy, the copy is discarded
-//   ("still being written") and the next check tries again.
-// * The original file is only read, never modified, moved or locked.
+// Reading a workbook that colleagues keep open in Excel (shared SMB folder):
+// * Office owner files (~$name.xlsx) and temporary/partial files (.tmp, .part,
+//   .crdownload, hidden files) are never import candidates. An owner file is
+//   NOT a reason to refuse the workbook: Excel keeps the last SAVED version in
+//   the .xlsx and allows others to read it; the owner file is not touched.
+// * The workbook is opened read-only (fs.open "r"). On Windows, Node/libuv opens
+//   with FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE and GENERIC_READ,
+//   which is compatible with Excel holding the file open; no permission is
+//   bypassed and nothing is locked. A real sharing violation (EBUSY) postpones
+//   the read.
+// * Snapshot: record size + modification time, copy to a local file while
+//   hashing (SHA-256), then check that size and modification time are still the
+//   same and that the copy is a structurally valid workbook (ZIP central
+//   directory with [Content_Types].xml and xl/workbook.xml; OLE header for .xls).
+//   A changed source, a sharing violation or an invalid snapshot is retried
+//   PLAN_SOURCE_READ_ATTEMPTS times, PLAN_SOURCE_RETRY_SECONDS apart; only a
+//   validated snapshot is processed.
+// * The original file is only read, never written, moved, renamed or locked.
 
 const fs = require("fs");
 const path = require("path");
@@ -33,7 +43,9 @@ function mapFsError(e, where) {
   if (e instanceof SourceError) return e;
   if (e.code === "ENOENT") return new SourceError("not_found", `не найдено: ${where}`);
   if (e.code === "EACCES" || e.code === "EPERM") return new SourceError("permission_denied", `нет доступа: ${where}`);
-  if (e.code === "EBUSY" || e.code === "ETXTBSY") return new SourceError("locked", `файл занят другой программой: ${where}`);
+  if (e.code === "EBUSY" || e.code === "ETXTBSY") {
+    return new SourceError("sharing_violation", `${where}: нарушение совместного доступа (файл временно недоступен для чтения)`);
+  }
   if (["EIO", "ENOTCONN", "EHOSTDOWN", "ETIMEDOUT", "ESTALE", "ENXIO", "ENODEV"].includes(e.code)) {
     return new SourceError("unavailable", `расположение недоступно (${e.code}): ${where}`);
   }
@@ -57,7 +69,10 @@ class LocalFileSource {
     this.full = path.resolve(o.baseDir || process.cwd(), o.path);
     this.pattern = o.pattern ? globToRegex(o.pattern) : null;
     this.settleMs = Math.max(0, Number(o.settleSeconds == null ? 5 : o.settleSeconds)) * 1000;
+    this.attempts = Math.max(1, Math.floor(Number(o.readAttempts == null ? 3 : o.readAttempts)) || 1);
+    this.retryMs = Math.max(0, Number(o.retrySeconds == null ? 5 : o.retrySeconds)) * 1000;
     this.now = o.now || (() => Date.now());
+    this.sleep = o.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
   describe() {
@@ -127,65 +142,145 @@ class LocalFileSource {
     if (!PLAN_EXTENSIONS.includes(path.extname(name).toLowerCase())) {
       throw new SourceError("unexpected_format", `${name}: неподдерживаемый тип файла (ожидается ${PLAN_EXTENSIONS.join(", ")})`);
     }
-    const dir = path.dirname(file);
-    const owners = [`~$${name}`, `~$${name.slice(2)}`];
-    for (const o of owners) {
-      if (fs.existsSync(path.join(dir, o))) {
-        throw new SourceError("locked", `${name} открыт в Excel (найден ${o}) — проверка будет повторена`);
-      }
-    }
     if (st.size === 0) throw new SourceError("empty", `${name} пуст (0 байт)`);
-    const age = this.now() - st.mtimeMs;
-    if (age < this.settleMs) {
-      throw new SourceError("unstable", `${name} изменён ${Math.round(age / 1000)} с назад — ожидание окончания записи`);
-    }
-    return { file, name, size: st.size, mtime_ms: Math.round(st.mtimeMs), mtime: new Date(st.mtimeMs).toISOString() };
+    const dir = path.dirname(file);
+    const ownerFile = [`~$${name}`, `~$${name.slice(2)}`].find((o) => fs.existsSync(path.join(dir, o))) || null;
+    return { file, name, size: st.size, mtime_ms: Math.round(st.mtimeMs), mtime: new Date(st.mtimeMs).toISOString(),
+      open_in_excel: !!ownerFile };
   }
 
-  /** Copy the file to dest while hashing it. Returns the SHA-256 and the probe data. */
+  /**
+   * Take a validated snapshot of the last saved version into dest (retried, see top).
+   * Returns the probe data + { sha256, bytes, attempts }.
+   */
   async fetchTo(dest, probe) {
-    const p = probe || (await this.probe());
+    let last = null;
+    for (let attempt = 1; attempt <= this.attempts; attempt += 1) {
+      if (attempt > 1) await this.sleep(this.retryMs);
+      try {
+        const p = attempt === 1 && probe ? probe : await this.probe();
+        const snap = await this.snapshotOnce(dest, p);
+        return Object.assign(snap, { attempts: attempt, retried: attempt > 1 ? last.code : null });
+      } catch (e) {
+        if (!(e instanceof SourceError) || !["unstable", "sharing_violation", "corrupt_snapshot"].includes(e.code)) throw e;
+        last = e;
+      }
+    }
+    const n = this.attempts;
+    if (last.code === "unstable") {
+      throw new SourceError("unstable", `Файл изменяется, повторная попытка: ${last.message} (попыток: ${n})`);
+    }
+    if (last.code === "sharing_violation") {
+      throw new SourceError("sharing_violation", `Не удалось прочитать сохранённую версию Excel: ${last.message} (попыток: ${n}); ` +
+        "чтение будет повторено при следующем обновлении");
+    }
+    throw new SourceError("corrupt", `Не удалось прочитать сохранённую версию Excel: ${last.message} (попыток: ${n})`);
+  }
+
+  /** One snapshot attempt. Throws unstable / sharing_violation / corrupt_snapshot (retried) or a final error. */
+  async snapshotOnce(dest, p) {
+    const age = this.now() - p.mtime_ms;
+    if (age < this.settleMs) {
+      throw new SourceError("unstable", `${p.name} сохранён ${Math.max(0, Math.round(age / 1000))} с назад — ожидание окончания записи`);
+    }
+    const discard = () => { try { fs.unlinkSync(dest); } catch (x) { /* ignore */ } };
+    let src = null;
+    let out = null;
     const hash = crypto.createHash("sha256");
     let bytes = 0;
-    let head = Buffer.alloc(0);
-    await new Promise((resolve, reject) => {
-      const rs = fs.createReadStream(p.file);
-      const ws = fs.createWriteStream(dest, { flags: "wx" });
-      rs.on("data", (chunk) => {
+    try {
+      try {
+        src = await fs.promises.open(p.file, "r");       // read-only; never "r+", "w" or "a"
+      } catch (e) {
+        throw mapFsError(e, p.name);
+      }
+      const st0 = await src.stat();
+      if (st0.size !== p.size || Math.round(st0.mtimeMs) !== p.mtime_ms) {
+        throw new SourceError("unstable", `${p.name} изменился перед чтением`);
+      }
+      out = await fs.promises.open(dest, "wx");
+      const buf = Buffer.alloc(1024 * 1024);
+      for (;;) {
+        let r;
+        try {
+          r = await src.read(buf, 0, buf.length, bytes);
+        } catch (e) {
+          throw mapFsError(e, p.name);
+        }
+        if (!r.bytesRead) break;
+        const chunk = buf.subarray(0, r.bytesRead);
         hash.update(chunk);
-        bytes += chunk.length;
-        if (head.length < 8) head = Buffer.concat([head, chunk.slice(0, 8 - head.length)]);
-      });
-      rs.on("error", (e) => { ws.destroy(); reject(mapFsError(e, p.name)); });
-      ws.on("error", (e) => { rs.destroy(); reject(e); });
-      ws.on("finish", resolve);
-      rs.pipe(ws);
-    }).catch((e) => {
-      try { fs.unlinkSync(dest); } catch (x) { /* ignore */ }
+        await out.write(chunk, 0, chunk.length, bytes);
+        bytes += r.bytesRead;
+      }
+      await out.sync();
+    } catch (e) {
+      if (out) await out.close().catch(() => {});
+      if (src) await src.close().catch(() => {});
+      discard();
       throw e;
-    });
-    const fail = (err) => {
-      try { fs.unlinkSync(dest); } catch (x) { /* ignore */ }
-      throw err;
-    };
+    }
+    await out.close();
+    await src.close();
     let after;
     try {
       after = await fs.promises.stat(p.file);
     } catch (e) {
-      fail(mapFsError(e, p.name));
+      discard();
+      throw mapFsError(e, p.name);
     }
     if (after.size !== p.size || Math.round(after.mtimeMs) !== p.mtime_ms || bytes !== p.size) {
-      fail(new SourceError("unstable", `${p.name} изменился во время чтения (неполная передача) — копия отброшена`));
+      discard();
+      throw new SourceError("unstable", `${p.name} изменился во время копирования — копия отброшена`);
     }
-    const ext = path.extname(p.name).toLowerCase();
-    if ((ext === ".xlsx" || ext === ".xlsm") && !head.slice(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) {
-      fail(new SourceError("corrupt", `${p.name} не является файлом Excel (повреждён или передан не полностью)`));
-    }
-    if (ext === ".xls" && !head.equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]))) {
-      fail(new SourceError("corrupt", `${p.name} не является файлом Excel 97-2003 (повреждён)`));
+    const problem = validateWorkbookFile(dest, path.extname(p.name).toLowerCase());
+    if (problem) {
+      discard();
+      throw new SourceError("corrupt_snapshot", `${p.name}: снимок не является корректной книгой Excel (${problem})`);
     }
     return Object.assign({}, p, { sha256: hash.digest("hex"), bytes });
   }
 }
 
-module.exports = { LocalFileSource, isTempName, PLAN_EXTENSIONS };
+/**
+ * Structural check of a snapshot. Returns null when valid, else the problem.
+ * .xlsx/.xlsm: ZIP end-of-central-directory, every central entry points to a local
+ * header, and the package contains [Content_Types].xml and xl/workbook.xml.
+ * .xls: OLE compound-file header. .csv: not empty.
+ */
+function validateWorkbookFile(file, ext) {
+  const b = fs.readFileSync(file);
+  if (!b.length) return "пустой файл";
+  if (ext === ".csv") return null;
+  if (ext === ".xls") {
+    return b.subarray(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]))
+      ? null : "нет заголовка файла Excel 97-2003";
+  }
+  if (b.length < 22 || b.readUInt32LE(0) !== 0x04034b50) return "нет заголовка ZIP";
+  let eocd = -1;
+  for (let i = b.length - 22; i >= Math.max(0, b.length - 22 - 65535); i -= 1) {
+    if (b.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) return "нет оглавления ZIP (файл обрезан)";
+  const count = b.readUInt16LE(eocd + 10);
+  const cdSize = b.readUInt32LE(eocd + 12);
+  const cdOff = b.readUInt32LE(eocd + 16);
+  if (cdOff + cdSize > eocd || !count) return "оглавление ZIP повреждено";
+  const names = new Set();
+  let pos = cdOff;
+  for (let i = 0; i < count; i += 1) {
+    if (pos + 46 > b.length || b.readUInt32LE(pos) !== 0x02014b50) return "запись оглавления ZIP повреждена";
+    const nameLen = b.readUInt16LE(pos + 28);
+    const extraLen = b.readUInt16LE(pos + 30);
+    const commentLen = b.readUInt16LE(pos + 32);
+    const local = b.readUInt32LE(pos + 42);
+    if (local + 30 > b.length || b.readUInt32LE(local) !== 0x04034b50) return "локальный заголовок ZIP повреждён";
+    names.add(b.subarray(pos + 46, pos + 46 + nameLen).toString("utf-8"));
+    pos += 46 + nameLen + extraLen + commentLen;
+  }
+  if (!names.has("[Content_Types].xml")) return "в пакете нет [Content_Types].xml";
+  if (!names.has("xl/workbook.xml")) return "в пакете нет xl/workbook.xml";
+  return null;
+}
+
+module.exports = { LocalFileSource, isTempName, validateWorkbookFile, PLAN_EXTENSIONS };

@@ -432,7 +432,7 @@
   }
   .eng-update-btn:disabled{ cursor:progress; opacity:.85; }
   .eng-update-btn[data-state="no_changes"], .eng-update-btn[data-state="updated"]{ background:var(--good-soft); border-color:var(--good); color:var(--good); }
-  .eng-update-btn[data-state="review_required"]{ background:var(--warn-soft); border-color:var(--warn); color:var(--warn); }
+  .eng-update-btn[data-state="review_required"], .eng-update-btn[data-state="retry"]{ background:var(--warn-soft); border-color:var(--warn); color:var(--warn); }
   .eng-update-btn[data-state="error"]{ background:var(--crit-soft); border-color:var(--crit); color:var(--crit); }
   .eng-update-status{ font-size:11px; color:var(--ink-soft); line-height:1.35; flex:1 1 100%; }
   .eng-update-status b{ color:var(--ink); font-weight:600; }
@@ -1295,7 +1295,7 @@
 
   // ---- «Обновить»: manual plan update + status indicator (Yekaterinburg time) ----
   var ENG_UPDATE_LABEL = { ready:"Обновить", busy:"Обновление...", updated:"Обновлено", no_changes:"Изменений нет",
-    review_required:"Требуется проверка", error:"Ошибка обновления" };
+    review_required:"Требуется проверка", error:"Ошибка обновления", retry:"Файл изменяется" };
   var engUpdateRunning = false, engUpdateResetTimer = null, engUpdateStatusData = null;
   function fmtTz(iso, tz){
     if(!iso) return "—";
@@ -1342,7 +1342,7 @@
         var ui = r.ui || { state:"error", message:"Нет ответа" };
         engUpdateStatusData = r.state || engUpdateStatusData;
         setEngUpdateBtn(ui.state === "busy" ? "ready" : ui.state);
-        showEngUpdateNote(ui.message, ui.state === "error" ? "err" : ui.state === "review_required" || ui.state === "busy" ? "warn" : "");
+        showEngUpdateNote(ui.message, ui.state === "error" ? "err" : ui.state === "review_required" || ui.state === "busy" || ui.state === "retry" ? "warn" : "");
         return loadEngProjects();
       })
       .catch(function(err){ setEngUpdateBtn("error"); showEngUpdateNote("Ошибка обновления: "+err.message, "err"); })
@@ -1869,7 +1869,7 @@
   var engSource = null, engSourcePreview = null, engSourceBusy = "";
   var ENG_SOURCE_STATUS = { not_configured:"Источник не настроен", idle:"Ожидание первой проверки", up_to_date:"Актуально",
     awaiting_approval:"Есть изменения — ожидает утверждения", blocked:"Требуется проверка файла", failed:"Файл не обработан",
-    waiting:"Файл занят или записывается — повтор позже", error:"Ошибка", interrupted:"Прервано — будет повторено" };
+    waiting:"Файл изменяется, повторная попытка", error:"Ошибка", interrupted:"Прервано — будет повторено" };
   var ENG_SOURCE_CHANGE = { "new":"Новый", update:"Изменение", review:"На проверку", duplicate:"Дубликат?", error:"Ошибка" };
   function engSourceHtml(){
     var st = engSource;

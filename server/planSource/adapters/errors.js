@@ -6,8 +6,10 @@
  *   not_found        - file/folder missing
  *   unavailable      - location unreachable (share offline, I/O error, HTTP 5xx, timeout)
  *   permission_denied- access/authentication refused
- *   locked           - the file is open/locked by another program
- *   unstable         - the file is still being written / transfer incomplete
+ *   sharing_violation- the OS refused read access because of another program's share mode
+ *                      (NOT the presence of an Excel ~$ owner file, which is ignored)
+ *   unstable         - the file changed while being copied / was just saved
+ *   corrupt_snapshot - a snapshot attempt produced an invalid workbook (retried; finally "corrupt")
  *   empty            - zero-byte file
  *   corrupt          - the content is not a valid file of its type
  *   unexpected_format- not a supported planning-file type
@@ -23,7 +25,7 @@ class SourceError extends Error {
     this.details = details || null;
   }
   get transient() {
-    return ["unavailable", "locked", "unstable"].includes(this.code);
+    return ["unavailable", "sharing_violation", "unstable"].includes(this.code);
   }
 }
 

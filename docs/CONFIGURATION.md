@@ -24,7 +24,8 @@ Secrets live only in environment variables, or in a secret manager that sets the
 | `PLAN_SCHEDULE_GRACE_MINUTES` | app | a run later than this is recorded as missed (default 30) |
 | `PLAN_AUTO_SYNC_ENABLED` | app | apply permitted changes automatically; others go to review. Switchable in the UI |
 | `PLAN_REQUIRE_APPROVAL` | app | must be `true`: changes outside the automatic rules always need approval |
-| `PLAN_SOURCE_SETTLE_SECONDS` | app | the file must be unchanged this long before it is read (default 5) |
+| `PLAN_SOURCE_SETTLE_SECONDS` | app | a save younger than this is not read yet (default 5) |
+| `PLAN_SOURCE_READ_ATTEMPTS`, `PLAN_SOURCE_RETRY_SECONDS` | app | snapshot attempts per check and the pause between them (default 3 and 5 s); used when the workbook changes during the copy or a real sharing violation occurs |
 | `PM_DASHBOARD_URL` | `verify-deployment` | dashboard page URL, if it differs from the API |
 | `PLAN_AGENT_REQUIRE_VERIFIED_DEPLOYMENT` | agent CLI | `1` (default): a command-line sync runs only after `verify-deployment` reported READY. In-app imports set `0`, because the agent talks to its own server |
 

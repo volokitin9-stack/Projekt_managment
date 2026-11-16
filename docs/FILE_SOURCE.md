@@ -105,7 +105,9 @@ All settings are environment variables of the server (`.env`). No path is built 
 | `PLAN_AUTO_SYNC_ENABLED` | `false` (`.env.example`: `true`) | apply permitted changes automatically; the UI switch overrides it |
 | `PLAN_REQUIRE_APPROVAL` | `true` | changes outside the automatic rules need approval. `false` is not supported and is shown as a configuration warning |
 | `PLAN_TARGET_MONTH` | `auto` | `auto` = current month in `PLAN_TIMEZONE`, or a fixed `YYYY-MM` |
-| `PLAN_SOURCE_SETTLE_SECONDS` | `5` | the file must be unchanged this long before it is read |
+| `PLAN_SOURCE_SETTLE_SECONDS` | `5` | a save younger than this is not read yet (retried) |
+| `PLAN_SOURCE_READ_ATTEMPTS` | `3` | snapshot attempts per check (changed file, sharing violation, invalid snapshot) |
+| `PLAN_SOURCE_RETRY_SECONDS` | `5` | pause between snapshot attempts |
 | `AGENT_API_KEY` | (required) | without it, no file is processed |
 
 `PLAN_CHECK_INTERVAL_MINUTES` and `PLAN_SOURCE_INITIAL_DELAY_SECONDS` from the previous version are no longer used: there is no interval polling.
@@ -113,17 +115,18 @@ All settings are environment variables of the server (`.env`). No path is built 
 ### The corporate workbook
 
 ```text
-\\s017\Отделы\Конструкторский\1. Планы и отчеты\AfM СIS+OEM 2026
+\\s017\Отделы\Конструкторский\1. Планы и отчеты\AfM СIS+OEM 2026.xlsx
 ```
 
 * Run Штурман on a machine **inside the corporate network**, under an account that can read this folder. The development cloud environment cannot reach `s017`.
 * **Windows host:** put the path as is into `.env`, unquoted or in single quotes:
   ```text
-  PLAN_SOURCE_PATH=\\s017\Отделы\Конструкторский\1. Планы и отчеты\AfM СIS+OEM 2026
+  PLAN_SOURCE_PATH=\\s017\Отделы\Конструкторский\1. Планы и отчеты\AfM СIS+OEM 2026.xlsx
   ```
   The extension is found automatically. If both `.xlsx` and `.xlsm` exist, the run stops; then write the full name with its extension.
-* **Linux host:** mount the share, for example `mount -t cifs "//s017/Отделы" /mnt/s017 -o credentials=/etc/s017.cred,ro,iocharset=utf8`. Then set `PLAN_SOURCE_PATH=/mnt/s017/Конструкторский/1. Планы и отчеты/AfM СIS+OEM 2026`. A `\\s017\...` path on Linux is rejected with a clear message.
+* **Linux host:** mount the share, for example `mount -t cifs "//s017/Отделы" /mnt/s017 -o credentials=/etc/s017.cred,ro,iocharset=utf8`. Then set `PLAN_SOURCE_PATH=/mnt/s017/Конструкторский/1. Планы и отчеты/AfM СIS+OEM 2026.xlsx`. A `\\s017\...` path on Linux is rejected with a clear message.
 * The name contains a **Cyrillic «С»** in «СIS». Copy the name from Explorer rather than typing it.
+* **The workbook may stay open in Excel all day.** See "Reading a workbook that is open in Excel" below: no one needs to close it.
 * **Verify before relying on the schedule:** start the server, click «Обновить», and check that the status shows the real file name with its extension and a SHA-256 value. `Ошибка обновления: не найдено` or `нет доступа` means the path or the permissions are wrong. The file is only read, never written, locked or moved.
 
 ### Network shares and other sources
@@ -158,6 +161,33 @@ Everything else is **not written** and goes to **На проверке** (kind "
 
 The confirmed Kanban stage and the stage timer are never changed. The first import of a file structure (no approved mapping, or a changed structure) always waits for manual approval, even in automatic mode. Independent projects are processed even when others are held.
 
+## Reading a workbook that is open in Excel
+
+About 20 people work in the corporate workbook, and it can stay open all day. Excel keeps the last **saved** version in the `.xlsx` file and lets others read it. The `~$…` file next to it only records who has the workbook open. Штурман therefore:
+
+1. finds the exact workbook. `~$…`, `.tmp` and other temporary files are never import candidates;
+2. does **not** refuse the workbook because a `~$…` file exists. That file is never read, changed or deleted, and it never triggers an update;
+3. records the size and the last-modified time;
+4. opens the workbook **read-only**. On Windows, Node.js opens files with the standard read-sharing flags (`GENERIC_READ`, `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`), the same way Explorer copies a file that is open in Excel. No permission is bypassed, and no lock is taken or removed;
+5. copies the file into a local snapshot (`PLAN_IMPORT_DIR/files/`) while computing its SHA-256;
+6. checks that the size and last-modified time are still the same. If the file was saved during the copy, the snapshot is discarded;
+7. checks that the snapshot is a structurally valid workbook: ZIP central directory, `[Content_Types].xml` and `xl/workbook.xml` for `.xlsx`/`.xlsm`, the OLE header for `.xls`. The planning agent then opens it fully;
+8. retries a changed file, a real sharing violation (`EBUSY`) or an invalid snapshot up to `PLAN_SOURCE_READ_ATTEMPTS` times (default 3), `PLAN_SOURCE_RETRY_SECONDS` apart (default 5). Only a validated snapshot is processed.
+
+Change detection uses the SHA-256 of the saved contents. If the workbook is open but nobody saved, the result is «Изменений нет». If someone saved, the new saved version is processed. The scheduled 09:00 run, the «Обновить» button and «Проверить обновления» all use this same procedure.
+
+Statuses (button message and «Импорт плана»):
+
+| Message | When |
+|---|---|
+| Проверка файла выполнена | a valid snapshot was taken |
+| Изменений нет | same SHA-256 as the last processed version |
+| Файл обработан | the new saved version was analysed / synchronised |
+| Файл изменяется, повторная попытка | the file kept changing during the copy; retried at the next update |
+| Не удалось прочитать сохранённую версию Excel | the saved version could not be read (sharing violation, no access, damaged file) |
+
+The synthetic tests cover these scenarios on Linux, with the `~$` file and sharing violations simulated. A **live test with Excel holding the workbook open on `\\s017`** must be done on the Windows host; see the checklist below.
+
 ## Version tracking
 
 Each processed version is stored in `data/shturman.json` (`plan_source_versions`) with its SHA-256, size, modification time, month, import, counts and status: `analyzing`, `awaiting_approval`, `blocked`, `failed`, `syncing`, `synced`, `sync_failed` or `interrupted`.
@@ -175,8 +205,10 @@ Each processed version is stored in `data/shturman.json` (`plan_source_versions`
 | `not_found` | file or folder missing | status "Ошибка", retried on the next check |
 | `unavailable` | share offline, I/O error | "повтор позже", retried |
 | `permission_denied` | no read access | error + review item |
-| `locked` | `~$file.xlsx` present (open in Excel), or the file is busy | "повтор позже", the file is not read |
-| `unstable` | modified less than `PLAN_SOURCE_SETTLE_SECONDS` ago, or changed during the copy (incomplete transfer) | the copy is discarded, retried |
+| (none) | `~$file.xlsx` present: the workbook is open in Excel | **not an error**: the last saved version is read |
+| `sharing_violation` | the operating system refused read access (another program opened the file without read sharing) | retried within the check; then «Не удалось прочитать сохранённую версию Excel», retried at the next update; no review item |
+| `unstable` | saved less than `PLAN_SOURCE_SETTLE_SECONDS` ago, or changed during the copy | the snapshot is discarded and retried; then «Файл изменяется, повторная попытка»; no review item |
+| `corrupt` | the snapshot is not a valid workbook on every attempt | «Не удалось прочитать сохранённую версию Excel» + review item, nothing imported |
 | `empty` | 0 bytes | error, nothing imported |
 | `corrupt` | not a valid Excel file | error + review item, nothing imported |
 | `ambiguous` | several planning files in the folder | error + review item (keep one file or set `PLAN_SOURCE_PATTERN`) |
@@ -191,5 +223,6 @@ A failed check never changes project data. The store writes atomically and keeps
 2. Set `AGENT_API_KEY` and the variables above, then restart the server. The log shows `scheduler_started` with the next run date.
 3. Click «Обновить» on the board (or «Проверить обновления» in «Импорт плана»). Check the file name, month and counts.
 4. Approve the first version manually. Enable automatic mode only after that, if you want it.
+5. With the workbook **open in Excel on another PC**, click «Обновить» again. The expected message is «Изменений нет». Save a small change in Excel, click «Обновить», and the expected message starts with «Проверка файла выполнена. Файл обработан». This is the live test the automated tests cannot replace.
 
 **Automatic retrieval is operational only once a real source has been connected and checked this way on the production server.**

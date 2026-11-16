@@ -12,7 +12,8 @@ function fullStatus() {
   return Object.assign(monitor.status(), { schedule: scheduler.status() });
 }
 
-// Button state for the board («Обновить»).
+// Button state and message for the board («Обновить»).
+const CHECKED = "Проверка файла выполнена";
 function uiState(run, result) {
   const c = run.counts || {};
   const held = run.held_for_review || 0;
@@ -20,20 +21,27 @@ function uiState(run, result) {
     case "busy":
       return { state: "busy", message: "Обновление уже выполняется — дождитесь завершения" };
     case "unchanged":
-      return { state: "no_changes", message: "Изменений нет: файл не изменился" };
+      return { state: "no_changes", message: `Изменений нет (${CHECKED.toLowerCase()})` };
     case "synced":
-      return { state: "updated", message: `Обновлено: изменено ${c.updated || 0}, без изменений ${c.unchanged || 0}` };
+      return { state: "updated", message: `${CHECKED}. Файл обработан: обновлено ${c.updated || 0}, без изменений ${c.unchanged || 0}` };
     case "synced_review_required":
-      return { state: "review_required", message: `Обновлено ${c.updated || 0}; требуют проверки: ${held} (раздел «На проверке»)` };
+      return { state: "review_required", message: `${CHECKED}. Файл обработан: обновлено ${c.updated || 0}; требуют проверки: ${held} (раздел «На проверке»)` };
     case "review_required":
       return { state: "review_required", message: result.status === "blocked"
-        ? "Требуется проверка файла — данные не изменены (см. «Импорт плана»)"
-        : "Есть изменения, требующие утверждения — данные не изменены (см. «Импорт плана»)" };
+        ? `${CHECKED}. Требуется проверка файла — данные не изменены (см. «Импорт плана»)`
+        : `${CHECKED}. Файл обработан: есть изменения, требующие утверждения — данные не изменены (см. «Импорт плана»)` };
     case "not_configured":
       return { state: "error", message: "Источник файла плана не настроен (PLAN_SOURCE_TYPE / PLAN_SOURCE_PATH)" };
     default:
-      return { state: "error", message: `Ошибка обновления: ${run.error || result.status}` };
+      break;
   }
+  const code = run.error_code;
+  if (code === "unstable") return { state: "retry", message: "Файл изменяется, повторная попытка — при следующем обновлении" };
+  if (["sharing_violation", "corrupt", "permission_denied", "unavailable", "not_found", "empty"].includes(code)) {
+    const detail = String(run.error || "").replace(/^Не удалось прочитать сохранённую версию Excel:\s*/, "");
+    return { state: "error", message: `Не удалось прочитать сохранённую версию Excel: ${detail}` };
+  }
+  return { state: "error", message: `Ошибка обновления: ${run.error || result.status}` };
 }
 
 const router = express.Router();

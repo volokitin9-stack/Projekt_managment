@@ -31,7 +31,7 @@ def make_server(tmp_path, inbox, start_now="2026-11-11T02:00:00Z", **env):
          "PLAN_TIMEZONE": "Asia/Yekaterinburg", "PLAN_WORK_CALENDAR": "RU", "PLAN_SCHEDULE_TIME": "09:00",
          "PLAN_AUTO_MONITOR_ENABLED": "true", "PLAN_SCHEDULE_ENABLED": "true", "PLAN_AUTO_SYNC_ENABLED": "true",
          "PLAN_REQUIRE_APPROVAL": "true", "PLAN_SOURCE_SETTLE_SECONDS": "0",
-         "PLAN_SCHEDULER_TEST_HOOKS": "1", "PLAN_SCHEDULER_TEST_NOW": start_now}
+         "PLAN_SCHEDULER_TEST_HOOKS": "1", "PLAN_SCHEDULER_TEST_NOW": start_now, "PLAN_SOURCE_RETRY_SECONDS": "0"}
     e.update(env)
     return ShturmanServer(tmp_path / "srv", extra_env=e).start()
 
@@ -249,7 +249,8 @@ def test_unchanged_file(srv, inbox):
     n_imports = len(imports(srv))
     r = update(srv)
     assert r["ui"]["state"] == "no_changes" and r["ui"]["message"].startswith("Изменений нет")
-    assert r["run"]["phases"] == {"check": "ok", "analysis": "not_run", "sync": "not_run"}
+    assert {k: r["run"]["phases"][k] for k in ("check", "analysis", "sync")} == \
+        {"check": "ok", "analysis": "not_run", "sync": "not_run"}
     assert len(imports(srv)) == n_imports
     # the scheduled run records a successful check without another import
     assert tick(srv, at(WED))["outcome"] == "unchanged"
@@ -264,13 +265,13 @@ def test_changed_file_with_safe_updates(srv, inbox):
     r = tick(srv, at(WED))
     assert r["outcome"] == "synced"
     rec = runs(srv, "schedule")[0]
-    assert rec["phases"] == {"check": "ok", "analysis": "ok", "sync": "ok"}
+    assert {k: rec["phases"][k] for k in ("check", "analysis", "sync")} == {"check": "ok", "analysis": "ok", "sync": "ok"}
     h2 = requests.get(f"{srv.url}/api/projects/{honda['id']}").json()
     assert h2["workload"]["planned_hours"] == honda["workload"]["planned_hours"] + 4
     assert len(projects(srv)) == len(ps)
     put(inbox, 1)                                                         # back to 8 h via the button
     u = update(srv)
-    assert u["ui"]["state"] == "updated" and u["ui"]["message"].startswith("Обновлено")
+    assert u["ui"]["state"] == "updated" and "Файл обработан" in u["ui"]["message"]
 
 
 def test_changed_file_requiring_review(srv, inbox):
