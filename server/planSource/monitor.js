@@ -140,8 +140,18 @@ function classifyDryRun(json) {
 }
 
 // ------------------------------------------------------------------ recovery
+const PYTHON_LAUNCH_FAILURE = /Python was not found|Не удалось запустить Python|Python для агента планирования не найден/i;
+
 (function recoverInterrupted() {
   store.tx((s) => {
+    // Versions that "failed" only because the agent's Python could not start (earlier versions
+    // recorded them as file failures) are processed again once the interpreter is fixed.
+    s.plan_source_versions.forEach((v) => {
+      if (["failed", "sync_failed"].includes(v.status) && PYTHON_LAUNCH_FAILURE.test(String(v.error || ""))) {
+        v.status = "interrupted";
+        v.updated_at = nowIso();
+      }
+    });
     s.plan_source_versions.forEach((v) => {
       if (["fetching", "analyzing", "syncing"].includes(v.status)) {
         v.status = "interrupted";
@@ -247,6 +257,14 @@ async function checkInner({ trigger = "manual", force = false } = {}, ph) {
       updateVersion(version.id, { status: "analyzing", phase: "analyze", import_id: importId });
       setState({ running: { started_at: startedAt, trigger, phase: "analyze" } });
       const r = await imports.analyzeImport(importId);
+      if (r.launchError) {
+        // The interpreter could not run - not a problem of the file: keep the version retryable.
+        ph.analysis = "failed";
+        updateVersion(version.id, { status: "interrupted", phase: null, error: r.launchError });
+        logEvent("error", "python_unavailable", r.launchError, { version_id: version.id });
+        setState({ running: null, status: "error", last_error: r.launchError, last_check_result: "error" });
+        return { status: "error", code: "python_unavailable", error: r.launchError };
+      }
       const outcome = classifyDryRun(r.json);
       ph.analysis = outcome === "ready" ? "ok" : outcome;
       const counts = r.json ? r.json.counts : null;

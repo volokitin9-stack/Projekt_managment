@@ -82,6 +82,9 @@ if (require.main === module) {
     // Daily working-day plan check: active only when PLAN_SOURCE_TYPE and PLAN_SOURCE_PATH are set
     // and PLAN_AUTO_MONITOR_ENABLED / PLAN_SCHEDULE_ENABLED are not false.
     planScheduler.start();
+    const py = require("./pythonResolver").getPython();
+    if (py.ok) console.log(`Python для агента планирования: ${py.executable} (${py.source})`); // eslint-disable-line no-console
+    else console.error(`ВНИМАНИЕ: ${py.error}. Проверено: ${py.attempted.join("; ")}`); // eslint-disable-line no-console
   });
 }
 

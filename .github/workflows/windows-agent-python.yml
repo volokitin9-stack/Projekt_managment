@@ -1,0 +1,37 @@
+# Windows integration test of the planning agent's Python interpreter:
+# a project-local .venv (.venv\Scripts\python.exe), no Microsoft Store alias,
+# manual («Обновить») and scheduled (09:00) runs on the same interpreter.
+name: windows-agent-python
+
+on:
+  push:
+    branches: [claude/ecstatic-pascal-7feq2f]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Node dependencies
+        run: npm ci
+      - name: Create the project-local virtual environment
+        shell: cmd
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Interpreter, snapshot and schedule tests (Windows)
+        shell: cmd
+        env:
+          PYTHONUTF8: "1"
+        run: .venv\Scripts\python.exe -m pytest -q tests/test_python_resolver.py tests/test_snapshot.py
+      - name: npm test resolves the same interpreter
+        shell: cmd
+        run: npm test -- tests/test_python_resolver.py -k resolution_order

@@ -57,7 +57,8 @@ class ShturmanServer:
         e = dict(os.environ)
         e.update(PORT=str(self.port), DATA_DIR=str(self.data_dir), UPLOADS_DIR=str(self.uploads),
                  PLAN_IMPORT_DIR=str(self.plan_dir), AGENT_API_KEY=self.key,
-                 SEED_DEMO_DATA="true" if self.seed_demo else "false", PLAN_AGENT_PYTHON=sys.executable)
+                 SEED_DEMO_DATA="true" if self.seed_demo else "false", PLAN_PYTHON_EXECUTABLE=sys.executable)
+        e.pop("PLAN_AGENT_PYTHON", None)
         for k in [k for k in e if k.startswith("PLAN_SOURCE_") or k in ("PLAN_AUTO_SYNC_ENABLED", "PLAN_TARGET_MONTH",
                                                                          "PLAN_CHECK_INTERVAL_MINUTES", "PLAN_TIMEZONE")]:
             del e[k]

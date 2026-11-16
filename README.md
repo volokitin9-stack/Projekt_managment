@@ -47,11 +47,29 @@ Install the Node dependencies:
 npm install
 ```
 
-Install the Python dependencies of the planning agent:
+Create a virtual environment in the project folder and install the Python dependencies of the planning agent. The application finds `.venv` automatically.
+
+On Linux and macOS:
 
 ```bash
-python3 -m pip install -r requirements.txt
+python3 -m venv .venv
 ```
+
+```bash
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+On Windows (cmd):
+
+```bat
+py -3 -m venv .venv
+```
+
+```bat
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+To use a different interpreter, set its full path in `.env` as `PLAN_PYTHON_EXECUTABLE`, for example `C:\Users\user\Projekt_managment\.venv\Scripts\python.exe`. Writing just `python` or `python3` is not needed and not recommended on Windows, where these names can be the Microsoft Store alias. The server log shows the chosen interpreter at start-up: `Python для агента планирования: …`.
 
 Create the configuration file:
 
@@ -186,10 +204,10 @@ The tests start the real Node server with temporary databases and use synthetic 
 Install the development dependencies:
 
 ```bash
-python3 -m pip install -r requirements-dev.txt
+.venv/bin/python -m pip install -r requirements-dev.txt
 ```
 
-Run the tests (this runs `python3 -m pytest -q`):
+Run the tests (`npm test` runs pytest with the same interpreter as the application):
 
 ```bash
 npm test

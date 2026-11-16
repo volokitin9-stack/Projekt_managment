@@ -22,7 +22,7 @@ const REPO_ROOT = path.join(__dirname, "..", "..");
 const IMPORT_DIR = path.resolve(process.env.PLAN_IMPORT_DIR || "./data/plan-imports");
 const STATE_DIR = path.join(IMPORT_DIR, "state");
 const FILES_DIR = path.join(IMPORT_DIR, "files");
-const PYTHON = process.env.PLAN_AGENT_PYTHON || "python3";
+const { getPython } = require("../pythonResolver");
 const MAX_BYTES = Number(process.env.MAX_PLAN_UPLOAD_BYTES || 50 * 1024 * 1024);
 const RUN_TIMEOUT_MS = Number(process.env.PLAN_AGENT_TIMEOUT_MS || 10 * 60 * 1000);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_BYTES } });
@@ -58,8 +58,20 @@ function updateImport(id, fields) {
   store.tx((s) => Object.assign(s.plan_imports.find((x) => x.id === id), fields));
 }
 
+/** A diagnostic for a Python that could not run the agent (path + error code; never the environment). */
+function launchDiagnostic(exe, code, detail) {
+  return `Не удалось запустить Python-агент: «${exe}» (${code})${detail ? ` — ${detail}` : ""}. ` +
+    "Задайте PLAN_PYTHON_EXECUTABLE — полный путь к python.exe виртуального окружения проекта.";
+}
+
 function runAgent(args) {
   return new Promise((resolve) => {
+    const py = getPython();
+    if (!py.ok) {
+      const msg = `${py.error} (проверено: ${py.attempted.join("; ") || "—"})`;
+      return resolve({ code: -1, out: "", err: msg, json: null, launchError: msg, python: null });
+    }
+    const exe = py.executable;
     const port = process.env.PORT || 3000;
     const env = Object.assign({}, process.env, {
       PM_API_URL: `http://127.0.0.1:${port}`,
@@ -68,21 +80,45 @@ function runAgent(args) {
       // The agent talks to this very server; deployment verification of a
       // remote production host does not apply to the in-app import.
       PLAN_AGENT_REQUIRE_VERIFIED_DEPLOYMENT: "0",
-      PYTHONIOENCODING: "utf-8"
+      PYTHONIOENCODING: "utf-8",
+      PYTHONUTF8: "1"
     });
-    const child = spawn(PYTHON, ["-m", "plan_agent"].concat(args), { cwd: REPO_ROOT, env });
+    // Argument array + shell:false: a path with spaces is one argument, nothing is parsed by a shell.
+    let child;
+    try {
+      child = spawn(exe, ["-m", "plan_agent"].concat(args), { cwd: REPO_ROOT, env, shell: false, windowsHide: true });
+    } catch (e) {
+      const msg = launchDiagnostic(exe, e.code || e.name);
+      return resolve({ code: -1, out: "", err: msg, json: null, launchError: msg, python: exe });
+    }
     let out = "";
     let err = "";
     const timer = setTimeout(() => child.kill("SIGKILL"), RUN_TIMEOUT_MS);
     child.stdout.on("data", (d) => { out += d; });
     child.stderr.on("data", (d) => { err += d; });
-    child.on("error", (e) => { clearTimeout(timer); resolve({ code: -1, out, err: String(e), json: null }); });
+    let done = false;
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      if (done) return;
+      done = true;
+      const msg = launchDiagnostic(exe, e.code || "spawn_error");
+      resolve({ code: -1, out, err: msg, json: null, launchError: msg, python: exe });
+    });
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (done) return;
+      done = true;
       const line = out.trim().split("\n").reverse().find((l) => l.startsWith("{"));
       let json = null;
       try { json = line ? JSON.parse(line) : null; } catch (e) { json = null; }
-      resolve({ code, out, err, json });
+      // The Windows Store alias prints this and exits with 9009 instead of running Python.
+      if (!json && (code === 9009 || /Python was not found|No module named plan_agent/i.test(err))) {
+        const detail = /No module named plan_agent/i.test(err) ? "модуль plan_agent не найден этим интерпретатором"
+          : "интерпретатор не запустился (псевдоним Microsoft Store?)";
+        const msg = launchDiagnostic(exe, code === 9009 ? "exit 9009" : `exit ${code}`, detail);
+        return resolve({ code, out, err: msg, json: null, launchError: msg, python: exe });
+      }
+      resolve({ code, out, err, json, python: exe });
     });
   });
 }
@@ -149,11 +185,12 @@ async function analyzeImport(id) {
   const r = await runAgent(["analyze", imp.stored_path, "--month", imp.plan_month, "--name", imp.original_name, "--json"]);
   const json = r.json;
   const ok = !!(json && json.status && json.status !== "Failed" && json.mode !== "none");
-  const summary = { dry_run: json, stderr: r.code !== 0 && !json ? r.err.slice(-4000) : undefined };
+  const summary = { dry_run: json, python: r.python || null,
+    stderr: r.code !== 0 && !json ? r.err.slice(-4000) : undefined };
   updateImport(id, { status: ok ? "analyzed" : "failed", fingerprint: json ? json.fingerprint || null : null,
     dry_run_id: json ? json.run_id : null, summary,
-    error: ok ? null : ((json && json.fatal_error) || r.err.slice(-2000) || "analysis failed") });
-  return { ok, json, row: getImport(id) };
+    error: ok ? null : (r.launchError || (json && json.fatal_error) || r.err.slice(-2000) || "analysis failed") });
+  return { ok, json, row: getImport(id), launchError: r.launchError || null, python: r.python || null };
 }
 
 /** Approve the mapping of this analysis (fingerprint-bound) and synchronise.
@@ -163,7 +200,7 @@ async function approveAndSync(imp, by, { autoSafe = false } = {}) {
   if (!autoSafe) {
     const appr = await runAgent(["approve", "--by", by, "--fingerprint", imp.fingerprint || "", "--json"]);
     if (!appr.json || !appr.json.approved) {
-      const error = (appr.json && appr.json.error) || appr.err.slice(-2000);
+      const error = appr.launchError || (appr.json && appr.json.error) || appr.err.slice(-2000);
       updateImport(imp.id, { error });
       return { ok: false, code: 409, error: "Не удалось утвердить сопоставление", details: appr.json || error };
     }
@@ -176,11 +213,11 @@ async function approveAndSync(imp, by, { autoSafe = false } = {}) {
   const json = r.json;
   const synced = !!(json && /^Completed/.test(json.status || ""));
   const complete = !!(json && json.status === "Completed");   // every project written without errors
-  const summary = Object.assign({}, imp.summary || {}, { sync: json });
+  const summary = Object.assign({}, imp.summary || {}, { sync: json, sync_python: r.python || null });
   updateImport(imp.id, { status: synced ? "synced" : "sync_failed", sync_run_id: json ? json.run_id : null, summary,
-    error: synced ? null : ((json && (json.fatal_error || json.status)) || r.err.slice(-2000) || "sync failed"),
+    error: synced ? null : (r.launchError || (json && (json.fatal_error || json.status)) || r.err.slice(-2000) || "sync failed"),
     approved_at: nowIso(), approved_by: by });
-  return { ok: synced, complete, code: synced ? 200 : 422, json, row: getImport(imp.id) };
+  return { ok: synced, complete, code: synced ? 200 : 422, json, row: getImport(imp.id), launchError: r.launchError || null };
 }
 
 // A restart while the agent was running: the run's own writes are per-project

@@ -38,3 +38,7 @@ state/
 *.xlsx
 *.xls
 !tests/fixtures/*.py
+
+# Python virtual environment of the planning agent
+.venv/
+venv/

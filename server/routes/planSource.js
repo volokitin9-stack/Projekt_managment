@@ -7,9 +7,12 @@
 const express = require("express");
 const monitor = require("../planSource/monitor");
 const scheduler = require("../planSource/scheduler");
+const { getPython } = require("../pythonResolver");
 
 function fullStatus() {
-  return Object.assign(monitor.status(), { schedule: scheduler.status() });
+  const py = getPython();
+  return Object.assign(monitor.status(), { schedule: scheduler.status(),
+    python: { ok: py.ok, executable: py.executable || null, source: py.source || null, error: py.error || null } });
 }
 
 // Button state and message for the board («Обновить»).
