@@ -16,7 +16,6 @@ and an agent payload adapter compatible with the detected API.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -58,7 +57,11 @@ def load_status(state_dir: Path, api_url: Optional[str]) -> Optional[dict]:
     if not api_url:
         return None
     p = status_path(state_dir, api_url)
-    return json.loads(p.read_text()) if p.exists() else None
+    if not p.exists():
+        return None
+    from .textio import read_legacy_json
+    return read_legacy_json(p, Path(state_dir) / "encoding_migrations.jsonl",
+                            lambda o: None if isinstance(o, dict) else "expected a JSON object")
 
 
 class Check:
@@ -228,8 +231,8 @@ def _finish(result: dict, state_dir: Path, base: Optional[str]) -> dict:
     result["checks"] = [c.to_dict() for c in checks]
     if base:
         p = status_path(state_dir, base)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(result, ensure_ascii=False, indent=2))
+        from .textio import write_json
+        write_json(p, result)
     return result
 
 

@@ -56,3 +56,26 @@ Run these in `cmd`, in the project folder.
    On Windows, this also runs `test_windows_project_venv_runs_the_agent` against the real `.venv`.
 
 If step 3 fails, the output shows which paths were tried and why. Send that output; it contains no keys or passwords.
+
+## Text encoding (Russian data on Windows)
+
+All text files of the planning agent are UTF-8:
+- metadata `state/inbox/<sha256>/meta.json`;
+- reports `.json`, `.txt` and `_analysis.md`;
+- `review_queue.json`, `sync_history.jsonl`;
+- the mapping YAML files and the deployment status.
+
+They are written atomically (temporary file, then replace), and the server starts the agent with `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8`.
+
+**Earlier versions** wrote some of these files in the Windows code page (cp1251) and could fail with `UnicodeEncodeError` on symbols such as «→». After the switch to UTF-8 mode, reading such a file failed with `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xd1`.
+
+**Existing metadata files** are migrated automatically on first read, only for the known metadata files (`meta.json` and the deployment status):
+1. strict UTF-8 is tried first, then strict cp1251;
+2. the result must be valid JSON with the expected structure;
+3. the original is kept as `meta.json.cp1251-<time>.bak`;
+4. the file is rewritten as UTF-8, atomically;
+5. the migration is recorded in `state/encoding_migrations.jsonl`.
+
+A file that is neither valid UTF-8 nor valid cp1251 JSON is **not changed**. The run stops with `metadata file cannot be read: <path>: …`. Repair that file, or move it away and run again; the workbook itself is not affected.
+
+Report files written by older versions are not rewritten. They are only displayed, so Cyrillic in them may look garbled; new reports are UTF-8.

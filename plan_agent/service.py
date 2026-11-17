@@ -22,6 +22,7 @@ from .models import PROJECT_FIELDS
 from .parsers import CorruptFileError, EmptyFileError, UnsupportedFormatError
 from .pipeline import analyze_file
 from .report import build_report, render_initial_analysis, render_text
+from .textio import MetadataError, write_json, write_text
 from .sync import SyncExecutor, build_plan, restrict_for_auto
 
 log = logging.getLogger("plan_agent")
@@ -59,8 +60,13 @@ class PlanAgent:
     def receive(self, path: Path, channel: str, original_name: Optional[str] = None,
                 requested_mode: str = "auto", metadata: Optional[dict] = None,
                 target_month: Optional[str] = None, auto_safe: bool = False) -> ProcessOutcome:
-        stored, meta = self.inbox.store(Path(path), channel, original_name, metadata)
         name = original_name or Path(path).name
+        try:
+            stored, meta = self.inbox.store(Path(path), channel, original_name, metadata)
+        except MetadataError as exc:
+            # Unreadable earlier metadata of this file: stop and report; the file is left untouched.
+            run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:6]
+            return self._failed(run_id, name, f"metadata file cannot be read: {exc}")
         return self.process(stored, name, requested_mode, target_month, auto_safe)
 
     def reprocess(self, sha: str, requested_mode: str = "auto", target_month: Optional[str] = None) -> ProcessOutcome:
@@ -69,7 +75,7 @@ class PlanAgent:
         meta["deliveries"].append({"channel": "reprocess",
                                    "received_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                                    "original_name": name})
-        (stored.parent / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+        self.inbox.write_meta(stored.parent / "meta.json", meta)
         return self.process(stored, name, requested_mode, target_month)
 
     # ------------------------------------------------------------------ #
@@ -188,10 +194,10 @@ class PlanAgent:
     # ------------------------------------------------------------------ #
     def _persist(self, run_id, started, a, report, text, md, plans=None) -> Path:
         base = self.reports_dir / run_id
-        (base.with_suffix(".json")).write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str))
-        (base.with_suffix(".txt")).write_text(text)
+        write_json(base.with_suffix(".json"), report, default=str)
+        write_text(base.with_suffix(".txt"), text)
         if md:
-            (self.reports_dir / f"{run_id}_analysis.md").write_text(md)
+            write_text(self.reports_dir / f"{run_id}_analysis.md", md)
         if a.profile is not None:
             queue = [{"project": r.project_name, "category": r.record_category, "source_file": r.source_file,
                       "source_sheet": r.source_sheet, "source_rows": r.source_rows,
@@ -199,9 +205,8 @@ class PlanAgent:
                       "reasons": [i.message for i in r.issues if i.severity.value in ("review", "error")],
                       "activities": r.activity_payload}
                      for r in a.records if r.needs_review()]
-            (self.settings.state_dir / "review_queue.json").write_text(
-                json.dumps({"run_id": run_id, "source_file": report["input_file"], "items": queue},
-                           ensure_ascii=False, indent=2, default=str))
+            write_json(self.settings.state_dir / "review_queue.json",
+                       {"run_id": run_id, "source_file": report["input_file"], "items": queue}, default=str)
         entry = {"run_id": run_id, "started_at": started,
                  "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                  "source_file": report["input_file"], "file_sha256": report.get("file_sha256"),
@@ -279,8 +284,8 @@ class PlanAgent:
                   "projects": [], "row_errors": [], "notes": [], "file_warnings": []}
         text = ("ENGINEERING PLAN SYNCHRONIZATION\n\n"
                 f"Input file: {name}\nRun id: {run_id}\n\nStatus: {status}\n\nError: {error}\n")
-        (self.reports_dir / f"{run_id}.json").write_text(json.dumps(report, ensure_ascii=False, indent=2))
-        (self.reports_dir / f"{run_id}.txt").write_text(text)
+        write_json(self.reports_dir / f"{run_id}.json", report, default=str)
+        write_text(self.reports_dir / f"{run_id}.txt", text)
         with open(self.history_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({"run_id": run_id, "source_file": name, "status": status, "error": error},
                                 ensure_ascii=False) + "\n")

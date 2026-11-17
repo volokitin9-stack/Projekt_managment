@@ -27,6 +27,15 @@ def _agent():
     return PlanAgent(Settings.from_env())
 
 
+def _utf8_streams() -> None:
+    """Output to a pipe or file (e.g. the Штурман server) is UTF-8 regardless of the Windows code page.
+    An interactive Windows console already supports Unicode and is left as is."""
+    for stream in (sys.stdout, sys.stderr):
+        enc = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
+        if enc != "utf8" and hasattr(stream, "reconfigure") and not stream.isatty():
+            stream.reconfigure(encoding="utf-8")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="plan_agent", description="Engineering plan -> Projekt_managment sync agent")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -62,6 +71,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("verify-deployment", help="check dashboard, API, auth and persistence (no writes)")
     p.add_argument("--after-restart", action="store_true", help="compare with the snapshot taken before a restart")
     a = ap.parse_args(argv)
+    _utf8_streams()
     logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO, format="%(levelname)s %(message)s")
 
     if a.cmd == "approve":
@@ -75,7 +85,8 @@ def main(argv=None) -> int:
             else:
                 if a.fingerprint:
                     import yaml
-                    proposal = yaml.safe_load(store.proposed_path.read_text()) if store.proposed_path.exists() else {}
+                    proposal = (yaml.safe_load(store.proposed_path.read_text(encoding="utf-8"))
+                                if store.proposed_path.exists() else {})
                     if (proposal or {}).get("fingerprint") != a.fingerprint:
                         raise ValueError(f"the proposed mapping has fingerprint {(proposal or {}).get('fingerprint')}, "
                                          f"not {a.fingerprint}; analyse the file again")
@@ -122,7 +133,12 @@ def main(argv=None) -> int:
         return {"Failed": 1}.get(out.status, 3 if "required" in out.status else
                                  4 if "errors" in out.status else 0)
     if a.cmd == "reprocess":
-        out = agent.reprocess(a.sha, "dry_run" if a.dry_run else "auto")
+        from .textio import MetadataError
+        try:
+            out = agent.reprocess(a.sha, "dry_run" if a.dry_run else "auto")
+        except MetadataError as exc:
+            print(f"error: metadata file cannot be read: {exc}", file=sys.stderr)
+            return 1
         print(out.text)
         return 1 if out.status == "Failed" else 0
     if a.cmd == "watch":
@@ -146,7 +162,7 @@ def main(argv=None) -> int:
         print("dashboard API:", agent.settings.api_url or "not configured", "| agent key:",
               "set" if agent.settings.api_key else "missing")
         if agent.history_path.exists():
-            for line in agent.history_path.read_text().splitlines()[-10:]:
+            for line in agent.history_path.read_text(encoding="utf-8").splitlines()[-10:]:
                 e = json.loads(line)
                 print(f"  {e['run_id']}  {e.get('status'):<30} {e.get('source_file')}  {e.get('counts', '')}")
         return 0
