@@ -10,7 +10,7 @@
 // A seeded project that has manual or agent changes, files, comments or
 // activities is never removed automatically - it is listed instead.
 
-require("dotenv").config();
+require("../server/env");   // .env from the project folder, backslashes kept literally
 const store = require("../server/store");
 
 const report = store.read((s) => s.projects.filter((r) => (r.data || {}).source === "seed").map((r) => {

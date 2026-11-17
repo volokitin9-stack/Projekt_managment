@@ -12,7 +12,8 @@ const { getPython } = require("../pythonResolver");
 function fullStatus() {
   const py = getPython();
   return Object.assign(monitor.status(), { schedule: scheduler.status(),
-    python: { ok: py.ok, executable: py.executable || null, source: py.source || null, error: py.error || null } });
+    python: { ok: py.ok, executable: py.executable || null, source: py.source || null, error: py.error || null,
+      warnings: py.warnings || [], attempted: py.attempted || [] } });
 }
 
 // Button state and message for the board («Обновить»).

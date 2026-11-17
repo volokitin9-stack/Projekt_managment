@@ -288,3 +288,13 @@ def test_data_and_images_survive_restart(shturman):
     assert after["status"] == "scanning" and after["stage_entered_at"] == before["stage_entered_at"]
     assert after["history"] == before["history"]
     assert requests.get(shturman.url + after["images"][0]["url"]).content == PNG
+
+
+def test_dashboard_script_has_no_syntax_errors(tmp_path):
+    """A syntax error anywhere in the inline script would blank the whole dashboard."""
+    import re
+    html = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
+    js = tmp_path / "page.js"
+    js.write_text("\n".join(re.findall(r"<script>(.*?)</script>", html, re.S)), encoding="utf-8")
+    out = subprocess.run(["node", "--check", str(js)], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr

@@ -1,6 +1,6 @@
 "use strict";
 
-require("dotenv").config();
+require("./env");   // .env from the project folder, backslashes kept literally
 
 const path = require("path");
 const express = require("express");
@@ -83,6 +83,7 @@ if (require.main === module) {
     // and PLAN_AUTO_MONITOR_ENABLED / PLAN_SCHEDULE_ENABLED are not false.
     planScheduler.start();
     const py = require("./pythonResolver").getPython();
+    (py.warnings || []).forEach((w) => console.warn(`ВНИМАНИЕ: ${w}`)); // eslint-disable-line no-console
     if (py.ok) console.log(`Python для агента планирования: ${py.executable} (${py.source})`); // eslint-disable-line no-console
     else console.error(`ВНИМАНИЕ: ${py.error}. Проверено: ${py.attempted.join("; ")}`); // eslint-disable-line no-console
   });

@@ -73,4 +73,55 @@ r = win(["C:\\Tools\\python.exe"], { env: { PATH: "C:\\Tools" }, verify: () => n
 assert.strictEqual(r.ok, false);
 results.unverified_not_used = true;
 
+// --- root cause on the user's PC: .env copied from the old .env.example has PLAN_AGENT_PYTHON=python3,
+// PATH contains .venv\Scripts (python.exe, but no python3.exe) and the Store alias python3.exe.
+r = win([VENV_WIN, `${STORE}\\python3.exe`, `${STORE}\\python.exe`],
+  { env: { PLAN_AGENT_PYTHON: "python3", PATH: `C:\\Users\\user\\Projekt_managment\\.venv\\Scripts;${STORE}` } });
+assert.deepStrictEqual([r.ok, r.executable, r.source], [true, VENV_WIN, "project .venv"]);
+assert.ok(r.warnings.some((w) => w.includes("PLAN_AGENT_PYTHON=python3")));
+results.old_env_python3_ignored = true;
+
+// value with quotes (cmd: set PLAN_PYTHON_EXECUTABLE="C:\...\python.exe") and spaces around it
+r = win([VENV_WIN], { env: { PLAN_PYTHON_EXECUTABLE: `  "${VENV_WIN}"  ` } });
+assert.deepStrictEqual([r.ok, r.executable], [true, VENV_WIN]);
+results.quotes_stripped = true;
+
+// a "\n" that dotenv turned into a line break: clear diagnostic instead of a strange path
+r = win([VENV_WIN], { env: { PLAN_PYTHON_EXECUTABLE: "C:\\Users\\user\new\\python.exe" } });
+assert.strictEqual(r.code, "python_bad_value");
+results.control_chars_reported = true;
+
+// a bare name is resolved on PATH to a full path, never to the Store alias
+r = win([`${STORE}\\python.exe`, "C:\\Python313\\python.exe"],
+  { env: { PLAN_PYTHON_EXECUTABLE: "python", PATH: `${STORE};C:\\Python313` } });
+assert.deepStrictEqual([r.ok, r.executable], [true, "C:\\Python313\\python.exe"]);
+r = win([`${STORE}\\python.exe`], { env: { PLAN_PYTHON_EXECUTABLE: "python", PATH: STORE } });
+assert.strictEqual(r.code, "python_not_runnable");
+results.bare_name_resolved_without_alias = true;
+
+// .env: read from the project folder, backslashes literal, existing variables win, BOM tolerated
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { loadEnv } = require("../../server/env");
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "shturman-env-"));
+fs.writeFileSync(path.join(root, ".env"), "\uFEFF" + [
+  "PLAN_PYTHON_EXECUTABLE=C:\\Users\\user\\Projekt_managment\\.venv\\Scripts\\python.exe",
+  'Q_DOUBLE="C:\\Users\\user\\new\\python.exe"',
+  "Q_SINGLE='C:\\Users\\user\\new\\python.exe'",
+  "PLAN_SOURCE_PATH=\\\\s017\\Отделы\\Конструкторский\\1. Планы и отчеты\\AfM СIS+OEM 2026.xlsx",
+  "KEEP=from-file"].join("\r\n"), "utf-8");
+const target = { KEEP: "from-shell" };
+const cwd = process.cwd();
+process.chdir(os.tmpdir());                       // loading does not depend on the current directory
+const res = loadEnv(root, target);
+process.chdir(cwd);
+assert.strictEqual(target.PLAN_PYTHON_EXECUTABLE, "C:\\Users\\user\\Projekt_managment\\.venv\\Scripts\\python.exe");
+assert.strictEqual(target.Q_DOUBLE, "C:\\Users\\user\\new\\python.exe");
+assert.strictEqual(target.Q_SINGLE, "C:\\Users\\user\\new\\python.exe");
+assert.strictEqual(target.PLAN_SOURCE_PATH, "\\\\s017\\Отделы\\Конструкторский\\1. Планы и отчеты\\AfM СIS+OEM 2026.xlsx");
+assert.strictEqual(target.KEEP, "from-shell");
+assert.strictEqual(res.file, path.join(root, ".env"));
+results.env_file_literal_backslashes = true;
+
 console.log(JSON.stringify(results));

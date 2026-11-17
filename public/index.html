@@ -1887,6 +1887,10 @@
       '<span style="font-size:12px;">Автосинхронизация: <b>'+(st.auto_sync_enabled ? "включена" : "выключена (ручное утверждение)")+'</b></span></div>' +
       '<table class="eng-table" style="max-width:640px;">' +
       row("Источник", escapeHtml(st.source.type+": "+st.source.location+(st.source.pattern ? " ("+st.source.pattern+")" : ""))) +
+      (st.python ? row("Python агента", (st.python.ok
+          ? escapeHtml(st.python.executable)+' <span style="color:var(--ink-faint);">('+escapeHtml(st.python.source||"")+')</span>'
+          : '<span class="eng-status err">'+escapeHtml(st.python.error||"не найден")+'</span>') +
+        ((st.python.warnings||[]).length ? '<div style="font-size:11px;color:var(--warn);">'+st.python.warnings.map(escapeHtml).join("<br>")+'</div>' : '')) : "") +
       row("Текущий месяц", escapeHtml(st.current_month || st.month_error || "—")+' <span style="color:var(--ink-faint);">('+escapeHtml(st.timezone)+')</span>') +
       row("Последняя проверка", st.last_check_at ? fmtTs(st.last_check_at) : "—") +
       row("Последнее изменение файла", st.last_change_at ? fmtTs(st.last_change_at) : "—") +

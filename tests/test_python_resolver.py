@@ -72,7 +72,7 @@ def test_resolution_order_unit():
                          timeout=60)
     assert out.returncode == 0, out.stderr
     r = json.loads(out.stdout)
-    assert all(r.values()) and len(r) == 9
+    assert all(r.values()) and len(r) == 14
 
 
 def test_spawn_never_uses_a_shell():
@@ -100,9 +100,14 @@ def test_manual_and_scheduled_runs_use_the_configured_interpreter(tmp_path, spac
         t = tick(s, at(WED))                                             # scheduled 09:00 run
         assert t["outcome"] == "synced", t
         scheduled = launches(log)[len(manual):]
-        assert manual and scheduled
-        # every agent process (analyze, approve, sync) ran in the configured venv
-        assert all(Path(p).parent == spaced_venv.parent for p in manual + scheduled), manual + scheduled
+        # «Пробный анализ» (forced dry run) and «Проверить обновления» in the import view
+        put(inbox, 1)
+        d = requests.post(s.url + "/api/plan-source/check", json={"dry_run": True}, timeout=180).json()
+        assert d["result"]["status"] == "dry_run", d["result"]
+        panel = launches(log)[len(manual) + len(scheduled):]
+        assert manual and scheduled and panel
+        # every agent process (analyze, approve, sync, dry run) ran in the configured venv
+        assert all(Path(p).parent == spaced_venv.parent for p in manual + scheduled + panel), manual + scheduled + panel
         imps = requests.get(s.url + "/api/plan-imports", timeout=10).json()
         assert {i["id"] for i in imps}
         for i in imps:
@@ -110,6 +115,51 @@ def test_manual_and_scheduled_runs_use_the_configured_interpreter(tmp_path, spac
             assert full["summary"]["python"] == str(spaced_venv)
     finally:
         s.stop()
+
+
+def test_old_env_value_python3_does_not_block_the_agent(tmp_path, spaced_venv):
+    """The user's case: .env copied from the old .env.example contains PLAN_AGENT_PYTHON=python3."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    put(inbox, 1)
+    s = make_server(tmp_path, inbox, PLAN_PYTHON_EXECUTABLE="", PLAN_AGENT_PYTHON="python3")
+    try:
+        st = status(s)["python"]
+        assert st["ok"] and st["source"] != "PLAN_AGENT_PYTHON", st
+        assert any("PLAN_AGENT_PYTHON=python3" in w for w in st["warnings"])
+        r = update(s)
+        assert r["run"]["phases"]["analysis"] == "awaiting_approval", r["ui"]
+    finally:
+        s.stop()
+
+
+def test_quoted_configured_path_with_spaces(tmp_path, spaced_venv):
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    put(inbox, 1)
+    s = make_server(tmp_path, inbox, PLAN_PYTHON_EXECUTABLE=f'"{spaced_venv}"')     # as typed in cmd with quotes
+    try:
+        st = status(s)["python"]
+        assert st["ok"] and st["executable"] == str(spaced_venv)
+        assert update(s)["run"]["phases"]["analysis"] == "awaiting_approval"
+    finally:
+        s.stop()
+
+
+def test_check_python_command(tmp_path, spaced_venv):
+    env = dict(os.environ, PLAN_PYTHON_EXECUTABLE=str(spaced_venv), AGENT_API_KEY="secret-test-key")
+    env.pop("PLAN_AGENT_PYTHON", None)
+    # started from another folder: .env and .venv are still taken from the project folder
+    out = subprocess.run(["node", str(ROOT / "scripts" / "check-python.js")], cwd=tmp_path, env=env, capture_output=True,
+                         text=True, encoding="utf-8", timeout=120)
+    text = out.stdout + out.stderr
+    assert out.returncode == 0, text
+    assert str(spaced_venv) in text and "Python-агент запускается: OK" in text
+    assert "secret-test-key" not in text
+    bad = dict(env, PLAN_PYTHON_EXECUTABLE=str(tmp_path / "нет" / "python.exe"))
+    out = subprocess.run(["node", str(ROOT / "scripts" / "check-python.js")], cwd=tmp_path, env=bad,
+                         capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert out.returncode == 2 and "файл не найден" in out.stdout
 
 
 def test_missing_interpreter_gives_a_clear_diagnostic_and_recovers(tmp_path, spaced_venv):

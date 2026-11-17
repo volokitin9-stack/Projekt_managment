@@ -1,5 +1,7 @@
 "use strict";
 
+require("./env");   // `npm run seed` standalone: .env from the project folder
+
 // Seeds the five workflow stages and the sample engineering projects that the
 // original Artifact's "Инж. проекты" preview tab shipped with, so a fresh
 // install isn't empty. Safe to run multiple times: every statement is

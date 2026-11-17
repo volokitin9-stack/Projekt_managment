@@ -11,7 +11,7 @@
 //   overwritten. The SQLite file is only read, never modified.
 // * Requires Node.js 22.13+ (built-in node:sqlite); no extra dependency.
 
-require("dotenv").config();
+require("../server/env");   // .env from the project folder, backslashes kept literally
 const fs = require("fs");
 
 const src = process.argv[2];

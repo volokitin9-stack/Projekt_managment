@@ -2,7 +2,7 @@
 // npm test: runs pytest with the same interpreter the application uses for the
 // planning agent (PLAN_PYTHON_EXECUTABLE, project .venv, verified system Python),
 // so it also works on Windows where "python3" may be the Microsoft Store alias.
-require("dotenv").config();
+require("../server/env");   // .env from the project folder, backslashes kept literally
 const { spawnSync } = require("child_process");
 const { getPython } = require("../server/pythonResolver");
 

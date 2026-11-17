@@ -12,7 +12,7 @@ Secrets live only in environment variables, or in a secret manager that sets the
 | `AGENT_API_KEY` | app | shared secret for `/api/agent/*`. The plan import is disabled until it is set |
 | `SEED_DEMO_DATA` | app | `true` inserts the 14 demo projects into an EMPTY database (development only) |
 | `PLAN_IMPORT_DIR` | app | uploaded planning files and the agent state (reports, approved mapping, review queue). Not served over HTTP |
-| `PLAN_PYTHON_EXECUTABLE` | app | full path of the Python that runs the planning agent; used exactly as given (no fallback if it is missing: the status and «Обновить» show the path and the reason). Empty: project `.venv` (`.venv\Scripts\python.exe` / `.venv/bin/python`), then a verified system Python; the Microsoft Store alias is never used. `PLAN_AGENT_PYTHON` is accepted as the old name |
+| `PLAN_PYTHON_EXECUTABLE` | app | full path of the Python that runs the planning agent; used exactly as given (no fallback if it is missing: the status and «Обновить» show the path and the reason). Empty: project `.venv` (`.venv\Scripts\python.exe` / `.venv/bin/python`), then a verified system Python; the Microsoft Store alias is never used. `PLAN_AGENT_PYTHON` is honoured only with a full path; its old default `python3` is ignored. `.env` is read from the project folder, and backslashes are literal. Check with `npm run check-python` |
 | `MAX_UPLOAD_BYTES`, `MAX_PLAN_UPLOAD_BYTES` | app | upload limits |
 | `PM_API_URL`, `PM_AGENT_API_KEY` | agent CLI | the Штурман server and key. Set automatically for in-app imports |
 | `PLAN_AGENT_STATE_DIR` | agent CLI | agent state directory (in-app: `PLAN_IMPORT_DIR/state`) |

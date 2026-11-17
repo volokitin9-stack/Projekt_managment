@@ -69,7 +69,7 @@ py -3 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-To use a different interpreter, set its full path in `.env` as `PLAN_PYTHON_EXECUTABLE`, for example `C:\Users\user\Projekt_managment\.venv\Scripts\python.exe`. Writing just `python` or `python3` is not needed and not recommended on Windows, where these names can be the Microsoft Store alias. The server log shows the chosen interpreter at start-up: `Python для агента планирования: …`.
+To use a different interpreter, set its full path in `.env` as `PLAN_PYTHON_EXECUTABLE`, for example `C:\Users\user\Projekt_managment\.venv\Scripts\python.exe`. Writing just `python` or `python3` is not needed and not recommended on Windows, where these names can be the Microsoft Store alias. The server log shows the chosen interpreter at start-up: `Python для агента планирования: …`. `npm run check-python` checks it without starting the server. Windows details, and the fix for «Python was not found … Microsoft Store», are in `docs/WINDOWS.md`.
 
 Create the configuration file:
 
@@ -219,6 +219,7 @@ npm test
 * `docs/CONFIGURATION.md`: environment variables, mapping configuration and the monthly-plan profile
 * `docs/EXTERNAL_AGENT.md`: connecting an automatic file-delivery agent
 * `docs/DEPLOYMENT_VERIFICATION.md`: checks before syncing to a production server
+* `docs/WINDOWS.md`: Windows setup, the agent's Python interpreter and a verification procedure
 * `docs/FILE_SOURCE.md`: daily schedule, production calendar, «Обновить», file-source configuration (corporate share) and troubleshooting
 
 ## Production
