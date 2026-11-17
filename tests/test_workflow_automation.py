@@ -556,3 +556,27 @@ def test_daily_recalculation_runs_on_weekends_without_file_check(tmp_path):
         assert len(rec) == 1 and rec[0]["scheduled_date"] == SAT and rec[0]["phases"]["check"] == "not_run"
     finally:
         s.stop()
+
+
+def test_additional_work_and_backlog_get_no_stage_review_items(backend):
+    for cat, ext in (("additional_work", "AW-1"), ("backlog", "BL-1")):
+        p = mk(backend, ext, wf(None, kind="none"), record_category=cat)
+        assert p["status"] is None and p["stage_source"] is None
+        assert not [i for i in queue(backend, "all") if i["payload"].get("project_id") == p["id"]
+                    and i["kind"] in ("workflow_stage_undetermined", "workflow_ambiguous_stage")]
+        assert p["next_action"]["label"]                       # the next action is still provided
+    # a deterministic decision for a non-main record never places it on the board
+    q = mk(backend, "AW-2", wf("development"), record_category="additional_work")
+    assert q["status"] is None
+
+
+def test_manual_choice_that_differs_from_the_agent_is_flagged_not_changed(backend):
+    p = mk(backend, "D1", wf("measurement"))
+    requests.post(f"{backend}/api/projects/{p['id']}/stage", json={"stage": "development", "version": p["version"]})
+    c = get(backend, p["id"])
+    assert c["status"] == "development" and c["stage_source"] == "manual"
+    flags = [f for f in c["review_flags"] if f["code"] == "manual_stage_differs"]
+    assert len(flags) == 1 and flags[0]["severity"] == "info" and "Замер" in flags[0]["reason"]
+    # when the person agrees with the agent, there is no flag
+    requests.post(f"{backend}/api/projects/{p['id']}/stage", json={"stage": "measurement", "version": c["version"]})
+    assert not [f for f in get(backend, p["id"])["review_flags"] if f["code"] == "manual_stage_differs"]

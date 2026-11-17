@@ -133,7 +133,9 @@ function applyWorkflow(s, row, wf, { actor = null, sync = null, push, at = null 
   let stageAction = "none";
   let changed = false;
 
-  const rule = d.type === "deterministic" ? assigningRule(cfg, d.rule_id) : null;
+  // Additional work and backlog items have no Kanban stage: no stage decisions, no stage review items.
+  const isMain = (row.record_category || "main_project") === "main_project";
+  const rule = isMain && d.type === "deterministic" ? assigningRule(cfg, d.rule_id) : null;
   const assignable = !!rule;
   const newSource = rule ? (rule.assignment_source || "agent_rule") : null;    // from the SERVER's config
   if (proposed && data.planned_stage !== proposed) {
@@ -183,7 +185,7 @@ function applyWorkflow(s, row, wf, { actor = null, sync = null, push, at = null 
     row.stage_confidence = rule.confidence || "verified";
     stageAction = "basis_changed";
     changed = true;
-  } else if (!current) {
+  } else if (!current && isMain) {
     if (d.type === "none") {
       open.push(["stage_undetermined", `Этап не определён: ${d.explanation || "нет данных"}`]);
     } else {
@@ -317,6 +319,11 @@ function stageConfidence(row) {
 function apiFields(row, activities, reviews = []) {
   const status = (row.data || {}).status || null;
   const wfFlags = ((row.workflow || {}).review_flags || []).map((f) => f.code);
+  // A confirmed stage that differs from the agent's current decision: shown (info), never acted on.
+  const dec = (row.workflow || {}).stage_decision || {};
+  const src = stageSource(row);
+  const disagree = status && (src === "manual" || src === "agent_explicit") && dec.proposed_stage &&
+    dec.type !== "none" && dec.proposed_stage !== status;
   return Object.assign({
     stage_source: stageSource(row),
     stage_confidence: stageConfidence(row),
@@ -324,7 +331,12 @@ function apiFields(row, activities, reviews = []) {
     review_flags: reviews.map((r) => ({ id: r.id, kind: r.kind, code: (r.payload && r.payload.code) || r.kind,
       severity: r.severity || "review", reason: r.reason || null, created_at: r.created_at }))
       .concat(wfFlags.filter((c) => !reviews.some((r) => r.payload && r.payload.code === c))
-        .map((c) => ({ id: null, kind: `workflow_${c}`, code: c, severity: "warning", reason: null, created_at: null }))),
+        .map((c) => ({ id: null, kind: `workflow_${c}`, code: c, severity: "warning", reason: null, created_at: null })))
+      .concat(disagree && !reviews.some((r) => r.payload && r.payload.code === "manual_stage_conflict")
+        ? [{ id: null, kind: "workflow_manual_stage_differs", code: "manual_stage_differs", severity: "info",
+          reason: `Этап подтверждён вручную («${STAGE_LABEL[status] || status}»); по данным плана агент определяет ` +
+            `«${STAGE_LABEL[dec.proposed_stage] || dec.proposed_stage}» (${dec.rule_id || dec.type}). Этап не изменён`,
+          created_at: null }] : []),
     stage_detected_at: row.stage_detected_at || null,
     stage_entry_confidence: status ? (row.stage_entered_at ? (row.stage_entry_confidence || "confirmed") : "unknown") : null,
     verified_stage_entered_at: status && row.stage_entered_at ? row.stage_entered_at : null,
@@ -336,6 +348,19 @@ function apiFields(row, activities, reviews = []) {
   }, priorityView(row));
 }
 
-module.exports = { config, validateWorkflow, applyWorkflow, onConfirmedTransition, apiFields, stageSource, stageConfidence,
+/**
+ * Startup maintenance: stage review items opened for records WITHOUT a Kanban stage (additional work,
+ * backlog) by an earlier build are resolved (marked, never deleted). Returns how many.
+ */
+function resolveStageItemsOfNonMain(store) {
+  return store.tx((s) => {
+    const nonMain = new Set(s.projects.filter((r) => (r.record_category || "main_project") !== "main_project").map((r) => r.id));
+    const keys = [];
+    nonMain.forEach((id) => ["stage_undetermined", "ambiguous_stage"].forEach((c) => keys.push(`workflow:${id}:${c}`)));
+    return keys.length ? reviewQueue.resolveKeysIn(s, keys, "not_a_kanban_record") : 0;
+  });
+}
+
+module.exports = { config, validateWorkflow, applyWorkflow, resolveStageItemsOfNonMain, onConfirmedTransition, apiFields, stageSource, stageConfidence,
   AUTO_SOURCES, STAGE_CODES,
   CONFIG_FILE };

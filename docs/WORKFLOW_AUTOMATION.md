@@ -171,6 +171,10 @@ Items created by the automation are kept one per project and code. They are reop
 | `workflow_manual_stage_conflict`, `workflow_backward_transition`, `workflow_unknown_next_action` | warning |
 | `plan_record` (identity, unknown task, …: not synchronised) | review (blocking for that record) |
 
+Stage items exist only for **main projects**. Additional work and backlog have no Kanban stage, so they get a next action but no stage review. Items created for them by an earlier build are resolved at server start (`resolution: not_a_kanban_record`); nothing is deleted.
+
+`review_flags` in the project API also shows `manual_stage_differs` (severity info, computed and not queued). It appears when a person's confirmed stage differs from the agent's current decision. The stage is never changed because of it.
+
 `GET /api/review-queue` returns the actionable items (blocking + review); `?severity=all` returns warnings too. Other projects are processed even when some need review.
 
 ## 9. When a decision is sent

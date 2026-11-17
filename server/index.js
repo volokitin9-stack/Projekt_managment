@@ -19,6 +19,8 @@ const planScheduler = require("./planSource/scheduler");
 const store = require("./store");
 
 seed();
+// maintenance of review items created by an earlier build (resolved, never deleted)
+require("./workflowModel").resolveStageItemsOfNonMain(store);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
