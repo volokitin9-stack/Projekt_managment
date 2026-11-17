@@ -3,6 +3,7 @@
   "version": 1,
 
   "stages": ["scanning", "development", "test_prototype", "measurement", "documentation"],
+  "_stage_sources_comment": "stage_source of the Kanban stage: manual (a person), agent_explicit (explicit confirmed transition), agent_rule (assigned from logged work), inferred_from_plan (assigned from the month plan only). Automatic sources (agent_rule, inferred_from_plan) may be re-decided by later evidence; confirmed ones never.",
   "_stages_comment": "Agent stage codes; the dashboard uses 'prototype' for 'test_prototype'.",
 
   "auto_assign_stage": true,
@@ -11,14 +12,15 @@
   "_allow_backward_transitions_comment": "Rework (e.g. measurement -> development) may be assigned automatically for agent-assigned stages; it is always recorded and reported as a warning.",
 
   "stage_rules": [
-    {"id": "active_single_stage", "enabled": true, "mode": "assign",
+    {"id": "active_single_stage", "enabled": true, "mode": "assign", "assignment_source": "agent_rule", "confidence": "verified",
      "description": "In the project's latest engineering cycle, hours were logged (in progress) on main-stage activities of exactly ONE stage -> that stage is the current stage."},
     {"id": "active_multiple_stages", "enabled": true, "mode": "propose",
      "description": "Hours were logged on activities of several stages -> the most advanced active stage is proposed; review."},
     {"id": "completed_previous_stage", "enabled": true, "mode": "propose",
      "description": "All main activities of the latest cycle are verified completed -> the next stage of the workflow is proposed; review."},
-    {"id": "planned_single_stage", "enabled": true, "mode": "propose",
-     "description": "No work logged yet; this month's plan contains main-stage work of exactly ONE stage -> that stage is proposed. Switch mode to 'assign' only after the department approves that the month plan defines the current stage."},
+    {"id": "planned_single_stage", "enabled": true, "mode": "assign", "assignment_source": "inferred_from_plan", "confidence": "inferred",
+     "approved": "2026-11-17: approved by the department (the month plan with work of exactly one main stage defines the current stage)",
+     "description": "No work logged yet; all main-stage activities of this month's plan (latest cycle) belong to exactly ONE stage -> that stage is assigned, marked as INFERRED FROM THE PLAN (not verified by logged work, not confirmed by a person)."},
     {"id": "planned_sequence_earliest", "enabled": true, "mode": "propose",
      "description": "No work logged yet; the plan contains several stages -> the earliest planned stage is proposed; review."}
   ],

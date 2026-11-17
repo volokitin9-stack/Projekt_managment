@@ -108,11 +108,26 @@ def test_single_active_stage_is_assigned_deterministically():
 def test_future_planned_work_is_only_a_proposal():
     d = A.decide_stage(norm([act("m", "measurement"), act("k", "documentation", seq=2)]), RULES)
     assert d["type"] == "proposed" and d["rule_id"] == "planned_sequence_earliest" and d["proposed_stage"] == "measurement"
+    # planned_single_stage is APPROVED (assign) but marked as inferred from the plan, not verified
     d = A.decide_stage(norm([act("k", "documentation"), act("c", "documentation", seq=2)]), RULES)
-    assert d["type"] == "proposed" and d["rule_id"] == "planned_single_stage" and d["proposed_stage"] == "documentation"
-    # once the department approves the rule, the same evidence assigns the stage
-    d = A.decide_stage(norm([act("k", "documentation")]), rules_with(planned_single_stage="assign"))
-    assert d["type"] == "deterministic"
+    assert d["type"] == "deterministic" and d["rule_id"] == "planned_single_stage" and d["proposed_stage"] == "documentation"
+    assert d["confidence"] == "inferred" and d["assignment_source"] == "inferred_from_plan"
+    # switched back to propose, the same evidence only proposes
+    d = A.decide_stage(norm([act("k", "documentation")]), rules_with(planned_single_stage="propose"))
+    assert d["type"] == "proposed"
+
+
+def test_month_plan_spanning_several_stages_is_not_one_stage():
+    # a development cycle and a series cycle in the same month, nothing logged: not "one stage"
+    acts = norm([act("d", "development", seq=1, cycle=1, task="Разработать"),
+                 act("o", "test_prototype", seq=2, cycle=1, task="Заказать"),
+                 act("k", "documentation", seq=3, cycle=2, task="КД"), act("c", "documentation", seq=4, cycle=2, task="1С")])
+    d = A.decide_stage(acts, RULES)
+    assert d["type"] == "proposed" and d["rule_id"] == "planned_sequence_earliest" and d["proposed_stage"] == "development"
+    assert A.next_action(acts, d, None, RULES)["label"] == "Начать: Разработать"
+    # an activity without hours in another stage also prevents the one-stage inference
+    acts = norm([act("k", "documentation"), act("x", "measurement", planned=0, seq=2)])
+    assert A.decide_stage(acts, RULES)["rule_id"] != "planned_single_stage"
 
 
 def test_conflicting_stage_evidence_is_not_assigned():
@@ -258,7 +273,7 @@ def test_backend_assigns_deterministic_stage_without_inventing_entry_date(backen
 
 
 def test_backend_refuses_unapproved_rules_and_invalid_blocks(backend):
-    p = mk(backend, "S2", wf("measurement", rule="planned_single_stage"))        # not approved for assignment
+    p = mk(backend, "S2", wf("measurement", rule="planned_sequence_earliest"))   # not approved for assignment
     assert p["status"] is None and p["planned_stage"] == "measurement"
     bad = wf("development")
     bad["stage_decision"]["proposed_stage"] = "invented_stage"
@@ -392,8 +407,12 @@ def test_agent_end_to_end_with_real_backend(tmp_path, backend, make_agent):
     assert gac["next_action"]["label"] == "Продолжить: КД"
     assert {a["normalized_status"] for a in gac["activities"]} <= {"planned", "in_progress"}
     chery = next(p for p in db if p["project_name"] == "Chery Tiggo 4 Защита картера")
-    assert chery["status"] is None and chery["planned_stage"] == "development"
+    # only planned development this month -> assigned, but visibly INFERRED from the plan
+    assert chery["status"] == "development" and chery["stage_source"] == "inferred_from_plan"
+    assert chery["stage_confidence"] == "inferred" and chery["stage_entered_at"] is None
     assert chery["next_action"]["label"] == "Начать: Разработать" and chery["next_action"]["confidence"] == "planned"
+    honda = next(p for p in db if p["project_name"].startswith("Honda CR-V"))
+    assert honda["status"] is None and honda["planned_stage"] == "development"      # month spans several stages
     # 19: workload preserved exactly
     assert gac["workload"]["planned_hours"] == 32 and gac["workload"]["actual_hours"] == 5
     # 20 + 23: repeated synchronisation - no duplicates, no new decisions, timer untouched
@@ -433,3 +452,107 @@ def test_monthly_history_and_december_decision(tmp_path, backend, make_agent):
     assert gac["status"] == "documentation"                                             # December: 1С hours logged
     moves = [h for h in gac["history"] if h["action"].startswith("stage_auto")]
     assert len(moves) == 1                                                              # same stage: no new transition
+
+
+# ====================================================================== inferred_from_plan + basis change
+def test_inferred_stage_is_distinguishable_and_upgraded_by_logged_work(backend):
+    inferred = wf("documentation", rule="planned_single_stage")
+    inferred["stage_decision"]["confidence"] = "inferred"
+    p = mk(backend, "I1", inferred)
+    assert p["status"] == "documentation" and p["stage_source"] == "inferred_from_plan"
+    assert p["stage_confidence"] == "inferred" and p["stage_assigned_automatically"] is True
+    assert p["stage_entered_at"] is None and p["verified_stage_entered_at"] is None
+    # hours are now logged on the same stage: the basis becomes "verified", nothing else moves
+    up = send(backend, p["id"], wf("documentation"))
+    assert up["stage_source"] == "agent_rule" and up["stage_confidence"] == "verified"
+    assert up["stage_detected_at"] == p["stage_detected_at"] and up["stage_entered_at"] is None
+    assert [h["action"] for h in up["history"]].count("stage_basis_changed") == 1
+    # a person confirms: "confirmed", the entry date is now verified
+    requests.post(f"{backend}/api/projects/{p['id']}/stage", json={"stage": "measurement", "version": up["version"]})
+    c = get(backend, p["id"])
+    assert c["stage_source"] == "manual" and c["stage_confidence"] == "confirmed" and c["verified_stage_entered_at"]
+    assert c["stage_assigned_automatically"] is False
+
+
+# ====================================================================== contract fields for the UI
+def test_api_contract_fields(backend):
+    p = mk(backend, "C1", wf("development", review_flags=[{"code": "unknown_next_action", "message": "?"}]),
+           assigned_engineer="Иванов", priority="normal")
+    for k in ("status", "stage_source", "stage_confidence", "stage_detected_at", "verified_stage_entered_at",
+              "stage_entered_at", "stage_decision", "source_priority", "system_priority", "effective_priority",
+              "priority_source", "priority_reasons", "assigned_engineer", "next_action", "workload", "review_flags",
+              "attention", "activities", "history"):
+        assert k in p, k
+    assert p["next_action"]["evidence"] == [] and "label" in p["next_action"] and "confidence" in p["next_action"]
+    assert [f["code"] for f in p["review_flags"]] == ["unknown_next_action"] and p["review_flags"][0]["severity"] == "warning"
+    assert set(p["workload"]) >= {"planned_hours", "actual_hours", "remaining_planned_hours", "by_employee", "by_month"}
+    schema = requests.get(f"{backend}/api/agent/schema", headers=KEY, timeout=10).json()
+    assert set(schema["workflow"]["assign_rules"]) == {"active_single_stage", "planned_single_stage"}
+
+
+# ====================================================================== recalculation without the file
+def test_recalculation_without_reimport(tmp_path, make_agent):
+    cfg = json.loads((ROOT / "config" / "workflow_automation.json").read_text(encoding="utf-8"))
+    cfg["priority"]["rules"] = [{"id": "deadline_soon", "type": "deadline_within_days", "days": 7, "raise_to": "high"}]
+    rules_file = tmp_path / "rules.json"
+    rules_file.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+    cfgdir = tmp_path / "cfg"
+    import shutil
+    shutil.copytree(ROOT / "config", cfgdir)
+    (cfgdir / "workflow_automation.json").write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+    s = ShturmanServer(tmp_path / "srv", extra_env={"WORKFLOW_AUTOMATION_CONFIG": str(rules_file),
+                                                     "PLAN_AGENT_CONFIG_DIR": str(cfgdir)}).start()
+    try:
+        src = tmp_path / "work_plan_2026.xlsx"
+        make_fixtures.make_monthly_workbook(src, 4)
+        agent = make_agent(s.url)
+        agent.settings.config_dir = cfgdir
+        agent.receive(src, "cli", src.name, target_month="2026-11")
+        agent.store.approve("pytest")
+        assert agent.receive(src, "cli", src.name, target_month="2026-11").status == "Completed"
+        n_runs = len(requests.get(f"{s.url}/api/sync-runs", timeout=10).json())
+        db = requests.get(f"{s.url}/api/projects", timeout=10).json()
+        honda = next(p for p in db if p["project_name"].startswith("Honda CR-V"))
+        gac = next(p for p in db if p["project_name"] == "GAC S9 Комплект защит")
+        assert honda["effective_priority"] == "low" and honda["system_priority"] is None
+        # a deadline is set in Штурман (manually) - no new Excel version
+        soon = (date.today() + timedelta(days=3)).isoformat()
+        requests.patch(f"{s.url}/api/projects/{honda['id']}", json={"planned_deadline": soon, "version": honda["version"]})
+        # a person marks GAC's КД done
+        kd = next(a for a in gac["activities"] if a["task_type"] == "КД")
+        requests.patch(f"{s.url}/api/projects/{gac['id']}/activities/{kd['id']}", json={"progress_status": "done"})
+        r = requests.post(f"{s.url}/api/plan-source/recalculate", json={}, timeout=180).json()
+        assert r["run"]["outcome"] == "recalculated", r
+        assert r["run"]["counts"]["workflow_updated"] >= 2 and r["run"]["phases"]["check"] == "not_run"
+        h2 = requests.get(f"{s.url}/api/projects/{honda['id']}", timeout=10).json()
+        assert (h2["system_priority"], h2["effective_priority"], h2["priority_source"]) == ("high", "high", "system")
+        assert any("срок" in x for x in h2["priority_reasons"])
+        g2 = requests.get(f"{s.url}/api/projects/{gac['id']}", timeout=10).json()
+        assert g2["next_action"]["label"] == "Начать: 1С"
+        assert next(a for a in g2["activities"] if a["id"] == kd["id"])["normalized_status"] == "completed"
+        assert g2["status"] == gac["status"] and g2["stage_detected_at"] == gac["stage_detected_at"]   # timers kept
+        assert g2["stage_entered_at"] == gac["stage_entered_at"]
+        # no file was read: no new import run; repeating changes nothing
+        assert len(requests.get(f"{s.url}/api/sync-runs", timeout=10).json()) == n_runs
+        again = requests.post(f"{s.url}/api/plan-source/recalculate", json={}, timeout=180).json()
+        assert again["run"]["counts"]["workflow_updated"] == 0 and again["run"]["counts"]["activities_updated"] == 0
+    finally:
+        s.stop()
+
+
+def test_daily_recalculation_runs_on_weekends_without_file_check(tmp_path):
+    from test_schedule import at, SAT, make_server, put, tick, imports, runs
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    s = make_server(tmp_path, inbox)
+    try:
+        put(inbox, 1)
+        r = tick(s, at(SAT))
+        assert r["action"] == "non_working" and r["recalc"] == "recalculated"
+        assert imports(s) == []                                         # no file check on a non-working day
+        second = tick(s, at(SAT, "10:00"))                              # same date again: nothing repeated
+        assert second["action"] == "already_done" and second["recalc"] == "already_done"
+        rec = [x for x in runs(s) if x["trigger"] == "recalc"]
+        assert len(rec) == 1 and rec[0]["scheduled_date"] == SAT and rec[0]["phases"]["check"] == "not_run"
+    finally:
+        s.stop()

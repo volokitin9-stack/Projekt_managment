@@ -354,13 +354,21 @@ def test_import_view_has_sync_status_section():
         assert text in html
 
 def only_rule_assigned_stages(projects):
-    """A stage set by an import must come from the approved evidence rule (hours logged on one stage);
-    its true entry date stays unknown. Every other project keeps no stage."""
+    """A stage set by an import comes only from an approved rule, and its basis stays visible:
+    * agent_rule / active_single_stage - hours logged on one stage (confidence verified);
+    * inferred_from_plan / planned_single_stage - the month plan has work of one stage only (confidence inferred).
+    The true entry date stays unknown; every other project keeps no stage."""
     for p in projects:
         if p["status"] is None:
             continue
         d = p["stage_decision"] or {}
-        assert p["stage_source"] == "agent_rule" and d.get("rule_id") == "active_single_stage", p["project_name"]
         assert d.get("type") == "deterministic" and p["stage_entered_at"] is None and p["stage_detected_at"]
-        assert any(e["status"] == "in_progress" for e in d["evidence"])
+        assert p["verified_stage_entered_at"] is None and p["stage_assigned_automatically"] is True
+        if p["stage_source"] == "agent_rule":
+            assert d.get("rule_id") == "active_single_stage" and p["stage_confidence"] == "verified", p["project_name"]
+            assert any(e["status"] == "in_progress" for e in d["evidence"])
+        else:
+            assert p["stage_source"] == "inferred_from_plan" and d.get("rule_id") == "planned_single_stage", p["project_name"]
+            assert p["stage_confidence"] == "inferred"
+            assert all(e["status"] == "planned" for e in d["evidence"])
     return True

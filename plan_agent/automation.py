@@ -33,6 +33,16 @@ STAGE_LABEL = {"scanning": "Сканирование", "development": "Разр�
                "measurement": "Замер", "documentation": "Оформление"}
 
 
+def local_today() -> date:
+    """Today in PLAN_TIMEZONE (default Asia/Yekaterinburg); UTC if the zone database is unavailable."""
+    import os
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(os.environ.get("PLAN_TIMEZONE") or "Asia/Yekaterinburg")).date()
+    except Exception:            # no tz database (e.g. Windows without the tzdata package)
+        return datetime.now(timezone.utc).date()
+
+
 def load_rules(config_dir: Path = DEFAULT_CONFIG_DIR) -> dict:
     return json.loads((Path(config_dir) / "workflow_automation.json").read_text(encoding="utf-8"))
 
@@ -102,11 +112,17 @@ def decide_stage(activities: list[dict], rules: dict, category: str = "main_proj
     if not main:
         return {"type": "none", "rule_id": None, "proposed_stage": None, "confidence": "none",
                 "explanation": "no main-stage activity this month", "evidence": []}
-    cycle = max(a.get("cycle") or 1 for a in main)
+    order = lambda xs: sorted(set(xs), key=STAGES.index)  # noqa: E731
+    active_acts = [a for a in main if a["normalized_status"] in ("in_progress", "blocked")]
+    open_acts = [a for a in main if a["normalized_status"] != "completed"]
+    # Current work: the latest cycle in which work is actually logged (rework cycles stay apart).
+    # Planned-only rules look at ALL open main-stage work of the month, across cycles: a project whose
+    # month plan spans several stages (e.g. a development cycle and a series cycle) is not one-stage.
+    cycle = max((a.get("cycle") or 1) for a in (active_acts or main))
     cur = sorted([a for a in main if (a.get("cycle") or 1) == cycle], key=lambda a: a.get("sequence") or 0)
-    by = lambda st: sorted({a["activity_type"] for a in cur if a["normalized_status"] in st}, key=STAGES.index)  # noqa: E731
-    active, planned, done = by(("in_progress", "blocked")), by(("planned",)), by(("completed",))
-    open_ = [a for a in cur if a["normalized_status"] not in ("completed",)]
+    active = order(a["activity_type"] for a in active_acts if (a.get("cycle") or 1) == cycle)
+    planned = order(a["activity_type"] for a in open_acts if a["normalized_status"] == "planned")
+    done = order(a["activity_type"] for a in main if a["normalized_status"] == "completed")
     candidates = []
     if len(active) == 1:
         candidates.append(("active_single_stage", active[0], "verified",
@@ -115,20 +131,24 @@ def decide_stage(activities: list[dict], rules: dict, category: str = "main_proj
         candidates.append(("active_multiple_stages", active[-1], "probable",
                            "work logged on several stages: " + ", ".join(STAGE_LABEL[s] for s in active) +
                            "; the most advanced is proposed"))
-    if not open_ and done:
-        last = done[-1]
+    if not open_acts and done:
+        last = order(a["activity_type"] for a in cur)[-1]
         nxt = STAGES[STAGES.index(last) + 1] if STAGES.index(last) + 1 < len(STAGES) else None
         if nxt:
             candidates.append(("completed_previous_stage", nxt, "probable",
-                               f"all activities of the cycle are completed up to «{STAGE_LABEL[last]}»"))
-    if not active:
-        if len(planned) == 1:
+                               f"all activities of the month are completed up to «{STAGE_LABEL[last]}»"))
+    if not active_acts:
+        unknown = [a for a in open_acts if a["normalized_status"] not in ("planned",)]
+        if len(planned) == 1 and not [a for a in unknown if a["activity_type"] != planned[0]]:
             candidates.append(("planned_single_stage", planned[0], "probable",
-                               f"no work logged yet; this month's plan covers only «{STAGE_LABEL[planned[0]]}»"))
+                               f"no work logged yet; all main-stage work of this month's plan belongs to "
+                               f"«{STAGE_LABEL[planned[0]]}»"))
         elif len(planned) > 1:
             candidates.append(("planned_sequence_earliest", planned[0], "low",
                                "no work logged yet; planned stages " + " → ".join(STAGE_LABEL[s] for s in planned) +
                                "; the earliest is proposed"))
+        if planned:
+            cur = sorted(open_acts, key=lambda a: ((a.get("cycle") or 1), a.get("sequence") or 0))
     enabled = {r["id"]: r for r in rules.get("stage_rules", []) if r.get("enabled")}
     for rule_id, stage, confidence, why in candidates:
         r = enabled.get(rule_id)
@@ -136,9 +156,15 @@ def decide_stage(activities: list[dict], rules: dict, category: str = "main_proj
             continue
         assign = r.get("mode") == "assign" and rules.get("auto_assign_stage", False)
         ev = [_ev(a) for a in cur if a["activity_type"] == stage] or [_ev(a) for a in cur]
-        return {"type": "deterministic" if assign else "proposed", "rule_id": rule_id,
-                "proposed_stage": dash_stage(stage), "confidence": "verified" if assign else confidence,
-                "explanation": why, "evidence": ev[:12], "cycle": cycle}
+        dec_cycle = cycle
+        if rule_id.startswith("planned_"):         # the cycle where the proposed stage's work actually is
+            dec_cycle = min((a.get("cycle") or 1) for a in open_acts if a["activity_type"] == stage)
+        out = {"type": "deterministic" if assign else "proposed", "rule_id": rule_id,
+               "proposed_stage": dash_stage(stage), "confidence": r.get("confidence", "verified") if assign else confidence,
+               "explanation": why, "evidence": ev[:12], "cycle": dec_cycle}
+        if assign:
+            out["assignment_source"] = r.get("assignment_source", "agent_rule")
+        return out
     return {"type": "none", "rule_id": None, "proposed_stage": None, "confidence": "none",
             "explanation": "the activities give no usable stage evidence (statuses unknown)",
             "evidence": [_ev(a) for a in cur][:12], "cycle": cycle}
@@ -241,7 +267,7 @@ def next_action(activities: list[dict], decision: dict, confirmed_stage: Optiona
 def build_workflow(category: str, activities: list[dict], dashboard_project: Optional[dict], source_priority: Optional[str],
                    source_raw: Any, rules: dict, plan_month: Optional[str], today: Optional[date] = None) -> dict:
     """Normalise the activities IN PLACE (normalized_status, status_evidence) and return the workflow block."""
-    today = today or datetime.now(timezone.utc).date()
+    today = today or local_today()
     dash_acts = {a.get("activity_key"): a for a in (dashboard_project or {}).get("activities") or []
                  if a.get("plan_month") == plan_month}
     for a in activities:

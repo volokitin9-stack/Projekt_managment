@@ -131,6 +131,27 @@ Each event carries `source` (`manual`, `agent`, `seed` or `telegram`), `actor` a
 * Activities may carry `normalized_status` (`planned`, `in_progress`, `completed`, `blocked`, `unknown`) and `status_evidence` (object).
 * `GET /api/agent/schema`: `supports` contains `workflow` and `review_severity`; `workflow.assign_rules` lists the rules the server accepts for automatic assignment.
 
+Project API fields for the UI (read-only), summary:
+
+| UI need | Field |
+|---|---|
+| current stage | `status` (alias `stage`); `null` = not placed |
+| stage assignment source | `stage_source`: `manual`, `agent_explicit`, `agent_rule` or `inferred_from_plan`; also `stage_assigned_automatically` |
+| stage confidence | `stage_confidence`: `confirmed`, `verified`, `inferred` or `null`; the full decision in `stage_decision` (rule, explanation, evidence) |
+| stage detection date | `stage_detected_at`, `days_since_stage_detected` |
+| verified stage-entry date | `verified_stage_entered_at` (also `stage_entered_at`; `null` = unknown), `days_in_stage`, `stage_entry_confidence` |
+| suggested stage | `planned_stage` |
+| source / system / effective priority | `source_priority` (+ `source_priority_raw`), `system_priority`, `effective_priority`, `priority_source` |
+| priority explanation | `priority_reasons` |
+| responsible engineer | `assigned_engineer` |
+| next action + evidence | `next_action.label`, `.source`, `.confidence`, `.evidence`, `.updated_at` |
+| workload | `workload` (planned, actual, remaining, by employee, by month, by date), `activities` (each with `normalized_status`, `status_evidence`) |
+| review flags | `review_flags` (open review items of the project: `code`, `kind`, `severity`, `reason`) |
+| attention | `attention` (missing engineer, blocker, deadline, inactivity, stage duration) |
+| history | `history` (stage moves with rule, evidence and direction; basis changes; decisions) |
+
+`POST /api/plan-source/recalculate` re-decides from stored data (no file is read); see `docs/WORKFLOW_AUTOMATION.md` §4a.
+
 Project API additions (read-only):
 - stage: `stage_source` (`manual` | `agent_explicit` | `agent_rule`), `stage_detected_at`, `stage_entry_confidence`, `days_since_stage_detected`, `stage_decision`, `workflow`;
 - priority: `source_priority`, `source_priority_raw`, `system_priority`, `effective_priority`, `priority_source`, `priority_reasons`;

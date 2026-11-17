@@ -68,6 +68,8 @@ def main(argv=None) -> int:
     p.add_argument("--host", default=os.environ.get("PLAN_AGENT_HOST", "127.0.0.1"))
     p.add_argument("--port", type=int, default=int(os.environ.get("PLAN_AGENT_PORT", "8090")))
     sub.add_parser("status")
+    p = sub.add_parser("recalc", help="re-decide stage/priority/next action from stored data (no file is read)")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("verify-deployment", help="check dashboard, API, auth and persistence (no writes)")
     p.add_argument("--after-restart", action="store_true", help="compare with the snapshot taken before a restart")
     a = ap.parse_args(argv)
@@ -102,6 +104,19 @@ def main(argv=None) -> int:
             print(f"error: {result['error']}", file=sys.stderr)
         return 0 if result["approved"] else 2
 
+    if a.cmd == "recalc":
+        from .client import DashboardClient
+        from .recalc import recalculate
+        st = Settings.from_env()
+        if not st.api_url:
+            print(json.dumps({"status": "Failed", "error": "PM_API_URL not configured"}) if a.json
+                  else "error: PM_API_URL not configured", file=sys.stdout if a.json else sys.stderr)
+            return 2
+        res = recalculate(DashboardClient(st), st.config_dir)
+        print(json.dumps(res, ensure_ascii=False) if a.json else
+              f"recalculated: {res.get('projects_checked', 0)} checked, {res.get('workflow_updated', 0)} decisions and "
+              f"{res.get('activities_updated', 0)} activity statuses updated, {res.get('conflicts', 0)} conflicts")
+        return 0 if res.get("status", "").startswith("Completed") else 1
     if a.cmd == "verify-deployment":
         from .deployment import render, verify
         st = Settings.from_env()

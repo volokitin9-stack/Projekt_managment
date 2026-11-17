@@ -268,7 +268,11 @@ function buildIndex(s) {
   return {
     files: groupBy(s.project_files, "project_id"),
     history: groupBy(s.project_history, "project_id"),
-    activities: groupBy(s.project_activities, "project_id")
+    activities: groupBy(s.project_activities, "project_id"),
+    // open review items that concern a stored project (workflow items, held automatic changes)
+    reviews: groupBy(s.review_queue.filter((r) => !r.resolved && r.payload &&
+      (r.payload.project_id || r.payload.dashboard_id)).map((r) => Object.assign({}, r,
+      { _pid: r.payload.project_id || r.payload.dashboard_id })), "_pid")
   };
 }
 
@@ -337,7 +341,7 @@ function rowToApi(row, { includeRelations = true, index = null } = {}) {
     engineer: data.assigned_engineer || "",
     stage: status,
     deadline: data.planned_deadline || data.deadline || null
-  }, workflowModel.apiFields(row, activities));
+  }, workflowModel.apiFields(row, activities, includeRelations ? (idx.reviews.get(row.id) || []) : []));
 }
 
 function getProject(id) {

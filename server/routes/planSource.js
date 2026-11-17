@@ -69,6 +69,13 @@ router.get("/preview", (req, res) => {
   res.json(p);
 });
 
+// POST /api/plan-source/recalculate - re-decide stage / priority / next action from the stored data.
+// No file is read or re-imported; confirmed stages and stage timers are never changed.
+router.post("/recalculate", async (req, res) => {
+  const run = await monitor.recalculate({ trigger: "manual" });
+  res.status(run.outcome === "busy" ? 409 : run.outcome === "recalculated" ? 200 : 422).json({ run, state: fullStatus() });
+});
+
 // POST /api/plan-source/check {dry_run: true?} - check the source now.
 // dry_run: analyse the current file again even if it is unchanged (never writes).
 router.post("/check", async (req, res) => {

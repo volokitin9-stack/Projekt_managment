@@ -287,3 +287,9 @@ module.exports.createImport = createImport;
 module.exports.newStoredPath = newStoredPath;
 module.exports.analyzeImport = analyzeImport;
 module.exports.approveAndSync = approveAndSync;
+/** Recalculate workflow decisions from stored data (no file is read). Caller holds the job lock. */
+module.exports.runRecalc = async function runRecalc() {
+  const r = await runAgent(["recalc", "--json"]);
+  return { ok: !!(r.json && /^Completed/.test(r.json.status || "")), json: r.json, error: r.launchError ||
+    (r.json && (r.json.error || (r.json.errors || []).join("; "))) || (r.json ? null : r.err.slice(-2000)) };
+};

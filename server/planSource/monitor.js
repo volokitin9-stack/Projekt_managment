@@ -434,6 +434,7 @@ function status() {
     current_version: versions.find((v) => v.id === st.current_version_id) || null,
     pending_import_id: st.pending_import_id || null,
     last_successful_check_at: st.last_successful_check_at || null,
+    last_recalc_at: st.last_recalc_at || null,
     versions,
     events
   };
@@ -498,6 +499,33 @@ function recordRun(fields) {
   return run;
 }
 
+/**
+ * Recalculate stage / priority / next-action decisions from the stored data - no file is read,
+ * nothing is re-imported. Time-dependent rules and manual marks take effect without a new Excel version.
+ */
+async function recalculate({ trigger = "manual", scheduledDate = null } = {}) {
+  const startedAt = nowIso();
+  const base = { trigger: "recalc", recalc_trigger: trigger, scheduled_date: scheduledDate, started_at: startedAt,
+    phases: { check: "not_run", analysis: "not_run", sync: "not_run", recalc: "not_run" } };
+  if (!process.env.AGENT_API_KEY) return recordRun(Object.assign(base, { outcome: "error", error: "AGENT_API_KEY не задан" }));
+  if (!imports.tryLock(`recalc:${trigger}`)) {
+    return recordRun(Object.assign(base, { outcome: "busy", finished_at: nowIso() }));
+  }
+  try {
+    const r = await imports.runRecalc();
+    const j = r.json || {};
+    base.phases.recalc = r.ok ? "ok" : "failed";
+    const run = recordRun(Object.assign(base, { outcome: r.ok ? "recalculated" : "error", finished_at: nowIso(),
+      error: r.ok ? null : r.error, counts: r.ok ? { checked: j.projects_checked, workflow_updated: j.workflow_updated,
+        activities_updated: j.activities_updated, conflicts: j.conflicts } : null }));
+    if (r.ok) setState({ last_recalc_at: nowIso() });
+    else logEvent("error", "recalc_failed", r.error || "пересчёт не выполнен");
+    return run;
+  } finally {
+    imports.unlock();
+  }
+}
+
 /** Run a check and record it. trigger: "schedule" | "manual". */
 async function runRecorded({ trigger, scheduledDate = null, scheduledFor = null }) {
   const startedAt = nowIso();
@@ -511,4 +539,5 @@ async function runRecorded({ trigger, scheduledDate = null, scheduledFor = null 
 }
 
 module.exports = { config, targetMonth, check, runRecorded, recordRun, outcomeOf, approvePending, status, preview, setAutoSync,
+  recalculate,
   classifyDryRun, logEvent };

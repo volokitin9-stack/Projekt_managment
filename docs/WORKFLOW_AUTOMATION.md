@@ -42,15 +42,26 @@ The last three are additional activity types, not Kanban stages. An unknown task
 
 ## 3. Current stage
 
-Only the **latest engineering cycle** of the month is evaluated, so repeated cycles and rework do not mix. The rules are tried in order, and the first that applies decides:
+Current work is taken from the **latest cycle in which hours are logged**, so rework cycles do not mix. Rules based on planned work look at **all** open main-stage work of the month, across cycles. The rules are tried in order, and the first that applies decides:
 
-| Rule | When | Default mode |
+| Rule | When | Mode | `stage_source` / `stage_confidence` |
+|---|---|---|---|
+| `active_single_stage` | hours logged on activities of exactly **one** stage | **assign** | `agent_rule` / `verified` |
+| `active_multiple_stages` | hours logged on several stages; the most advanced one is proposed | propose | — |
+| `completed_previous_stage` | all activities verified completed; the next stage is proposed | propose | — |
+| `planned_single_stage` | nothing logged; **all** main-stage work of the month's plan belongs to one stage | **assign** (approved 2026-11-17) | `inferred_from_plan` / `inferred` |
+| `planned_sequence_earliest` | nothing logged; several planned stages; the earliest is proposed | propose | — |
+
+**Stage sources:**
+
+| Source | Meaning | Changed by the automation? |
 |---|---|---|
-| `active_single_stage` | hours logged on activities of exactly **one** stage | **assign** |
-| `active_multiple_stages` | hours logged on several stages; the most advanced one is proposed | propose |
-| `completed_previous_stage` | all activities verified completed; the next stage is proposed | propose |
-| `planned_single_stage` | nothing logged; this month's plan contains **one** stage | propose (**see below**) |
-| `planned_sequence_earliest` | nothing logged; several planned stages; the earliest is proposed | propose |
+| `manual` | confirmed by a person | never |
+| `agent_explicit` | an explicit, confirmed transition | never |
+| `agent_rule` | assigned from logged work | yes, by later evidence |
+| `inferred_from_plan` | assigned from the month plan only | yes, by later evidence |
+
+`stage_confidence`: `confirmed`, `verified`, `inferred` or `null`. When hours are later logged on an inferred stage, its basis becomes `verified`. The history records `stage_basis_changed`; the stage and its timers are not touched.
 
 * **assign**: the server sets the Kanban stage (`stage_source = agent_rule`). It re-checks that the rule is enabled with mode `assign`, so an agent cannot use an unapproved rule.
 * **propose**: the stage is shown as a suggestion (`planned_stage`, «по плану: …» on the card). The project stays in «Этап не подтверждён», and a review item is created.
@@ -68,9 +79,16 @@ Only the **latest engineering cycle** of the month is evaluated, so repeated cyc
 
 **Switches:** `auto_assign_stage: false` turns all automatic assignment off (proposals only). A rule is switched on by setting its `mode` to `assign`. No code change and no restart are needed; the server re-reads the file when it changes.
 
-### Decision needed: `planned_single_stage`
+### November 2026 result (read-only validation)
 
-In the November 2026 plan, 40 of the 72 importable main projects have **no hours logged yet**, and the month's plan contains work of exactly one stage. The breakdown is in the validation report. Whether «the month plan has only КД/1С/PDM» means «the project is in Оформление» is a business rule, not a fact in the file. It stays `propose` until the department approves it.
+**48 of 72** main projects are placed automatically:
+- **11 `agent_rule`:** 10 «Оформление», 1 «Разработка».
+- **37 `inferred_from_plan`:** 16 «Замер», 14 «Оформление», 7 «Сканирование».
+
+Not placed:
+- **22** projects whose month plan spans several stages (proposal and review);
+- **1** with work logged on two stages, Lada Niva «Накладки на пороги» (proposal and review);
+- **1** with no main-stage work, Lada HGH «Оснастка»: only tests are planned.
 
 ## 4. Stage time
 
@@ -85,6 +103,31 @@ In the November 2026 plan, 40 of the 72 importable main projects have **no hours
 Ordinary updates never reset the timer, and repeated decisions for the same stage keep `stage_detected_at`. Only a real transition does.
 
 **Stage limits:** `attention.stage_duration_limits`, e.g. `{"measurement": {"warning_days": 20, "critical_days": 40}}`. The default is empty, so nothing is flagged until limits are approved. Limits apply only to confirmed entry dates.
+
+## 4a. Recalculation without a new Excel version
+
+Durations (`days_in_stage`, `days_since_stage_detected`) and the attention indicators are computed **on every read** from the current time, so they are always current.
+
+Decisions that depend on time or on marks made in Штурман are re-decided by a **recalculation**:
+- system priority from approved rules, e.g. a deadline approaching;
+- next action after a person marks an activity done or blocked;
+- normalised activity statuses.
+
+What a recalculation does:
+- it uses the data already stored in Штурман (the activities of each project's latest plan month, manual marks, confirmed entry dates) with today's date (`PLAN_TIMEZONE`);
+- it sends only what changed.
+
+What it never does:
+- read or re-import the Excel file;
+- change a confirmed stage;
+- reset a timer.
+
+When it runs:
+- **daily** at `PLAN_SCHEDULE_TIME` (09:00 Yekaterinburg), on **every** day including weekends and holidays (only the recalculation then, no file check), at most once per date;
+- after a late server start (cheap, no file);
+- on demand: `POST /api/plan-source/recalculate`, or `python -m plan_agent recalc`.
+
+Every run is recorded in the run history (`trigger: "recalc"`, `phases.recalc`).
 
 ## 5. Priority
 

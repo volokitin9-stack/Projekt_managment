@@ -73,7 +73,26 @@ function nextRun(cfg, from = now()) {
  * Evaluate the schedule at time t. Returns what happened:
  * not_due | already_done | missed | non_working | calendar_unavailable | ran | inactive | config_error
  */
-async function tick(t = now(), { startup = false } = {}) {
+/**
+ * The daily tick: the file check (working days only, see fileTick), then - every day, also on weekends and
+ * holidays, at most once per date - the lightweight recalculation of stage / priority / next-action decisions
+ * from stored data. The recalculation reads no file, so time-dependent rules work without a new Excel version.
+ */
+async function tick(t = now(), opts = {}) {
+  const r = await fileTick(t, opts);
+  if (["inactive", "config_error", "not_due"].includes(r.action) || !r.date) return r;
+  const done = store.read((s) => s.plan_source_runs.some((x) => x.trigger === "recalc" && x.scheduled_date === r.date &&
+    x.outcome === "recalculated"));
+  if (!done) {
+    const rc = await monitor.recalculate({ trigger: "schedule", scheduledDate: r.date });
+    r.recalc = rc.outcome;
+  } else {
+    r.recalc = "already_done";
+  }
+  return r;
+}
+
+async function fileTick(t = now(), { startup = false } = {}) {
   const cfg = monitor.config();
   if (!active(cfg)) return { action: "inactive" };
   if (!cfg.scheduleTime || !cal.validTimezone(cfg.timezone)) {
@@ -219,6 +238,7 @@ function status() {
 }
 
 // ---- test hooks (PLAN_SCHEDULER_TEST_HOOKS=1 only) ----
+// (note: tick() above is also what the real timer calls)
 function setClock(iso) {
   state.fakeNow = iso ? new Date(iso).toISOString() : null;
 }

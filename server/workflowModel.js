@@ -26,7 +26,9 @@ const CONFIG_FILE = process.env.WORKFLOW_AUTOMATION_CONFIG
   : path.join(__dirname, "..", "config", "workflow_automation.json");
 const DASH_STAGES = ["scanning", "development", "prototype", "measurement", "documentation"];
 const DECISION_TYPES = ["deterministic", "proposed", "none"];
-const CONFIDENCE = ["verified", "probable", "low", "none"];
+const CONFIDENCE = ["verified", "inferred", "probable", "low", "none"];
+// Automatic stage sources: may be re-decided by later evidence. Confirmed sources never are.
+const AUTO_SOURCES = ["agent_rule", "inferred_from_plan"];
 const PRIORITIES = ["critical", "high", "normal", "low"];
 const NEXT_CONFIDENCE = ["verified", "planned", "none"];
 const WF_KEYS = ["version", "plan_month", "stage_decision", "source_priority", "source_priority_raw", "system_priority",
@@ -87,9 +89,10 @@ function validateWorkflow(wf) {
   return e;
 }
 
-function ruleAllowsAssignment(cfg, ruleId) {
-  if (!cfg.auto_assign_stage) return false;
-  return (cfg.stage_rules || []).some((r) => r.id === ruleId && r.enabled && r.mode === "assign");
+/** The server's own approved rule (null = not approved for assignment here). */
+function assigningRule(cfg, ruleId) {
+  if (!cfg.auto_assign_stage) return null;
+  return (cfg.stage_rules || []).find((r) => r.id === ruleId && r.enabled && r.mode === "assign") || null;
 }
 
 /** The source of the current stage; a stage set before this version counts as confirmed by a person. */
@@ -130,14 +133,16 @@ function applyWorkflow(s, row, wf, { actor = null, sync = null, push, at = null 
   let stageAction = "none";
   let changed = false;
 
-  const assignable = d.type === "deterministic" && ruleAllowsAssignment(cfg, d.rule_id);
+  const rule = d.type === "deterministic" ? assigningRule(cfg, d.rule_id) : null;
+  const assignable = !!rule;
+  const newSource = rule ? (rule.assignment_source || "agent_rule") : null;    // from the SERVER's config
   if (proposed && data.planned_stage !== proposed) {
     data.planned_stage = proposed;          // the suggestion shown on the card
     fieldSources.planned_stage = "agent";
     changed = true;
   }
   if (assignable && proposed && proposed !== current) {
-    if (!current || src === "agent_rule") {
+    if (!current || AUTO_SOURCES.includes(src)) {
       const backward = current && DASH_STAGES.indexOf(proposed) < DASH_STAGES.indexOf(current);
       if (backward && !cfg.allow_backward_transitions) {
         open.push(["backward_transition", `Агент определил возврат «${STAGE_LABEL[current]}» → «${STAGE_LABEL[proposed]}», ` +
@@ -146,12 +151,14 @@ function applyWorkflow(s, row, wf, { actor = null, sync = null, push, at = null 
       } else {
         data.status = proposed;
         fieldSources.status = "agent";
-        row.stage_source = "agent_rule";
+        row.stage_source = newSource;
+        row.stage_confidence = rule.confidence || "verified";
         row.stage_entered_at = null;                 // true entry date unknown
         row.stage_detected_at = ts;
         row.stage_entry_confidence = "unknown";
         push(s, row.id, current ? "stage_auto_changed" : "stage_auto_assigned", "agent", actor, current,
-          { stage: proposed, rule_id: d.rule_id, explanation: d.explanation || null, direction: backward ? "backward" : "forward",
+          { stage: proposed, rule_id: d.rule_id, assignment_source: newSource, confidence: row.stage_confidence,
+            explanation: d.explanation || null, direction: backward ? "backward" : "forward",
             evidence: (d.evidence || []).slice(0, 12), sync_run_id: sync && sync.run_id, source_file: (sync && sync.source_file) || null,
             detected_at: ts });
         stageAction = current ? (backward ? "moved_backward" : "moved") : "assigned";
@@ -166,6 +173,16 @@ function applyWorkflow(s, row, wf, { actor = null, sync = null, push, at = null 
         `определил «${STAGE_LABEL[proposed]}» (${d.explanation || d.rule_id}). Этап не изменён`]);
       stageAction = "kept_manual";
     }
+  } else if (assignable && proposed && proposed === current && AUTO_SOURCES.includes(src) && src !== newSource) {
+    // same stage, different basis (e.g. inferred from the plan -> now hours are logged): the basis is
+    // updated, the stage and its timers are NOT touched
+    push(s, row.id, "stage_basis_changed", "agent", actor, { stage_source: src, confidence: row.stage_confidence || null },
+      { stage_source: newSource, confidence: rule.confidence || "verified", rule_id: d.rule_id, stage: current,
+        sync_run_id: sync && sync.run_id });
+    row.stage_source = newSource;
+    row.stage_confidence = rule.confidence || "verified";
+    stageAction = "basis_changed";
+    changed = true;
   } else if (!current) {
     if (d.type === "none") {
       open.push(["stage_undetermined", `Этап не определён: ${d.explanation || "нет данных"}`]);
@@ -205,6 +222,7 @@ function applyWorkflow(s, row, wf, { actor = null, sync = null, push, at = null 
 /** A confirmed transition (person or explicit agent call): stage authority + stage review items resolved. */
 function onConfirmedTransition(s, row, source) {
   row.stage_source = source === "manual" ? "manual" : "agent_explicit";
+  row.stage_confidence = "confirmed";
   row.stage_detected_at = null;
   row.stage_entry_confidence = "confirmed";
   reviewQueue.resolveKeysIn(s, STAGE_CODES.map((c) => `workflow:${row.id}:${c}`), "stage_confirmed");
@@ -285,13 +303,31 @@ function attentionView(row, activities, now = new Date()) {
   return out;
 }
 
-/** Fields added to the project API (read-only). */
-function apiFields(row, activities) {
+/** Confidence of the current Kanban stage: confirmed (person / explicit transition), verified (logged work),
+ *  inferred (month plan only), null without a stage. */
+function stageConfidence(row) {
   const status = (row.data || {}).status || null;
+  if (!status) return null;
+  const src = stageSource(row);
+  if (src === "manual" || src === "agent_explicit") return "confirmed";
+  return row.stage_confidence || (src === "inferred_from_plan" ? "inferred" : "verified");
+}
+
+/** Fields added to the project API (read-only). */
+function apiFields(row, activities, reviews = []) {
+  const status = (row.data || {}).status || null;
+  const wfFlags = ((row.workflow || {}).review_flags || []).map((f) => f.code);
   return Object.assign({
     stage_source: stageSource(row),
+    stage_confidence: stageConfidence(row),
+    stage_assigned_automatically: AUTO_SOURCES.includes(stageSource(row)),
+    review_flags: reviews.map((r) => ({ id: r.id, kind: r.kind, code: (r.payload && r.payload.code) || r.kind,
+      severity: r.severity || "review", reason: r.reason || null, created_at: r.created_at }))
+      .concat(wfFlags.filter((c) => !reviews.some((r) => r.payload && r.payload.code === c))
+        .map((c) => ({ id: null, kind: `workflow_${c}`, code: c, severity: "warning", reason: null, created_at: null }))),
     stage_detected_at: row.stage_detected_at || null,
     stage_entry_confidence: status ? (row.stage_entered_at ? (row.stage_entry_confidence || "confirmed") : "unknown") : null,
+    verified_stage_entered_at: status && row.stage_entered_at ? row.stage_entered_at : null,
     days_since_stage_detected: status && row.stage_detected_at ? daysBetween(row.stage_detected_at) : null,
     stage_decision: row.workflow ? clone(row.workflow.stage_decision) : null,
     workflow: row.workflow ? clone(row.workflow) : null,
@@ -300,5 +336,6 @@ function apiFields(row, activities) {
   }, priorityView(row));
 }
 
-module.exports = { config, validateWorkflow, applyWorkflow, onConfirmedTransition, apiFields, stageSource, STAGE_CODES,
+module.exports = { config, validateWorkflow, applyWorkflow, onConfirmedTransition, apiFields, stageSource, stageConfidence,
+  AUTO_SOURCES, STAGE_CODES,
   CONFIG_FILE };
