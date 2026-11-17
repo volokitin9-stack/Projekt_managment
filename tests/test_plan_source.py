@@ -111,7 +111,7 @@ def test_manual_mode_detects_waits_and_syncs_once(srv, inbox):
     ps = first_sync(srv, inbox)
     n = len(ps)
     assert {p["record_category"] for p in ps} == {"main_project", "additional_work", "backlog"}
-    assert all(p["status"] is None for p in ps)                     # no stage confirmed by the import
+    assert only_rule_assigned_stages(ps)                        # no stage from planned work
     st = status(srv)
     assert st["status"] == "up_to_date" and st["last_sync_at"] and st["current_version"]["status"] == "synced"
 
@@ -352,3 +352,15 @@ def test_import_view_has_sync_status_section():
     for text in ("Автоматическое обновление плана", "Проверить обновления", "Пробный анализ", "Просмотреть изменения",
                  "Утвердить синхронизацию", "Включить автосинхронизацию", "/api/plan-source/status"):
         assert text in html
+
+def only_rule_assigned_stages(projects):
+    """A stage set by an import must come from the approved evidence rule (hours logged on one stage);
+    its true entry date stays unknown. Every other project keeps no stage."""
+    for p in projects:
+        if p["status"] is None:
+            continue
+        d = p["stage_decision"] or {}
+        assert p["stage_source"] == "agent_rule" and d.get("rule_id") == "active_single_stage", p["project_name"]
+        assert d.get("type") == "deterministic" and p["stage_entered_at"] is None and p["stage_detected_at"]
+        assert any(e["status"] == "in_progress" for e in d["evidence"])
+    return True

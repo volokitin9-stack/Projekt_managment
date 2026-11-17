@@ -156,7 +156,11 @@ class PlanAgent:
                 notes.append("SYNC BLOCKED: no successful deployment verification for this API "
                              "(run 'python -m plan_agent verify-deployment'): " +
                              ("; ".join(dep.get("blocking", [])) if dep else "never verified"))
-        plans = build_plan(a.records, existing, self.policy, writable)
+        rules = None
+        if prof is not None:
+            from .automation import load_rules
+            rules = load_rules(self.settings.config_dir)
+        plans = build_plan(a.records, existing, self.policy, writable, rules)
         if auto_safe:
             restrict_for_auto(plans, self.policy)
             notes.append("AUTOMATIC MODE: only approved source-owned fields and existing activity data are "
@@ -166,6 +170,9 @@ class PlanAgent:
 
         report = build_report(a, plans, mode, "", run_id, comparison, notes, fatal)
         report["sync_scope"] = "automatic" if auto_safe else "full"
+        if rules is not None:
+            from .workflow_report import summarize_workflow
+            report["workflow_summary"] = summarize_workflow(plans)
         report["held_for_review"] = sum(1 for p in plans if p.held_for_review)
         c = report["counts"]
         if mode == "sync":

@@ -99,3 +99,43 @@ The activity fields are `activity_key`, `plan_month`, `sequence`, `cycle`, `name
 | `event:<type>` | agent event |
 
 Each event carries `source` (`manual`, `agent`, `seed` or `telegram`), `actor` and `at`.
+
+## Workflow decision (`workflow` block)
+
+`POST /api/agent/projects` and `PATCH /api/agent/projects/:id` accept an optional `workflow` object next to `project` / `changes`. The server validates it strictly (unknown keys → 400) and applies it in the same transaction. Rules and authority are described in `docs/WORKFLOW_AUTOMATION.md`.
+
+```json
+{
+  "version": 1,
+  "plan_month": "2026-11",
+  "stage_decision": {
+    "type": "deterministic",
+    "rule_id": "active_single_stage",
+    "proposed_stage": "documentation",
+    "confidence": "verified",
+    "explanation": "work logged only on «Оформление» activities",
+    "evidence": [{"activity_key": "2026-11#c1#кд#1", "task": "КД", "activity_type": "documentation",
+                  "status": "in_progress", "evidence": "5 h logged in 2026-11 (effort, not completion)", "source_row": 41}],
+    "cycle": 1
+  },
+  "source_priority": "normal", "source_priority_raw": "2", "system_priority": null, "recommended_priority": "normal",
+  "priority_reasons": ["Исходный приоритет в плане: 2 → Средний", "Правила повышения приоритета не утверждены — используется исходный приоритет"],
+  "next_action": {"label": "Продолжить: КД", "source": "engineering_activity", "confidence": "verified", "evidence": []},
+  "review_flags": []
+}
+```
+
+* `stage_decision.type`: `deterministic` | `proposed` | `none`. A deterministic decision is applied only if `rule_id` is enabled with `mode: assign` on the server, and the current stage was not confirmed by a person.
+* `proposed_stage`: dashboard stage key (`scanning`, `development`, `prototype`, `measurement`, `documentation`).
+* `confidence`: `verified` | `probable` | `low` | `none`; next action: `verified` | `planned` | `none`.
+* Activities may carry `normalized_status` (`planned`, `in_progress`, `completed`, `blocked`, `unknown`) and `status_evidence` (object).
+* `GET /api/agent/schema`: `supports` contains `workflow` and `review_severity`; `workflow.assign_rules` lists the rules the server accepts for automatic assignment.
+
+Project API additions (read-only):
+- stage: `stage_source` (`manual` | `agent_explicit` | `agent_rule`), `stage_detected_at`, `stage_entry_confidence`, `days_since_stage_detected`, `stage_decision`, `workflow`;
+- priority: `source_priority`, `source_priority_raw`, `system_priority`, `effective_priority`, `priority_source`, `priority_reasons`;
+- `next_action` and `attention`.
+
+`next_action` can be set manually with `PATCH /api/projects/:id`.
+
+Review queue: items have `severity` (`blocking` | `review` | `warning` | `info`). `GET /api/review-queue` returns blocking and review items; `?severity=all` (or one level) returns others; `?kind=…` returns all severities of that kind. `POST /api/agent/review-queue` accepts `severity`.

@@ -263,7 +263,7 @@ def test_excel_import_dry_run_approval_and_repeat(shturman, tmp_path):
     projects = requests.get(shturman.url + "/api/projects").json()
     cats = {p["record_category"] for p in projects}
     assert cats == {"main_project", "additional_work", "backlog"}
-    assert all(p["status"] is None for p in projects)                            # no stage confirmed by the import
+    assert only_rule_assigned_stages(projects)                        # no stage from planned work
     gac = next(p for p in projects if p["project_name"] == "GAC S9 Комплект защит")
     assert gac["workload"]["planned_hours"] == 32 and len(gac["activities"]) == 4
     assert {a["source_sheet"] for a in gac["activities"]} == {"Ноябрь"}
@@ -298,3 +298,15 @@ def test_dashboard_script_has_no_syntax_errors(tmp_path):
     js.write_text("\n".join(re.findall(r"<script>(.*?)</script>", html, re.S)), encoding="utf-8")
     out = subprocess.run(["node", "--check", str(js)], capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
+
+def only_rule_assigned_stages(projects):
+    """A stage set by an import must come from the approved evidence rule (hours logged on one stage);
+    its true entry date stays unknown. Every other project keeps no stage."""
+    for p in projects:
+        if p["status"] is None:
+            continue
+        d = p["stage_decision"] or {}
+        assert p["stage_source"] == "agent_rule" and d.get("rule_id") == "active_single_stage", p["project_name"]
+        assert d.get("type") == "deterministic" and p["stage_entered_at"] is None and p["stage_detected_at"]
+        assert any(e["status"] == "in_progress" for e in d["evidence"])
+    return True

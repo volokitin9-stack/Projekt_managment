@@ -13,6 +13,7 @@ import requests
 
 import make_fixtures
 from conftest import ROOT, ShturmanServer
+from test_plan_source import only_rule_assigned_stages
 
 PLAN = "work_plan_2026.xlsx"
 WED = "2026-11-11"          # ordinary working Wednesday
@@ -358,7 +359,7 @@ def test_manual_edits_and_confirmed_stages_survive_updates(srv, inbox):
     assert h2["priority"] == "critical" and h2["description"] == "ручное описание"
     assert h2["id"] == honda["id"] and h2["external_project_id"] == honda["external_project_id"]
     unconfirmed = [p for p in projects(srv) if p["id"] != honda["id"]]
-    assert all(p["status"] is None for p in unconfirmed)                  # no stage confirmed by an update
+    assert only_rule_assigned_stages(unconfirmed)                         # no stage from planned work
 
 
 def test_configuration_and_status_report(srv):

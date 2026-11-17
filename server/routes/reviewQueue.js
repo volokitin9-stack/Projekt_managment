@@ -5,9 +5,11 @@ const reviewQueue = require("../reviewQueueModel");
 
 const router = express.Router();
 
-// GET /api/review-queue — open items (add ?all=1 to include resolved ones, ?kind=plan_record to filter).
+// GET /api/review-queue — open actionable items (blocking + review). ?all=1 includes resolved ones,
+// ?kind=plan_record filters by kind, ?severity=all|blocking|review|warning|info selects severities.
 router.get("/", (req, res) => {
-  res.json(reviewQueue.list({ includeResolved: req.query.all === "1", kind: req.query.kind || null }));
+  res.json(reviewQueue.list({ includeResolved: req.query.all === "1", kind: req.query.kind || null,
+    severity: req.query.severity || null }));
 });
 
 // POST /api/review-queue/:id/resolve — mark an item as handled (nothing else is changed).

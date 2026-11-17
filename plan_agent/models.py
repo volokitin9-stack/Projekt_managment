@@ -316,11 +316,15 @@ class ChangePlan:
     error: Optional[str] = None
     held_for_review: bool = False    # automatic mode held (part of) this change for approval
     withheld: list[FieldChange] = field(default_factory=list)   # automatic mode: changes not applied
+    workflow: Optional[dict] = None          # stage / priority / next-action decision sent to the backend
+    workflow_changed: bool = False           # the decision differs from what the dashboard stored
 
     def to_dict(self) -> dict:
         return {
             "held_for_review": self.held_for_review,
             "withheld": [asdict(c) for c in self.withheld],
+            "workflow": self.workflow,
+            "workflow_changed": self.workflow_changed,
             "project": self.record.project_name,
             "identity": self.record.identity_key(),
             "source": f"{self.record.source_sheet}!{self.record.source_row}",

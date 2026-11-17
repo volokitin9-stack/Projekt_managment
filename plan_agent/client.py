@@ -143,21 +143,26 @@ class DashboardClient:
             raise ApiError(f"refusing to send activity fields the backend does not support: {sorted(unsupported)}")
 
     def create_project(self, data: dict, sync: dict, activities: Optional[list] = None,
-                       activity_scope: Optional[dict] = None) -> dict:
+                       activity_scope: Optional[dict] = None, workflow: Optional[dict] = None) -> dict:
         self._check_fields(data)
         self._check_activities(activities)
         body = {"project": data, "sync": sync, "create_only": True}
         if activities is not None:
             body.update(activities=activities, activity_scope=activity_scope)
+        if workflow is not None and "workflow" in self.schema().get("supports", []):
+            body["workflow"] = workflow           # an older backend without workflow support gets the data only
         return self._request("POST", "/api/agent/projects", body)
 
     def update_project(self, pid, changes: dict, expected_version: Optional[int], sync: dict,
-                       activities: Optional[list] = None, activity_scope: Optional[dict] = None) -> dict:
+                       activities: Optional[list] = None, activity_scope: Optional[dict] = None,
+                       workflow: Optional[dict] = None) -> dict:
         self._check_fields(changes)
         self._check_activities(activities)
         body = {"changes": changes, "expected_version": expected_version, "sync": sync}
         if activities is not None:
             body.update(activities=activities, activity_scope=activity_scope)
+        if workflow is not None and "workflow" in self.schema().get("supports", []):
+            body["workflow"] = workflow           # an older backend without workflow support gets the data only
         return self._request("PATCH", f"/api/agent/projects/{pid}", body)
 
     def save_sync_run(self, run: dict) -> None:

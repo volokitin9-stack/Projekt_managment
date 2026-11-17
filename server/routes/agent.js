@@ -19,6 +19,7 @@ const { v4: uuidv4 } = require("uuid");
 const store = require("../store");
 const storage = require("../storage");
 const projectsModel = require("../projectsModel");
+const workflowModel = require("../workflowModel");
 const reviewQueue = require("../reviewQueueModel");
 const { requireAgentAuth } = require("../auth");
 
@@ -73,8 +74,13 @@ router.get("/schema", (req, res) => {
     priorities: projectsModel.VALID_PRIORITIES,
     activity_types: projectsModel.ACTIVITY_TYPES,
     progress_statuses: projectsModel.PROGRESS,
+    normalized_statuses: projectsModel.NORMALIZED_STATUS,
+    workflow: {
+      assign_rules: (workflowModel.config().stage_rules || []).filter((r) => r.enabled && r.mode === "assign").map((r) => r.id),
+      auto_assign_stage: !!workflowModel.config().auto_assign_stage
+    },
     supports: ["expected_version", "duplicate_detection", "field_sources", "history", "sync_runs", "activities",
-      "review_queue", "stage_transitions", "telegram_photos", "create_only"]
+      "review_queue", "stage_transitions", "telegram_photos", "create_only", "workflow", "review_severity"]
   });
 });
 
@@ -95,6 +101,10 @@ router.post("/projects", (req, res) => {
   if (envelope) {
     const v = projectsModel.validateProjectInput(input, { partial: false, allowed });
     if (v.errors.length) return validationError(res, v.errors, v.unknown);
+    if (body.workflow != null) {
+      const we = workflowModel.validateWorkflow(body.workflow);
+      if (we.length) return validationError(res, we);
+    }
     const dups = findDuplicates(Object.assign({}, input));
     if (dups.length && body.create_only !== false) {
       return res.status(409).json({ error: "duplicate", code: "duplicate", message: "a project with the same identity already exists",
@@ -103,7 +113,7 @@ router.post("/projects", (req, res) => {
     try {
       const project = projectsModel.createProject(input, { externalId, needsReview: !externalId, source: "agent",
         actor: actorOf(req), activities: body.activities || null, activityScope: body.activity_scope || null,
-        sync: body.sync || null });
+        sync: body.sync || null, workflow: body.workflow || null });
       return res.status(201).json(Object.assign({ matched: "created" }, project));
     } catch (e) {
       if (e.status === 400) return validationError(res, e.details || [e.message]);
@@ -143,11 +153,15 @@ router.patch("/projects/:id", (req, res) => {
   const row = projectsModel.findRow(req.params.id);
   if (!row) return res.status(404).json({ error: "Not found" });
   const body = req.body || {};
-  const envelope = body.changes !== undefined || body.activities !== undefined;
+  const envelope = body.changes !== undefined || body.activities !== undefined || body.workflow !== undefined;
   const changes = envelope ? (body.changes || {}) : body;
   const allowed = envelope ? projectsModel.AGENT_WRITABLE : projectsModel.PROJECT_FIELDS;
   const v = projectsModel.validateProjectInput(changes, { partial: true, allowed });
   if (v.errors.length) return validationError(res, v.errors, v.unknown);
+  if (envelope && body.workflow != null) {
+    const we = workflowModel.validateWorkflow(body.workflow);
+    if (we.length) return validationError(res, we);
+  }
   if (envelope && (changes.external_project_id || changes.article_number)) {
     const dups = findDuplicates({ external_project_id: changes.external_project_id, article_number: changes.article_number }, row.id);
     if (dups.length) return res.status(409).json({ error: "duplicate", code: "duplicate", existing_ids: dups });
@@ -157,7 +171,8 @@ router.patch("/projects/:id", (req, res) => {
     expectedVersion: envelope ? body.expected_version : null,
     activities: envelope ? body.activities || null : null,
     activityScope: envelope ? body.activity_scope || null : null,
-    sync: envelope ? body.sync || null : null
+    sync: envelope ? body.sync || null : null,
+    workflow: envelope ? body.workflow || null : null
   });
   if (result.error === "not_found") return res.status(404).json({ error: "Not found" });
   if (result.error === "version_conflict") {
@@ -341,11 +356,14 @@ router.post("/projects/:id/events", (req, res) => {
 // ---- review queue (idempotent by dedupe_key) ----
 router.post("/review-queue", (req, res) => {
   const b = req.body || {};
-  const unknown = Object.keys(b).filter((k) => !["dedupe_key", "kind", "payload", "reason", "source"].includes(k));
+  const unknown = Object.keys(b).filter((k) => !["dedupe_key", "kind", "payload", "reason", "source", "severity"].includes(k));
   if (unknown.length) return validationError(res, [`unsupported fields: ${unknown.join(", ")}`], unknown);
   if (!b.kind || typeof b.payload !== "object") return validationError(res, ['"kind" and "payload" (object) are required']);
+  if (b.severity != null && !reviewQueue.SEVERITIES.includes(b.severity)) {
+    return validationError(res, [`"severity" must be one of: ${reviewQueue.SEVERITIES.join(", ")}`]);
+  }
   const r = reviewQueue.upsert({ kind: b.kind, payload: b.payload, reason: b.reason || null, source: b.source || "agent",
-    dedupeKey: b.dedupe_key || null });
+    dedupeKey: b.dedupe_key || null, severity: b.severity || null });
   res.status(r.duplicate ? 200 : 201).json(r);
 });
 

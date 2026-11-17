@@ -14,12 +14,15 @@
 
 const { v4: uuidv4 } = require("uuid");
 const store = require("./store");
+const workflowModel = require("./workflowModel");
 
 const VALID_PRIORITIES = ["critical", "high", "normal", "low"];
 const CATEGORIES = ["main_project", "additional_work", "backlog"];
 const ACTIVITY_TYPES = ["scanning", "development", "test_prototype", "measurement", "documentation",
   "testing", "transfer_extension", "engineering_change"];
 const PROGRESS = ["planned", "in_progress", "done", "blocked", "cancelled"];
+// Normalised activity status computed by the agent from evidence (see plan_agent/automation.py).
+const NORMALIZED_STATUS = ["planned", "in_progress", "completed", "blocked", "unknown"];
 const MONTH_RX = /^\d{4}-\d{2}$/;
 const DATE_RX = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -30,7 +33,7 @@ const PROJECT_FIELDS = [
   "article_number", "assigned_engineer", "priority", "priority_original", "status", "planned_stage",
   "work_status", "description", "planned_deadline", "planned_start_date", "actual_completion_date", "comments",
   "source", "source_file", "source_sheet", "source_row", "source_rows", "last_plan_month", "extra_attributes",
-  "dependencies", "stages"
+  "dependencies", "stages", "next_action"
 ];
 const ALIASES = { make: "manufacturer", model: "vehicle_model", product: "product_type", engineer: "assigned_engineer",
   stage: "status", deadline: "planned_deadline", externalProjectId: "external_project_id" };
@@ -38,16 +41,17 @@ const ALIASES = { make: "manufacturer", model: "vehicle_model", product: "produc
 const CONTROL_FIELDS = ["version", "actor"];
 // Fields an agent planning sync may write. `status` is NOT here: a confirmed
 // stage only changes through an explicit transition.
-const AGENT_WRITABLE = PROJECT_FIELDS.filter((f) => !["status", "comments", "source"].includes(f));
+// `next_action` is written by the agent only inside the validated `workflow` block.
+const AGENT_WRITABLE = PROJECT_FIELDS.filter((f) => !["status", "comments", "source", "next_action"].includes(f));
 // Fields a person may edit in the dashboard.
 const MANUAL_EDITABLE = ["project_name", "article_number", "assigned_engineer", "priority", "description",
-  "planned_deadline", "work_status"];
+  "planned_deadline", "work_status", "next_action"];
 
 const ACTIVITY_AGENT_FIELDS = [
   "activity_key", "plan_month", "sequence", "cycle", "name", "activity_type", "stage", "task_type",
   "project_stage_original", "task_group", "assignee", "assignee_original", "planned_hours", "actual_hours",
   "hours_by_date", "progress_status", "effort_ratio", "items_ok", "items_nok", "result_raw", "comment",
-  "details", "source_file", "source_sheet", "source_row"
+  "details", "source_file", "source_sheet", "source_row", "normalized_status", "status_evidence"
 ];
 const ACTIVITY_MANUAL_FIELDS = ["progress_status", "manual_note", "assignee"];
 
@@ -115,6 +119,10 @@ function validateProjectInput(input, { partial = false, strict = true, allowed =
       errors.push('"project_name" or "product_type" is required');
     }
   }
+  if (data.next_action !== undefined && data.next_action !== null &&
+      (typeof data.next_action !== "string" || data.next_action.length > 300)) {
+    errors.push('"next_action" must be text (max 300 characters)');
+  }
   if (data.priority !== undefined && data.priority !== null && !VALID_PRIORITIES.includes(data.priority)) {
     errors.push(`"priority" must be one of: ${VALID_PRIORITIES.join(", ")} (or null = unspecified)`);
   }
@@ -154,6 +162,12 @@ function validateActivity(a, allowed) {
   if (a.stage != null && !validStageKeys().includes(a.stage)) errors.push(`activity stage "${a.stage}" is not a configured stage`);
   if (a.progress_status != null && !PROGRESS.includes(a.progress_status)) {
     errors.push(`progress_status must be one of: ${PROGRESS.join(", ")}`);
+  }
+  if (a.normalized_status != null && !NORMALIZED_STATUS.includes(a.normalized_status)) {
+    errors.push(`normalized_status must be one of: ${NORMALIZED_STATUS.join(", ")}`);
+  }
+  if (a.status_evidence != null && (typeof a.status_evidence !== "object" || Array.isArray(a.status_evidence))) {
+    errors.push("status_evidence must be an object");
   }
   if (a.plan_month != null && !MONTH_RX.test(String(a.plan_month))) errors.push("plan_month must be YYYY-MM");
   ["planned_hours", "actual_hours", "effort_ratio"].forEach((f) => {
@@ -323,7 +337,7 @@ function rowToApi(row, { includeRelations = true, index = null } = {}) {
     engineer: data.assigned_engineer || "",
     stage: status,
     deadline: data.planned_deadline || data.deadline || null
-  });
+  }, workflowModel.apiFields(row, activities));
 }
 
 function getProject(id) {
@@ -487,7 +501,7 @@ function failWith(status, message, details) {
 }
 
 function createProject(input, { externalId = null, needsReview = false, source = null, actor = null,
-  activities = null, activityScope = null, sync = null } = {}) {
+  activities = null, activityScope = null, sync = null, workflow = null } = {}) {
   const data = canonical(clone(input));
   const src = source || data.source || "manual";
   data.source = data.source || src;
@@ -502,16 +516,24 @@ function createProject(input, { externalId = null, needsReview = false, source =
   const fieldSources = {};
   Object.keys(data).forEach((k) => { if (!isEmpty(data[k])) fieldSources[k] = src; });
   const summary = store.tx((s) => {
-    s.projects.push({ id, external_project_id: externalId, data, version: 1, needs_review: !!needsReview, created_at: ts,
+    const newRow = { id, external_project_id: externalId, data, version: 1, needs_review: !!needsReview, created_at: ts,
       updated_at: ts, record_category: category, stage_entered_at: data.status ? ts : null, field_sources: fieldSources,
-      last_plan_month: lastPlanMonth });
+      last_plan_month: lastPlanMonth };
+    s.projects.push(newRow);
     pushHistory(s, id, "created", src, actor, null, { record_category: category, source_file: data.source_file || null,
       sync_run_id: sync && sync.run_id });
-    if (data.status) pushHistory(s, id, "stage_transition", src, actor, null, data.status);
-    if (!activities) return null;
-    const r = applyActivities(s, id, activities, activityScope, sync);
-    if (r.error) throw failWith(400, r.error, r.details);
-    return r.summary;
+    if (data.status) {
+      pushHistory(s, id, "stage_transition", src, actor, null, data.status);
+      workflowModel.onConfirmedTransition(s, newRow, src);
+    }
+    let summary = null;
+    if (activities) {
+      const r = applyActivities(s, id, activities, activityScope, sync);
+      if (r.error) throw failWith(400, r.error, r.details);
+      summary = r.summary;
+    }
+    if (workflow) workflowModel.applyWorkflow(s, newRow, workflow, { actor, sync, push: pushHistory });
+    return summary;
   });
   const project = getProject(id);
   if (summary) project.activity_summary = summary;
@@ -524,7 +546,7 @@ function createProject(input, { externalId = null, needsReview = false, source =
  * `status` is a recorded stage transition and restarts the stage timer.
  */
 function updateProject(id, patch, { actor = null, source = "manual", expectedVersion = null, activities = null,
-  activityScope = null, sync = null, stageAt = null, protectManual = true } = {}) {
+  activityScope = null, sync = null, stageAt = null, protectManual = true, workflow = null } = {}) {
   return store.tx((s) => {
     const row = s.projects.find((r) => r.id === id);
     if (!row) return { error: "not_found" };
@@ -569,9 +591,19 @@ function updateProject(id, patch, { actor = null, source = "manual", expectedVer
       summary = r.summary;
     }
     const statusChange = changes.find((c) => c[0] === "status");
-    if (statusChange) row.stage_entered_at = stageAt || nowIso();
+    if (statusChange) {
+      row.stage_entered_at = stageAt || nowIso();
+      workflowModel.onConfirmedTransition(s, row, source);
+    }
+    if (changes.some((c) => c[0] === "next_action") && source === "manual") row.next_action_updated_at = nowIso();
+    let wfChanged = false;
+    if (workflow) {
+      row.data = current;
+      row.field_sources = fieldSources;
+      wfChanged = workflowModel.applyWorkflow(s, row, workflow, { actor, sync, push: pushHistory }).changed;
+    }
     const actChanged = summary && (summary.added || summary.updated || summary.removed_from_source);
-    if (changes.length || actChanged) {
+    if (changes.length || actChanged || wfChanged) {
       row.data = current;
       row.field_sources = fieldSources;
       row.version += 1;
@@ -586,7 +618,7 @@ function updateProject(id, patch, { actor = null, source = "manual", expectedVer
         pushHistory(s, row.id, `updated:${k}`, source, actor, prev, next);
       }
     });
-    if (sync && sync.run_id && (changes.length || actChanged)) {
+    if (sync && sync.run_id && (changes.length || actChanged || wfChanged)) {
       pushHistory(s, row.id, "agent_sync", "agent", actor, null, { sync_run_id: sync.run_id,
         source_file: sync.source_file || null, fields: changes.map((c) => c[0]), activities: summary });
     }
@@ -625,6 +657,7 @@ module.exports = {
   CATEGORIES,
   ACTIVITY_TYPES,
   PROGRESS,
+  NORMALIZED_STATUS,
   PROJECT_FIELDS,
   AGENT_WRITABLE,
   MANUAL_EDITABLE,

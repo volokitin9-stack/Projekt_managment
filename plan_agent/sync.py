@@ -9,17 +9,43 @@ from .config import OwnershipPolicy
 from .matching import ProjectMatcher
 from .models import ChangePlan, ChangeType, Conflict, ProjectRecord
 from .ownership import plan_field_changes
+from . import automation
 
 log = logging.getLogger("plan_agent.sync")
 
 
+def _workflow(rec: ProjectRecord, project: Optional[dict], rules: Optional[dict]) -> Optional[dict]:
+    """Stage / priority / next-action decision for a record (activities are normalised in place)."""
+    if rules is None or rec.activity_payload is None:
+        return None
+    src = automation.SOURCE_TO_DASHBOARD_PRIORITY.get(rec.priority) if rec.priority else None
+    return automation.build_workflow(rec.record_category or "main_project", rec.activity_payload, project, src,
+                                     rec.extra_attributes.get("priority_original"), rules, rec.activity_month)
+
+
+def _align(payload: dict, wf: Optional[dict]) -> None:
+    """Keep the plain project fields consistent with the workflow decision."""
+    if not wf:
+        return
+    stage = (wf.get("stage_decision") or {}).get("proposed_stage")
+    if stage:
+        payload["planned_stage"] = stage            # the suggestion shown on the card
+    else:
+        payload.pop("planned_stage", None)          # no usable evidence: keep what the dashboard has
+    if wf.get("system_priority") and "priority" in payload:
+        payload["priority"] = wf["recommended_priority"]   # approved escalation; a manual priority still wins
+
+
 def build_plan(records: list[ProjectRecord], existing: list[dict], policy: OwnershipPolicy,
-               writable: set[str]) -> list[ChangePlan]:
+               writable: set[str], rules: Optional[dict] = None) -> list[ChangePlan]:
+    """rules: config/workflow_automation.json; None = no workflow automation (generic files)."""
     matcher = ProjectMatcher(existing)
     plans: list[ChangePlan] = []
     claimed: dict = {}   # dashboard id -> record that already matched it in this run
     for rec in records:
+        wf_new = _workflow(rec, None, rules) if rules is not None else None
         payload = {k: v for k, v in rec.to_payload().items() if k in writable}
+        _align(payload, wf_new)
         if rec.has_errors():
             plans.append(ChangePlan(rec, ChangeType.ERROR, reason="record failed validation"))
             continue
@@ -40,6 +66,8 @@ def build_plan(records: list[ProjectRecord], existing: list[dict], policy: Owner
                                         reason="another record in this file matched the same dashboard project"))
                 continue
             claimed[pid] = f"{rec.source_sheet}!{rec.source_row}"
+            wf = _workflow(rec, m.project, rules) if rules is not None else None
+            _align(payload, wf)
             changes, conflicts, identity = plan_field_changes(m.project, payload, policy, writable)
             older = bool(rec.last_plan_month and m.project.get("last_plan_month")
                          and rec.last_plan_month < m.project["last_plan_month"])
@@ -48,6 +76,8 @@ def build_plan(records: list[ProjectRecord], existing: list[dict], policy: Owner
                                           "kept_dashboard", "file is an older plan month than the dashboard; only "
                                           "that month's activities are updated"))
                 changes = []
+            if older and wf:
+                wf = None        # the stage/priority decision belongs to the latest plan month only
             act_changes, act_conflicts = diff_activities(m.project, rec)
             conflicts.extend(act_conflicts)
             if identity:
@@ -60,16 +90,27 @@ def build_plan(records: list[ProjectRecord], existing: list[dict], policy: Owner
                                         reason="record has ambiguities that need review (see issues)",
                                         activity_changes=act_changes))
                 continue
-            ctype = ChangeType.UPDATE if (changes or act_changes) else ChangeType.UNCHANGED
+            wf_changed = bool(wf) and automation.comparable(wf) != automation.comparable(m.project.get("workflow"))
+            ctype = ChangeType.UPDATE if (changes or act_changes or wf_changed) else ChangeType.UNCHANGED
             plans.append(ChangePlan(rec, ctype, pid, m.project.get("version"), changes, conflicts,
-                                    reason=f"matched by {m.method}", activity_changes=act_changes))
+                                    reason=f"matched by {m.method}" + ("; workflow decision changed" if wf_changed and
+                                                                       not (changes or act_changes) else ""),
+                                    activity_changes=act_changes, workflow=wf, workflow_changed=wf_changed))
             continue
         # new
         if rec.needs_review():
             plans.append(ChangePlan(rec, ChangeType.REVIEW, reason="new project with ambiguities (see issues)"))
             continue
-        plans.append(ChangePlan(rec, ChangeType.NEW, reason=m.reason))
+        plans.append(ChangePlan(rec, ChangeType.NEW, reason=m.reason, workflow=wf_new, workflow_changed=bool(wf_new)))
+    for p in plans:
+        if p.workflow is None and rules is not None:
+            p.workflow = wf_new_for(p.record, rules)
     return plans
+
+
+def wf_new_for(rec: ProjectRecord, rules: dict) -> Optional[dict]:
+    """Report-only decision for records that are not written (review, duplicates)."""
+    return _workflow(rec, None, rules)
 
 
 def restrict_for_auto(plans: list[ChangePlan], policy: OwnershipPolicy) -> list[ChangePlan]:
@@ -106,7 +147,7 @@ def restrict_for_auto(plans: list[ChangePlan], policy: OwnershipPolicy) -> list[
         if notes:
             p.held_for_review = True
             p.reason = "automatic mode: " + "; ".join(notes)
-        if p.change_type == ChangeType.UPDATE and not p.changes and not p.activity_changes:
+        if p.change_type == ChangeType.UPDATE and not p.changes and not p.activity_changes and not p.workflow_changed:
             p.change_type = ChangeType.REVIEW
     return plans
 
@@ -190,7 +231,7 @@ class SyncExecutor:
         data = {k: v for k, v in p.record.to_payload().items() if k in self.writable and v not in (None, [], {})}
         acts, scope = self._activities(p)
         try:
-            created = self.c.create_project(data, self.sync_meta, acts, scope)
+            created = self.c.create_project(data, self.sync_meta, acts, scope, workflow=p.workflow)
             p.dashboard_id = created.get("id")
             p.result = "ok"
         except DuplicateError as e:
@@ -217,7 +258,8 @@ class SyncExecutor:
         changes = {c.field: c.new for c in p.changes}
         acts, scope = self._activities(p) if p.activity_changes else (None, None)
         try:
-            self.c.update_project(p.dashboard_id, changes, p.dashboard_version, self.sync_meta, acts, scope)
+            self.c.update_project(p.dashboard_id, changes, p.dashboard_version, self.sync_meta, acts, scope,
+                                  workflow=p.workflow if p.workflow_changed else None)
             p.result = "ok"
         except VersionConflict:
             current = self.c.get_project(p.dashboard_id)

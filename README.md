@@ -140,7 +140,11 @@ PLAN_TARGET_MONTH=auto
 * **What is applied:** only changes permitted by `config/ownership_policy.yaml → auto_sync`, which means hours and data of existing activities plus approved fields. New projects, identity, engineer or stage changes, added or removed activities and conflicts with manual edits go to **На проверке**.
 * **Always manual:** the confirmed stage is never changed, and the first import of a file structure always needs approval in «Импорт плана».
 
-## Stages: confirmed vs. planned
+## Stages: confirmed, automatic and planned
+
+The agent now also places projects on the board automatically when the plan gives **verified evidence**: hours logged on activities of exactly one stage. Planned work only produces a suggestion. A stage confirmed by a person is never changed by the automation. Details and the switchable rules are in `docs/WORKFLOW_AUTOMATION.md`.
+
+### Confirmed vs. planned
 
 * A card is placed in a Kanban column only by its **confirmed stage** (`status`). A person confirms it by dragging the card to a column, by using the "Подтвердить «…»" button, or in the project panel. An explicit agent call with `"confirmed": true` can also confirm it.
 * A planning file only provides a **suggested stage** (`planned_stage`). Planned work is never treated as proof that a project is in a stage, and an unknown stage never defaults to Сканирование.
@@ -219,6 +223,7 @@ npm test
 * `docs/CONFIGURATION.md`: environment variables, mapping configuration and the monthly-plan profile
 * `docs/EXTERNAL_AGENT.md`: connecting an automatic file-delivery agent
 * `docs/DEPLOYMENT_VERIFICATION.md`: checks before syncing to a production server
+* `docs/WORKFLOW_AUTOMATION.md`: automatic stage, activity status, priority, next action, stage time, review queue (rules in `config/workflow_automation.json`)
 * `docs/WINDOWS.md`: Windows setup, the agent's Python interpreter and a verification procedure
 * `docs/FILE_SOURCE.md`: daily schedule, production calendar, «Обновить», file-source configuration (corporate share) and troubleshooting
 

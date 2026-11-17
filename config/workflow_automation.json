@@ -1,0 +1,82 @@
+{
+  "_comment": "Business rules of the workflow automation (read by plan_agent AND by the Штурман server). Nothing here invents data: rules that are not approved stay disabled or 'propose'. See docs/WORKFLOW_AUTOMATION.md.",
+  "version": 1,
+
+  "stages": ["scanning", "development", "test_prototype", "measurement", "documentation"],
+  "_stages_comment": "Agent stage codes; the dashboard uses 'prototype' for 'test_prototype'.",
+
+  "auto_assign_stage": true,
+  "_auto_assign_stage_comment": "Master switch: false = the agent only proposes stages, nothing is assigned automatically.",
+  "allow_backward_transitions": true,
+  "_allow_backward_transitions_comment": "Rework (e.g. measurement -> development) may be assigned automatically for agent-assigned stages; it is always recorded and reported as a warning.",
+
+  "stage_rules": [
+    {"id": "active_single_stage", "enabled": true, "mode": "assign",
+     "description": "In the project's latest engineering cycle, hours were logged (in progress) on main-stage activities of exactly ONE stage -> that stage is the current stage."},
+    {"id": "active_multiple_stages", "enabled": true, "mode": "propose",
+     "description": "Hours were logged on activities of several stages -> the most advanced active stage is proposed; review."},
+    {"id": "completed_previous_stage", "enabled": true, "mode": "propose",
+     "description": "All main activities of the latest cycle are verified completed -> the next stage of the workflow is proposed; review."},
+    {"id": "planned_single_stage", "enabled": true, "mode": "propose",
+     "description": "No work logged yet; this month's plan contains main-stage work of exactly ONE stage -> that stage is proposed. Switch mode to 'assign' only after the department approves that the month plan defines the current stage."},
+    {"id": "planned_sequence_earliest", "enabled": true, "mode": "propose",
+     "description": "No work logged yet; the plan contains several stages -> the earliest planned stage is proposed; review."}
+  ],
+
+  "activity_status": {
+    "_comment": "Normalised activity status: planned | in_progress | completed | blocked | unknown. Hours are effort, never completion. ОК/NOK are kept as original values and are NOT interpreted until their meaning is confirmed.",
+    "in_progress_if_actual_hours": true,
+    "planned_if_planned_hours": true,
+    "completion_indicators": [],
+    "blocker_indicators": [],
+    "_indicators_comment": "Future verified indicators, e.g. {\"field\": \"items_ok\", \"op\": \">=\", \"value\": 1} - empty until the department confirms what ОК / NOK mean. A status set manually in the dashboard (done / blocked) is always used as verified evidence."
+  },
+
+  "workflows": {
+    "new_product": ["scanning", "development", "test_prototype", "measurement", "documentation"],
+    "transfer_extension": ["transfer_extension", "documentation"]
+  },
+
+  "next_action": {
+    "unknown_label": "Следующий шаг требует уточнения",
+    "continue_template": "Продолжить: {task}",
+    "start_template": "Начать: {task}",
+    "generic_task_names": ["Прочее", "Доп", "Доп."],
+    "_generic_task_names_comment": "A task named like this is described by its task group instead (e.g. «Прочее» in group «Выгрузка в PDM» -> «Выгрузка в PDM»).",
+    "after_stage_completed": {
+      "scanning": "Начать разработку",
+      "development": "Заказать образец",
+      "test_prototype": "Выполнить примерку",
+      "measurement": "Подготовить КД",
+      "documentation": "Загрузить в PDM"
+    }
+  },
+
+  "priority": {
+    "_comment": "Source priority = mapped Excel value (1/1.1/1.2/1.3 high, 2 normal, 3 low, 0/empty unspecified). System priority = result of the approved escalation rules below (none are approved yet, so the source priority is used). A manual priority in the dashboard always wins.",
+    "levels": ["critical", "high", "normal", "low"],
+    "rules": [],
+    "_rules_examples": [
+      {"id": "deadline_soon", "type": "deadline_within_days", "days": 7, "raise_to": "high"},
+      {"id": "deadline_overdue", "type": "deadline_overdue", "raise_to": "critical"},
+      {"id": "measurement_too_long", "type": "stage_days_exceeded", "stage": "measurement", "days": 30, "raise_to": "high"},
+      {"id": "blocked", "type": "verified_blocker", "raise_to": "high"}
+    ]
+  },
+
+  "attention": {
+    "_comment": "Indicators shown per project. Thresholds are null/empty until approved: then the indicator is reported as 'not configured', never guessed.",
+    "no_recent_activity_days": null,
+    "stage_duration_limits": {},
+    "_stage_duration_limits_example": {"measurement": {"warning_days": 20, "critical_days": 40}}
+  },
+
+  "review": {
+    "_comment": "Severity of review items created by the workflow automation: blocking (record not synchronised), review (a decision is needed), warning (informational, project processed). GET /api/review-queue returns blocking+review by default; ?severity=all returns everything.",
+    "stage_undetermined": "review",
+    "ambiguous_stage": "review",
+    "manual_stage_conflict": "warning",
+    "backward_transition": "warning",
+    "unknown_next_action": "warning"
+  }
+}
