@@ -65,14 +65,14 @@ function trim(s) {
 /** Create a job unless one is already queued or running for this source; idempotent by design -
  *  a second click of «Обновить» while a job is in flight just returns the same job. */
 function enqueue({ type = "check", trigger = "manual", scheduledDate = null, scheduledFor = null,
-  force = false, requestedBy = null } = {}) {
+  force = false, requestedBy = null, month = null } = {}) {
   return store.tx((s) => {
     sweepExpired(s);
     const existing = activeJob(s);
     if (existing) return { created: false, job: clone(existing) };
     const job = {
       id: uuidv4(), type, trigger, scheduled_date: scheduledDate, scheduled_for: scheduledFor,
-      force: !!force, requested_by: requestedBy,
+      force: !!force, requested_by: requestedBy, month,
       status: "queued", created_at: nowIso(), updated_at: nowIso(),
       claimed_at: null, lease_expires_at: null, heartbeat_at: null,
       attempts: 0, result: null, error: null
@@ -88,11 +88,11 @@ function enqueue({ type = "check", trigger = "manual", scheduledDate = null, sch
  *  approval path) - called while the *previous* job is still technically "running", so it must skip
  *  enqueue()'s active-job guard (that guard is for external callers like the «Обновить» button, not
  *  for the server's own pipeline chaining one job into the next under the same held lock). */
-function enqueueChained({ type, trigger, requestedBy = null, versionId = null } = {}) {
+function enqueueChained({ type, trigger, requestedBy = null, versionId = null, month = null } = {}) {
   return store.tx((s) => {
     const job = {
       id: uuidv4(), type, trigger, scheduled_date: null, scheduled_for: null,
-      force: true, requested_by: requestedBy, version_id: versionId,
+      force: true, requested_by: requestedBy, version_id: versionId, month,
       status: "queued", created_at: nowIso(), updated_at: nowIso(),
       claimed_at: null, lease_expires_at: null, heartbeat_at: null,
       attempts: 0, result: null, error: null

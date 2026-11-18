@@ -135,6 +135,14 @@ def test_windows_agent_key_unconfigured_returns_501(tmp_path):
 
 # --------------------------------------------------------------------------- manual approval flow
 
+def test_job_carries_the_resolved_month_for_the_agent(srv):
+    # The agent has no other authenticated way to learn which month PLAN_TARGET_MONTH=auto resolved
+    # to server-side - it must read it straight off the job it claims, not recompute its own guess.
+    update(srv)
+    job = next_job(srv, "-jm1")
+    assert job["month"] == "2026-11"
+
+
 def test_manual_flow_awaiting_approval_then_approve(srv):
     r = update(srv)
     assert r["ui"]["state"] == "busy" and r["run"]["job_id"], r
@@ -180,6 +188,7 @@ def test_auto_sync_chains_a_second_job(tmp_path):
         assert sync_job["id"] != check_job["id"]
         assert sync_job["type"] == "sync"
         assert sync_job["version_id"]
+        assert sync_job["month"] == check_job["month"] == "2026-11"
 
         resp2 = submit_result(s, sync_job["id"], SYNC_OK, "-a4")
         assert resp2.status_code == 200, resp2.text

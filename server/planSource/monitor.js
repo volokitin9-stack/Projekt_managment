@@ -422,7 +422,11 @@ function enqueueRemoteCheck({ trigger, scheduledDate = null, scheduledFor = null
     setState({ status: "error", last_error: e.message });
     return { status: "not_configured", error: e.message };
   }
-  const { job } = agentJobs.enqueue({ type: "check", trigger, scheduledDate, scheduledFor, force });
+  // month travels on the job itself: it is the only authenticated channel the Windows agent has for
+  // "which month is the server resolving right now" (PLAN_TARGET_MONTH=auto resolves a current month
+  // in PLAN_TIMEZONE server-side; the agent must report the exact same month back, not recompute its
+  // own guess) - see plan_agent/windows_agent.py.
+  const { job } = agentJobs.enqueue({ type: "check", trigger, scheduledDate, scheduledFor, force, month });
   setState({ running: { started_at: nowIso(), trigger, phase: "await_agent", job_id: job.id }, status: "awaiting_agent",
     current_month: month });
   logEvent("info", "job_queued", `задача ${job.id} поставлена в очередь для агента ноутбука (${trigger})`, { job_id: job.id });
@@ -531,7 +535,7 @@ async function applyRemoteAnalyze({ sha256, size, mtime, name, month, analyzeJso
   // jobs and is only released by applyRemoteSync() once the chain finishes, so nothing else (a
   // manual upload, a second check) can interleave between the two.
   updateVersion(version.id, { status: "analyzed", phase: "await_sync", error: null });
-  const { job: syncJob } = agentJobs.enqueueChained({ type: "sync", trigger: "schedule", versionId: version.id });
+  const { job: syncJob } = agentJobs.enqueueChained({ type: "sync", trigger: "schedule", versionId: version.id, month });
   setState({ running: { started_at: nowIso(), trigger: "schedule", phase: "await_agent_sync", job_id: syncJob.id } });
   logEvent("info", "job_queued", `задача синхронизации ${syncJob.id} поставлена в очередь (авто) после анализа ${version.name}`,
     { job_id: syncJob.id, version_id: version.id });
@@ -551,7 +555,8 @@ async function applyRemoteSync({ versionId, syncJson, by, autoSafe }) {
  *  run the approve+sync itself (it still has - or can re-read - the real file; Railway never does). */
 function enqueueRemoteApproval(version, by) {
   if (!imports.tryLock("plan_source:approve")) return { status: "busy", owner: imports.jobs.owner };
-  const { job } = agentJobs.enqueueChained({ type: "sync", trigger: "approve", requestedBy: by, versionId: version.id });
+  const { job } = agentJobs.enqueueChained({ type: "sync", trigger: "approve", requestedBy: by,
+    versionId: version.id, month: version.plan_month });
   setState({ running: { started_at: nowIso(), trigger: "approve", phase: "await_agent_sync", job_id: job.id } });
   logEvent("info", "job_queued", `задача утверждения ${job.id} поставлена в очередь для агента ноутбука`, { job_id: job.id, version_id: version.id });
   return { status: "queued", job };
