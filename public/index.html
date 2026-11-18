@@ -60,6 +60,50 @@
 
   svg.icon{ display:block; flex-shrink:0; }
 
+  /* ---- app shell: persistent left sidebar + main workspace ---- */
+  .app-shell{ display:flex; min-height:100vh; align-items:stretch; }
+  .sidebar{
+    flex-shrink:0; width:198px; background:#101C2A; border-right:1px solid var(--line);
+    display:flex; flex-direction:column; position:sticky; top:0; height:100vh; z-index:25;
+    transition:width .16s ease;
+  }
+  .sidebar.collapsed{ width:58px; }
+  .sidebar-brand{ display:flex; align-items:center; gap:8px; padding:14px 16px; border-bottom:1px solid var(--line); flex-shrink:0; }
+  .sidebar-brand .mark{
+    width:26px; height:26px; border-radius:7px; background:var(--accent-soft); color:var(--accent-ink);
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px; flex-shrink:0;
+  }
+  .sidebar-brand .name{ font-weight:700; font-size:13px; letter-spacing:.04em; color:var(--ink); white-space:nowrap; overflow:hidden; }
+  .sidebar.collapsed .sidebar-brand .name, .sidebar.collapsed .sidebar-nav .label{ display:none; }
+  .sidebar-nav{ display:flex; flex-direction:column; gap:2px; padding:10px 8px; flex:1; overflow-y:auto; }
+  .sidebar-nav .tab-btn{
+    display:flex; align-items:center; gap:10px; width:100%; text-align:left;
+    padding:8px 10px; background:none; border:none; cursor:pointer; border-radius:8px;
+    font-weight:600; letter-spacing:.01em; font-size:12.5px; text-transform:none;
+    color:var(--ink-soft); border-bottom:none; transition:all .15s ease; white-space:nowrap;
+  }
+  .sidebar-nav .tab-btn .icon{ flex-shrink:0; color:var(--ink-faint); }
+  .sidebar-nav .tab-btn:hover{ background:var(--surface-2); color:var(--ink); }
+  .sidebar-nav .tab-btn.active{ color:var(--accent-ink); background:var(--accent-soft); }
+  .sidebar-nav .tab-btn.active .icon{ color:var(--accent-ink); }
+  .sidebar-foot{ padding:8px; border-top:1px solid var(--line); flex-shrink:0; }
+  .sidebar-collapse-btn{
+    display:flex; align-items:center; justify-content:center; gap:8px; width:100%; height:32px;
+    background:none; border:1px solid var(--line); border-radius:8px; color:var(--ink-soft); cursor:pointer; font-size:11px;
+  }
+  .sidebar-collapse-btn:hover{ color:var(--ink); border-color:var(--accent); }
+  .main-area{ flex:1; min-width:0; display:flex; flex-direction:column; }
+  .sidebar-scrim{ position:fixed; inset:0; background:rgba(5,10,16,.55); z-index:24; display:none; }
+  .sidebar-scrim.show{ display:block; }
+  @media (max-width:767px){
+    .sidebar{ position:fixed; left:0; top:0; transform:translateX(-100%); transition:transform .18s ease; width:220px; }
+    .sidebar.mobile-open{ transform:translateX(0); }
+    .sidebar.collapsed{ width:220px; }
+    .sidebar.collapsed .sidebar-brand .name, .sidebar.collapsed .sidebar-nav .label{ display:inline; }
+    .sidebar-foot{ display:none; }
+    .mobile-menu-btn{ display:inline-flex !important; }
+  }
+
   /* ---- header (compact: the board/graph is the main surface, not the chrome) ---- */
   .app-header{
     position:sticky; top:0; z-index:20;
@@ -68,6 +112,10 @@
     border-bottom:1px solid var(--line);
     display:flex; align-items:center; justify-content:space-between;
     padding:0 14px; gap:12px;
+  }
+  .mobile-menu-btn{
+    display:none; align-items:center; justify-content:center; width:28px; height:28px; flex-shrink:0;
+    background:none; border:1px solid var(--line); border-radius:7px; color:var(--ink-soft); cursor:pointer;
   }
   .brand{ display:flex; flex-direction:row; align-items:baseline; gap:6px; min-width:90px; }
   .brand .name{ font-weight:700; font-size:13px; letter-spacing:.05em; color:var(--ink); }
@@ -413,6 +461,16 @@
   .kpi-tile .kpi-value{ font-family:"JetBrains Mono",monospace; font-size:19px; font-weight:700; color:var(--ink); margin-top:2px; }
   .kpi-tile.crit .kpi-value{ color:var(--crit); }
   .kpi-tile.warn .kpi-value{ color:var(--warn); }
+  .kpi-tile.clickable{ cursor:pointer; transition:border-color .15s ease, background .15s ease; text-align:left; }
+  .kpi-tile.clickable:hover{ border-color:var(--accent); background:var(--surface-3); }
+  .kpi-tile.clickable.active{ border-color:var(--accent); background:var(--accent-soft); }
+  .kpi-tile.clickable.active .kpi-value{ color:var(--accent-ink); }
+
+  .eng-density-toggle{ display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; flex-shrink:0; }
+  .eng-density-btn{ height:34px; width:34px; display:flex; align-items:center; justify-content:center; background:var(--surface-2); border:none; border-right:1px solid var(--line); color:var(--ink-soft); cursor:pointer; }
+  .eng-density-btn:last-child{ border-right:none; }
+  .eng-density-btn:hover{ color:var(--ink); }
+  .eng-density-btn.active{ background:var(--accent-soft); color:var(--accent-ink); }
 
   .eng-toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:12px 20px 0; }
   .eng-search-wrap{ position:relative; flex:1 1 200px; min-width:160px; }
@@ -484,6 +542,20 @@
   .eng-card-body{ padding:11px 13px 13px; display:flex; flex-direction:column; gap:5px; }
   .eng-card-make{ font-size:12.5px; font-weight:700; letter-spacing:.02em; color:var(--ink); }
   .eng-card-model{ font-size:11px; color:var(--ink-soft); margin-top:-3px; }
+  /* density modes */
+  .eng-board.density-compact .eng-card-img{ display:none; }
+  .eng-board.density-compact .eng-card-body{ padding:8px 11px 10px; gap:3px; }
+  .eng-board.density-compact .eng-col{ width:252px; flex-basis:252px; }
+  .eng-board.density-images .eng-card-img{ aspect-ratio:16/9; }
+  .eng-card-source{ font-size:9.5px; font-weight:600; letter-spacing:.02em; padding:1px 6px; border-radius:20px; white-space:nowrap; }
+  .eng-card-source.confirmed{ background:var(--good-soft); color:var(--good); }
+  .eng-card-source.actual{ background:var(--accent-soft); color:var(--accent-ink); }
+  .eng-card-source.planned{ background:var(--surface-3); color:var(--ink-soft); }
+  .eng-card-next{ font-size:10.5px; color:var(--ink); background:var(--surface-3); border-radius:6px; padding:3px 7px; margin-top:2px; }
+  .eng-card-next b{ font-weight:600; }
+  .eng-card-next.none{ color:var(--ink-faint); font-style:italic; background:none; padding:0; }
+  .eng-col-head-stats{ display:flex; flex-wrap:wrap; gap:6px; margin-top:3px; font-size:10px; color:var(--ink-faint); }
+  .eng-col-head-stats span.flag{ color:var(--warn); }
   .eng-card-product{ font-size:11.5px; color:var(--ink-soft); }
   .eng-card-foot{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:3px; }
   .eng-card-engineer{ font-size:11px; color:var(--ink-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -511,6 +583,7 @@
   .eng-subtab.active{ background:var(--accent-soft); color:var(--accent-ink); }
   .eng-subtab .n{ font-family:"JetBrains Mono",monospace; font-size:10.5px; margin-left:4px; opacity:.8; }
   .eng-card-article{ font-size:10.5px; font-family:"JetBrains Mono",monospace; color:var(--ink-faint); }
+  .eng-card-stage-row{ display:flex; align-items:center; justify-content:space-between; gap:6px; }
   .eng-card-stage{ font-size:10.5px; color:var(--ink-soft); }
   .eng-card-stage b{ font-family:"JetBrains Mono",monospace; color:var(--ink); font-weight:700; }
   .eng-card-stage.unknown{ color:var(--ink-faint); font-style:italic; }
@@ -555,7 +628,12 @@
   .eng-status.ok{ color:var(--ok, #2FBF71); }
   .eng-status.warn{ color:var(--warn); }
   .eng-status.err{ color:var(--crit); }
-  .detail-panel.wide{ width:600px; }
+  .detail-panel.wide{ width:var(--detail-wide-width, 600px); }
+  .detail-resize-handle{
+    position:absolute; left:-4px; top:0; width:9px; height:100%; cursor:col-resize; z-index:5;
+  }
+  .detail-resize-handle:hover, .detail-resize-handle.active{ background:linear-gradient(90deg, transparent, var(--accent) 50%, transparent); }
+  @media (max-width:767px){ .detail-resize-handle{ display:none; } }
   .eng-sec{ border-top:1px dashed var(--line); padding-top:12px; margin-top:14px; }
   .eng-sec-head{ display:flex; justify-content:space-between; align-items:center; font-size:10.5px; text-transform:uppercase;
     letter-spacing:.04em; color:var(--ink-soft); font-weight:600; margin-bottom:8px; }
@@ -590,36 +668,62 @@
   @media (max-width:767px){
     .app-header{ height:auto; flex-wrap:wrap; padding:6px 14px; row-gap:5px; }
     .brand{ min-width:0; }
-    .header-tabs{ order:3; width:100%; justify-content:center; }
     .header-clock{ min-width:0; }
     .integrations-panel{ grid-template-columns:1fr 1fr; }
     .integ-group{ padding:6px 14px; border-right:none; border-bottom:1px solid var(--line); }
     .actions-row{ padding:6px 14px; }
     .filters-row{ padding:6px 14px; flex-wrap:nowrap; }
     .task-card{ width:180px; }
-    .detail-panel{ width:100%; max-width:100%; }
-    .eng-col{ flex:0 0 238px; width:238px; }
+    .detail-panel, .detail-panel.wide{ width:100%; max-width:100%; }
+    .eng-col{ flex:0 0 86vw; width:86vw; scroll-snap-align:start; }
+    .eng-board{ scroll-snap-type:x proximity; }
     .eng-kpis{ padding:10px 14px 0; }
+    .eng-kpis .kpi-tile{ flex:1 1 42%; }
     .eng-toolbar{ padding:10px 14px 0; }
     .eng-board{ padding:12px 14px 16px; }
     .eng-subtabs{ margin:10px 14px 0; max-width:calc(100% - 28px); }
     .eng-unconfirmed{ margin:10px 14px 0; }
     .eng-list-wrap{ padding:12px 14px 16px; }
   }
+  .eng-stage-pager{ display:none; gap:4px; padding:0 14px; margin-top:8px; overflow-x:auto; }
+  .eng-stage-pager button{
+    flex-shrink:0; font-size:11px; font-weight:600; padding:5px 10px; border-radius:20px;
+    border:1px solid var(--line); background:var(--surface-2); color:var(--ink-soft); white-space:nowrap;
+  }
+  .eng-stage-pager button.active{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent-ink); }
+  @media (max-width:767px){
+    .eng-stage-pager{ display:flex; }
+  }
 </style>
+
+<div class="app-shell">
+
+<div class="sidebar-scrim" id="sidebarScrim"></div>
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <span class="mark">Ш</span>
+    <span class="name">ШТУРМАН</span>
+  </div>
+  <nav class="sidebar-nav">
+    <button type="button" class="tab-btn active" id="tabBoardBtn" data-tab="board" title="Доска"><span class="icon" id="navIconBoard"></span><span class="label">Доска</span></button>
+    <button type="button" class="tab-btn" id="tabGlobalBtn" data-tab="global" title="Глобально"><span class="icon" id="navIconGlobal"></span><span class="label">Глобально</span></button>
+    <button type="button" class="tab-btn" id="tabEngBtn" data-tab="eng" title="Конструкторский отдел"><span class="icon" id="navIconEng"></span><span class="label">Конструкторский отдел</span></button>
+  </nav>
+  <div class="sidebar-foot">
+    <button type="button" class="sidebar-collapse-btn" id="sidebarCollapseBtn" title="Свернуть/развернуть меню"><span class="icon" id="navIconCollapse"></span><span class="label">Свернуть</span></button>
+  </div>
+</aside>
+
+<div class="main-area">
 
 <div class="shell">
 
   <header class="app-header">
+    <button type="button" class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Меню"><span class="icon" id="navIconMenu"></span></button>
     <div class="brand">
       <span class="name">ШТУРМАН</span>
       <span class="sub">дерево задач</span>
     </div>
-    <nav class="header-tabs">
-      <button type="button" class="tab-btn active" id="tabBoardBtn" data-tab="board">Доска</button>
-      <button type="button" class="tab-btn" id="tabGlobalBtn" data-tab="global">Глобально</button>
-      <button type="button" class="tab-btn" id="tabEngBtn" data-tab="eng">Инж. проекты</button>
-    </nav>
     <div class="header-clock">
       <div class="clock-time" id="clockTime">—:—:—</div>
       <div class="clock-date" id="clockDate">—</div>
@@ -696,7 +800,9 @@
   <div class="eng-preview-banner" id="engBanner">Данные хранятся на сервере. Перетащите карточку в другую колонку, чтобы подтвердить этап — переход записывается в историю проекта. Проекты из плана без подтверждённого этапа — в блоке «Этап не подтверждён».</div>
 
   <nav class="eng-subtabs" id="engSubtabs">
-    <button type="button" class="eng-subtab active" data-subview="board">Проекты<span class="n" id="engCntBoard"></span></button>
+    <button type="button" class="eng-subtab active" data-subview="board">Активные проекты<span class="n" id="engCntBoard"></span></button>
+    <button type="button" class="eng-subtab" data-subview="completed">Сданные проекты<span class="n" id="engCntCompleted"></span></button>
+    <button type="button" class="eng-subtab" data-subview="photos">Нераспределённые фото<span class="n" id="engCntPhotos"></span></button>
     <button type="button" class="eng-subtab" data-subview="additional">Доп. работы<span class="n" id="engCntAdditional"></span></button>
     <button type="button" class="eng-subtab" data-subview="backlog">Банк задач<span class="n" id="engCntBacklog"></span></button>
     <button type="button" class="eng-subtab" data-subview="review">На проверке<span class="n" id="engCntReview"></span></button>
@@ -705,10 +811,12 @@
 
   <div id="engBoardView">
     <div class="eng-kpis">
-      <div class="kpi-tile"><div class="kpi-label">Активные проекты</div><div class="kpi-value" id="engKpiActive">0</div></div>
-      <div class="kpi-tile crit"><div class="kpi-label">Критичный приоритет</div><div class="kpi-value" id="engKpiCrit">0</div></div>
-      <div class="kpi-tile warn"><div class="kpi-label">Просрочено</div><div class="kpi-value" id="engKpiOverdue">0</div></div>
-      <div class="kpi-tile"><div class="kpi-label">Этап не подтверждён</div><div class="kpi-value" id="engKpiUnconfirmed">0</div></div>
+      <div class="kpi-tile clickable" data-kpi="all"><div class="kpi-label">Всего проектов</div><div class="kpi-value" id="engKpiTotal">0</div></div>
+      <div class="kpi-tile clickable" data-kpi="active"><div class="kpi-label">В работе</div><div class="kpi-value" id="engKpiActive">0</div></div>
+      <div class="kpi-tile warn clickable" data-kpi="overdue"><div class="kpi-label">Просрочено</div><div class="kpi-value" id="engKpiOverdue">0</div></div>
+      <div class="kpi-tile clickable" data-kpi="noengineer"><div class="kpi-label">Без ответственного</div><div class="kpi-value" id="engKpiNoEngineer">0</div></div>
+      <div class="kpi-tile crit clickable" data-kpi="critical"><div class="kpi-label">Критические</div><div class="kpi-value" id="engKpiCrit">0</div></div>
+      <div class="kpi-tile"><div class="kpi-label">Среднее время на стадии</div><div class="kpi-value" id="engKpiAvgDays">—</div></div>
     </div>
 
     <div class="eng-toolbar">
@@ -728,6 +836,15 @@
         <option value="low">Низкий</option>
         <option value="none">Не указан</option>
       </select>
+      <select class="eng-select" id="engSortSelect" title="Сортировка">
+        <option value="priority">Сорт.: приоритет</option>
+        <option value="stage_duration">Сорт.: длительность на этапе</option>
+        <option value="deadline">Сорт.: срок</option>
+      </select>
+      <div class="eng-density-toggle" id="engDensityToggle" role="group" aria-label="Плотность карточек">
+        <button type="button" class="eng-density-btn" data-density="compact" title="Компактно"><span class="icon" id="engDensityIconCompact"></span></button>
+        <button type="button" class="eng-density-btn" data-density="images" title="С изображениями"><span class="icon" id="engDensityIconImages"></span></button>
+      </div>
       <button type="button" class="eng-clear-btn" id="engFilterClearBtn">Сбросить фильтры</button>
       <button type="button" class="eng-update-btn" id="engUpdateBtn" data-state="ready" title="Проверить файл плана и применить разрешённые изменения">Обновить</button>
       <div class="eng-update-status" id="engUpdateStatus"></div>
@@ -736,9 +853,12 @@
 
     <div class="eng-unconfirmed" id="engUnconfirmed" style="display:none;"></div>
 
+    <nav class="eng-stage-pager" id="engStagePager"></nav>
     <div class="eng-board" id="engBoard"></div>
   </div>
 
+  <div id="engCompletedView" class="eng-list-wrap" style="display:none;"></div>
+  <div id="engPhotosView" class="eng-list-wrap" style="display:none;"></div>
   <div id="engAdditionalView" class="eng-list-wrap" style="display:none;"></div>
   <div id="engBacklogView" class="eng-list-wrap" style="display:none;"></div>
   <div id="engReviewView" class="eng-list-wrap" style="display:none;"></div>
@@ -746,11 +866,15 @@
 
 </div>
 
+</div><!-- /main-area -->
+</div><!-- /app-shell -->
+
 <div class="eng-lightbox" id="engLightbox"><img id="engLightboxImg" alt=""><div class="cap" id="engLightboxCap"></div>
   <button type="button" class="btn" id="engLightboxClose">Закрыть</button></div>
 
 <div class="detail-scrim" id="detailScrim"></div>
 <aside class="detail-panel" id="detailPanel">
+  <div class="detail-resize-handle" id="detailResizeHandle" title="Потяните, чтобы изменить ширину"></div>
   <div class="detail-panel-head">
     <span class="detail-eyebrow" id="treeDetailEyebrow">Задача</span>
     <button type="button" class="icon-btn" id="treeDetailCloseBtn"><span class="icon" id="iconPanelClose"></span></button>
@@ -883,7 +1007,15 @@
     "pause": '<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>',
     link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>',
     image: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline>',
-    search: '<circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>'
+    search: '<circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>',
+    list: '<line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line>',
+    globe: '<circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>',
+    tool: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>',
+    menu: '<line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line>',
+    "chevrons-left": '<polyline points="11 17 6 12 11 7"></polyline><polyline points="18 17 13 12 18 7"></polyline>',
+    "layout-grid": '<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>',
+    table: '<path d="M3 3h18v18H3z"></path><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line><line x1="9" y1="3" x2="9" y2="21"></line>',
+    "arrow-down-up": '<path d="m3 16 4 4 4-4"></path><path d="M7 20V4"></path><path d="m21 8-4-4-4 4"></path><path d="M17 4v16"></path>'
   };
   function iconSvg(name, size, strokeW){
     var inner = LUCIDE[name] || "";
@@ -904,6 +1036,75 @@
   setIcon("iconGZoomOut","minus",16);
   setIcon("iconGZoomCenter","crosshair",16);
   setIcon("iconGZoomFit","maximize-2",16);
+  setIcon("navIconBoard","list",15);
+  setIcon("navIconGlobal","globe",15);
+  setIcon("navIconEng","tool",15);
+  setIcon("navIconMenu","menu",16);
+  setIcon("navIconCollapse","chevrons-left",14);
+
+  // ---- sidebar: collapse (desktop) and slide-over (mobile) ----
+  var SIDEBAR_KEY = "shturman_sidebar_collapsed";
+  function applySidebarCollapsed(collapsed){
+    var el = document.getElementById("sidebar");
+    el.classList.toggle("collapsed", collapsed);
+    var lbl = document.querySelector("#sidebarCollapseBtn .label");
+    if(lbl) lbl.textContent = collapsed ? "Развернуть" : "Свернуть";
+    try{ localStorage.setItem(SIDEBAR_KEY, collapsed ? "1" : "0"); }catch(e){ /* ignore */ }
+  }
+  (function initSidebar(){
+    var collapsed = false;
+    try{ collapsed = localStorage.getItem(SIDEBAR_KEY) === "1"; }catch(e){ /* ignore */ }
+    applySidebarCollapsed(collapsed);
+  })();
+  document.getElementById("sidebarCollapseBtn").addEventListener("click", function(){
+    applySidebarCollapsed(!document.getElementById("sidebar").classList.contains("collapsed"));
+  });
+  function setMobileSidebar(open){
+    document.getElementById("sidebar").classList.toggle("mobile-open", open);
+    document.getElementById("sidebarScrim").classList.toggle("show", open);
+  }
+  document.getElementById("mobileMenuBtn").addEventListener("click", function(){ setMobileSidebar(true); });
+  document.getElementById("sidebarScrim").addEventListener("click", function(){ setMobileSidebar(false); });
+  document.getElementById("sidebar").addEventListener("click", function(e){
+    if(e.target.closest(".tab-btn")) setMobileSidebar(false);
+  });
+
+  // ---- detail drawer: resizable width (persisted for the wide/eng variant) ----
+  var DETAIL_WIDTH_KEY = "shturman_detail_wide_width";
+  (function initDetailWidth(){
+    var saved = null;
+    try{ saved = localStorage.getItem(DETAIL_WIDTH_KEY); }catch(e){ /* ignore */ }
+    if(saved) document.documentElement.style.setProperty("--detail-wide-width", saved+"px");
+  })();
+  (function(){
+    var handle = document.getElementById("detailResizeHandle");
+    var panel = document.getElementById("detailPanel");
+    var dragging = false, startX = 0, startW = 0;
+    handle.addEventListener("mousedown", function(e){
+      if(!panel.classList.contains("wide")) return;
+      dragging = true; startX = e.clientX; startW = panel.getBoundingClientRect().width;
+      handle.classList.add("active");
+      document.body.style.userSelect = "none";
+      e.preventDefault();
+    });
+    window.addEventListener("mousemove", function(e){
+      if(!dragging) return;
+      var w = Math.max(360, Math.min(window.innerWidth * 0.92, startW - (e.clientX - startX)));
+      panel.style.width = w+"px";
+    });
+    window.addEventListener("mouseup", function(){
+      if(!dragging) return;
+      dragging = false;
+      handle.classList.remove("active");
+      document.body.style.userSelect = "";
+      var w = parseInt(panel.style.width, 10);
+      panel.style.width = "";
+      if(w){
+        document.documentElement.style.setProperty("--detail-wide-width", w+"px");
+        try{ localStorage.setItem(DETAIL_WIDTH_KEY, String(w)); }catch(e){ /* ignore */ }
+      }
+    });
+  })();
   setIcon("iconPanelClose","x",18);
   setIcon("iconFab","plus",26);
   setIcon("engSearchIcon","search",13);
@@ -1271,8 +1472,10 @@
   var ENG_WORK_STATUS_LABELS = { not_started:"Не начато", in_progress:"В работе (часы списаны)", on_hold:"Приостановлено",
     completed:"Завершено", cancelled:"Отменено" };
   var ENG_CATEGORY_LABELS = { main_project:"Основной проект", additional_work:"Доп. работа", backlog:"Банк задач" };
+  var ENG_PRIORITY_SOURCE_LABELS = { manual:"вручную", system:"система (эскалация)", source:"план" };
 
-  var engProjects = [];      // main engineering projects (record_category = main_project)
+  var engProjects = [];      // main engineering projects (record_category = main_project), not completed
+  var engCompletedProjects = []; // main engineering projects with a confirmed completion date
   var engAllRecords = [];    // every record incl. additional work and backlog
   var engReview = [];
   var engStagesLoaded = false;
@@ -1360,7 +1563,8 @@
       return Promise.all([apiFetch("/api/projects"), apiFetch("/api/review-queue").catch(function(){ return []; })]);
     }).then(function(res){
       engAllRecords = (res[0] || []).map(engNormalize);
-      engProjects = engAllRecords.filter(function(p){ return p.record_category === "main_project"; });
+      engProjects = engAllRecords.filter(function(p){ return p.record_category === "main_project" && !p.is_completed; });
+      engCompletedProjects = engAllRecords.filter(function(p){ return p.record_category === "main_project" && p.is_completed; });
       engReview = res[1] || [];
       renderEngBoard();
       renderEngSubviewLists();
@@ -1373,10 +1577,16 @@
   function engNormalize(p){
     p.record_category = p.record_category || "main_project";
     p.prio = p.priority || "none";
+    p.is_completed = !!p.actual_completion_date;
     return p;
   }
 
-  var engFilters = { search:"", make:"", model:"", product:"", engineer:"", priority:"" };
+  var engFilters = { search:"", make:"", model:"", product:"", engineer:"", priority:"", overdueOnly:false, noEngineerOnly:false };
+  var engSortMode = "priority";
+  var engActiveKpi = null;
+  var ENG_DENSITY_KEY = "shturman_eng_density";
+  var engDensity = "images";
+  try{ engDensity = localStorage.getItem(ENG_DENSITY_KEY) || "images"; }catch(e){ /* ignore */ }
 
   function ruProjectsWord(n){
     var n10 = n % 10, n100 = n % 100;
@@ -1398,6 +1608,13 @@
     return z(d.getDate())+"."+z(d.getMonth()+1)+"."+d.getFullYear()+" "+z(d.getHours())+":"+z(d.getMinutes());
   }
 
+  function fmtDateOnly(iso){
+    if(!iso) return "—";
+    var d = new Date(iso); if(isNaN(d.getTime())) return escapeHtml(String(iso));
+    function z(n){ return (n<10?"0":"")+n; }
+    return z(d.getDate())+"."+z(d.getMonth()+1)+"."+d.getFullYear();
+  }
+
   function engDistinct(field, forMake){
     var seen = {}, out = [];
     engProjects.forEach(function(p){
@@ -1416,6 +1633,8 @@
     if(f.product && p.product !== f.product) return false;
     if(f.engineer && p.engineer !== f.engineer) return false;
     if(f.priority && p.prio !== f.priority) return false;
+    if(f.overdueOnly && !engIsOverdue(p)) return false;
+    if(f.noEngineerOnly && p.engineer) return false;
     if(f.search){
       var hay = (p.make+" "+p.model+" "+p.product+" "+(p.article_number||"")+" "+p.id).toLowerCase();
       if(hay.indexOf(f.search.toLowerCase()) === -1) return false;
@@ -1425,8 +1644,20 @@
 
   function engIsOverdue(p){ return isOverdue(p.deadline, false); }
 
-  function engSortProjects(list){
+  function engSortProjects(list, mode){
+    mode = mode || engSortMode;
     return list.slice().sort(function(a,b){
+      if(mode === "stage_duration"){
+        var da = a.days_in_stage == null ? -1 : a.days_in_stage, db = b.days_in_stage == null ? -1 : b.days_in_stage;
+        if(da !== db) return db - da; // longest-known first; unknown last
+        return ENG_PRIORITY_ORDER[a.prio] - ENG_PRIORITY_ORDER[b.prio];
+      }
+      if(mode === "deadline"){
+        if(a.deadline && b.deadline) return a.deadline < b.deadline ? -1 : (a.deadline > b.deadline ? 1 : 0);
+        if(a.deadline) return -1;
+        if(b.deadline) return 1;
+        return ENG_PRIORITY_ORDER[a.prio] - ENG_PRIORITY_ORDER[b.prio];
+      }
       var pr = ENG_PRIORITY_ORDER[a.prio] - ENG_PRIORITY_ORDER[b.prio];
       if(pr !== 0) return pr;
       if(a.deadline && b.deadline) return a.deadline < b.deadline ? -1 : (a.deadline > b.deadline ? 1 : 0);
@@ -1442,9 +1673,35 @@
         (p.planned_stage ? ' · по плану: '+escapeHtml(ENG_STAGE_LABELS[p.planned_stage] || p.planned_stage) : '') + '</div>';
     }
     if(p.days_in_stage === null || p.days_in_stage === undefined){
-      return '<div class="eng-card-stage unknown">Длительность неизвестна</div>';
+      return '<div class="eng-card-stage unknown">Длительность неизвестна' +
+        (p.days_since_stage_detected != null ? ' · определён '+p.days_since_stage_detected+' '+ruDaysWord(p.days_since_stage_detected)+' назад' : '') + '</div>';
     }
     return '<div class="eng-card-stage">На стадии: <b>'+p.days_in_stage+'</b> '+ruDaysWord(p.days_in_stage)+'</div>';
+  }
+
+  // Stage-source indicator: how the current (confirmed-on-board) stage was determined.
+  // manual / agent_explicit -> a person or an explicit transition confirmed it ("Подтверждён").
+  // agent_rule -> assigned automatically from logged work this month ("По факту работ").
+  // inferred_from_plan -> assigned automatically from the month's plan only, no hours logged yet ("По плану").
+  var ENG_STAGE_SOURCE_BADGE = {
+    manual: { cls:"confirmed", label:"Подтверждён" },
+    agent_explicit: { cls:"confirmed", label:"Подтверждён" },
+    agent_rule: { cls:"actual", label:"По факту работ" },
+    inferred_from_plan: { cls:"planned", label:"По плану" }
+  };
+  function engStageSourceBadge(p){
+    if(!p.stage || !p.stage_source) return "";
+    var b = ENG_STAGE_SOURCE_BADGE[p.stage_source];
+    if(!b) return "";
+    return '<span class="eng-card-source '+b.cls+'" title="Источник определения этапа">'+b.label+'</span>';
+  }
+
+  function engNextActionLine(p){
+    var n = p.next_action;
+    if(!n || !n.label || n.confidence === "none"){
+      return '<div class="eng-card-next none">Следующий шаг требует уточнения</div>';
+    }
+    return '<div class="eng-card-next">Далее: <b>'+escapeHtml(n.label)+'</b></div>';
   }
 
   function engCardHtml(p, opts){
@@ -1463,7 +1720,8 @@
           '<div class="eng-card-model">'+escapeHtml(p.model)+'</div>' +
           '<div class="eng-card-product">'+escapeHtml(p.product)+'</div>' +
           (p.article_number ? '<div class="eng-card-article">арт. '+escapeHtml(p.article_number)+'</div>' : '') +
-          engStageLine(p) +
+          '<div class="eng-card-stage-row">'+engStageLine(p)+engStageSourceBadge(p)+'</div>' +
+          engNextActionLine(p) +
           '<div class="eng-card-foot">' +
             (p.engineer ? '<span class="eng-card-engineer">'+escapeHtml(p.engineer)+'</span>'
                         : '<span class="eng-card-engineer none">Не назначен</span>') +
@@ -1490,22 +1748,39 @@
     fillSelect("engFilterEngineer", engDistinct("engineer"), engFilters.engineer, "Инженер");
   }
 
+  function engAvgDaysLabel(list){
+    var known = list.filter(function(p){ return p.days_in_stage != null; }).map(function(p){ return p.days_in_stage; });
+    if(!known.length) return "—";
+    var avg = known.reduce(function(s,d){ return s+d; }, 0) / known.length;
+    return fmtH(avg)+" "+ruDaysWord(Math.round(avg));
+  }
+
   function renderEngBoard(){
     var wrap = document.getElementById("engBoard");
     if(!wrap) return;
+    wrap.className = "eng-board density-"+engDensity;
     renderEngFilterOptions();
     var visible = engProjects.filter(engMatchesFilters);
     var confirmed = visible.filter(function(p){ return !!p.stage && ENG_STAGES.indexOf(p.stage) !== -1; });
     var unconfirmed = visible.filter(function(p){ return !p.stage || ENG_STAGES.indexOf(p.stage) === -1; });
 
-    document.getElementById("engKpiActive").textContent = engProjects.length;
-    document.getElementById("engKpiCrit").textContent = engProjects.filter(function(p){ return p.priority === "critical"; }).length;
+    // KPI strip — always computed from the full active (non-completed) scope, not the filtered view,
+    // so the numbers describe the whole department, independent of the filters used to browse the board.
+    document.getElementById("engKpiTotal").textContent = engProjects.length;
+    document.getElementById("engKpiActive").textContent = engProjects.filter(function(p){ return !!p.stage; }).length;
     document.getElementById("engKpiOverdue").textContent = engProjects.filter(engIsOverdue).length;
-    document.getElementById("engKpiUnconfirmed").textContent = engProjects.filter(function(p){ return !p.stage; }).length;
+    document.getElementById("engKpiNoEngineer").textContent = engProjects.filter(function(p){ return !p.engineer; }).length;
+    document.getElementById("engKpiCrit").textContent = engProjects.filter(function(p){ return p.priority === "critical"; }).length;
+    document.getElementById("engKpiAvgDays").textContent = engAvgDaysLabel(engProjects);
+    Array.prototype.forEach.call(document.querySelectorAll(".kpi-tile[data-kpi]"), function(t){
+      t.classList.toggle("active", t.getAttribute("data-kpi") === engActiveKpi);
+    });
     document.getElementById("engCntBoard").textContent = engProjects.length;
+    document.getElementById("engCntCompleted").textContent = engCompletedProjects.length;
+    document.getElementById("engCntPhotos").textContent = engReview.filter(function(r){ return r.kind === "image" || r.kind === "telegram_photo"; }).length;
     document.getElementById("engCntAdditional").textContent = engAllRecords.filter(function(p){ return p.record_category === "additional_work"; }).length;
     document.getElementById("engCntBacklog").textContent = engAllRecords.filter(function(p){ return p.record_category === "backlog"; }).length;
-    document.getElementById("engCntReview").textContent = engReview.length;
+    document.getElementById("engCntReview").textContent = engReview.filter(function(r){ return r.kind !== "image" && r.kind !== "telegram_photo"; }).length;
 
     var un = document.getElementById("engUnconfirmed");
     if(unconfirmed.length){
@@ -1526,6 +1801,8 @@
     wrap.innerHTML = ENG_STAGES.map(function(stage){
       var inStage = engSortProjects(confirmed.filter(function(p){ return p.stage === stage; }));
       var critInStage = inStage.filter(function(p){ return p.priority === "critical"; }).length;
+      var overdueInStage = inStage.filter(engIsOverdue).length;
+      var noEngInStage = inStage.filter(function(p){ return !p.engineer; }).length;
       var cardsHtml = inStage.length ? inStage.map(function(p){ return engCardHtml(p); }).join("") : '<div class="eng-col-empty">Нет проектов</div>';
       return (
         '<div class="eng-col" data-stage="'+stage+'">' +
@@ -1534,11 +1811,24 @@
             '<div class="eng-col-meta"><span>'+inStage.length+' '+ruProjectsWord(inStage.length)+'</span>' +
               (critInStage ? '<span class="eng-col-crit-badge">'+critInStage+' крит.</span>' : '') +
             '</div>' +
+            '<div class="eng-col-head-stats">' +
+              '<span>ср. '+engAvgDaysLabel(inStage)+'</span>' +
+              (overdueInStage ? '<span class="flag">просрочено: '+overdueInStage+'</span>' : '') +
+              (noEngInStage ? '<span class="flag">без отв.: '+noEngInStage+'</span>' : '') +
+            '</div>' +
           '</div>' +
           '<div class="eng-col-body">'+cardsHtml+'</div>' +
         '</div>'
       );
     }).join("");
+
+    var pager = document.getElementById("engStagePager");
+    if(pager){
+      pager.innerHTML = ENG_STAGES.map(function(stage){
+        var n = confirmed.filter(function(p){ return p.stage === stage; }).length;
+        return '<button type="button" data-stage="'+stage+'">'+ENG_STAGE_LABELS[stage]+' ('+n+')</button>';
+      }).join("");
+    }
   }
 
   // ---- confirmed stage transitions (drag-and-drop, buttons, details panel) ----
@@ -1587,6 +1877,14 @@
     var id = engDragId; engDragId = null;
     engMoveStage(id, col.getAttribute("data-stage"));
   });
+  document.getElementById("engStagePager").addEventListener("click", function(e){
+    var b = e.target.closest("button[data-stage]");
+    if(!b) return;
+    var col = document.querySelector('.eng-col[data-stage="'+b.getAttribute("data-stage")+'"]');
+    if(col) col.scrollIntoView({ behavior:"smooth", inline:"start", block:"nearest" });
+    Array.prototype.forEach.call(document.querySelectorAll("#engStagePager button"), function(x){ x.classList.remove("active"); });
+    b.classList.add("active");
+  });
 
   // ---- project details: information, workload, history, photos ----
   function engHistoryLabel(h){
@@ -1611,6 +1909,35 @@
   }
   var ENG_SOURCE_LABELS = { manual:"вручную", agent:"агент", seed:"демо", telegram:"Telegram" };
 
+  var ENG_ATTENTION_LABELS = {
+    missing_engineer: "Нет ответственного инженера",
+    confirmed_blocker: "Есть подтверждённая блокировка",
+    deadline_exceeded: "Плановый срок просрочен",
+    no_recent_activity: "Долго нет активности",
+    stage_duration: "Длительность на этапе"
+  };
+  function engAttentionReviewHtml(p){
+    var att = p.attention || {};
+    var flags = [];
+    if(att.missing_engineer) flags.push({ cls:"warn", text:ENG_ATTENTION_LABELS.missing_engineer });
+    if(att.confirmed_blocker) flags.push({ cls:"err", text:ENG_ATTENTION_LABELS.confirmed_blocker });
+    if(att.deadline_exceeded) flags.push({ cls:"err", text:ENG_ATTENTION_LABELS.deadline_exceeded });
+    if(att.no_recent_activity && att.no_recent_activity.configured && att.no_recent_activity.flagged){
+      flags.push({ cls:"warn", text:"Нет активности "+att.no_recent_activity.days_since+" "+ruDaysWord(att.no_recent_activity.days_since) });
+    }
+    if(att.stage_duration && att.stage_duration.configured && att.stage_duration.level && att.stage_duration.level !== "ok"){
+      flags.push({ cls: att.stage_duration.level === "critical" ? "err" : "warn",
+        text: att.stage_duration.level === "unknown" ? "Длительность этапа не подтверждена" : "На этапе дольше нормы ("+att.stage_duration.days+" "+ruDaysWord(att.stage_duration.days)+")" });
+    }
+    var reviews = p.review_flags || [];
+    var flagsHtml = flags.length ? '<div class="eng-flags">'+flags.map(function(f){
+      return '<span class="eng-status '+f.cls+'" style="margin:2px 4px 2px 0;display:inline-block;">'+escapeHtml(f.text)+'</span>'; }).join("")+'</div>' : "";
+    var reviewsHtml = reviews.length ? '<div class="eng-sec"><div class="eng-sec-head"><span>Флаги проверки</span></div>' +
+      '<ul class="eng-hist">'+reviews.map(function(r){
+        return '<li><span class="src">'+escapeHtml(r.severity||"")+'</span> '+escapeHtml(r.reason || r.code || r.kind)+'</li>'; }).join("")+'</ul></div>' : "";
+    return (flagsHtml || reviewsHtml) ? '<div class="eng-sec"><div class="eng-sec-head"><span>Внимание</span></div>'+(flagsHtml || '<div class="eng-empty">Нет активных флагов</div>')+'</div>'+reviewsHtml : "";
+  }
+
   function engInfoSection(p){
     var prioOrig = p.priority_original;
     var src = [p.source_file, p.source_sheet ? "лист «"+p.source_sheet+"»" : null,
@@ -1633,12 +1960,23 @@
         '<div class="meta-row"><span class="k">Продукт</span><span class="v">'+escapeHtml(p.product||"—")+'</span></div>' +
         '<div class="meta-row"><span class="k">Категория</span><span class="v">'+escapeHtml(ENG_CATEGORY_LABELS[p.record_category]||p.record_category)+'</span></div>' +
         '<div class="meta-row"><span class="k">Этап</span><span class="v">'+(p.stage?escapeHtml(ENG_STAGE_LABELS[p.stage]||p.stage):'<span class="ghost">не подтверждён</span>')+'</span></div>' +
-        '<div class="meta-row"><span class="k">На стадии</span><span class="v'+(p.stage && p.days_in_stage!=null?'':' ghost')+'">'+escapeHtml(durStr)+'</span></div>' +
+        (p.stage && p.stage_source ? '<div class="meta-row"><span class="k">Источник этапа</span><span class="v">'+engStageSourceBadge(p)+
+          '<span style="color:var(--ink-faint);margin-left:6px;font-size:11px;">('+escapeHtml(p.stage_confidence||"—")+')</span></span></div>' : '') +
+        '<div class="meta-row"><span class="k">На стадии</span><span class="v'+(p.stage && p.days_in_stage!=null?'':' ghost')+'">'+escapeHtml(durStr)+
+          (p.stage && p.days_in_stage==null && p.days_since_stage_detected!=null ? ' <span style="color:var(--ink-faint);">(определён '+p.days_since_stage_detected+' '+ruDaysWord(p.days_since_stage_detected)+' назад)</span>' : '')+'</span></div>' +
         (p.planned_stage ? '<div class="meta-row"><span class="k">Этап по плану</span><span class="v">'+escapeHtml(ENG_STAGE_LABELS[p.planned_stage]||p.planned_stage)+' — предложение из плана</span></div>' : '') +
+        '<div class="meta-row"><span class="k">Следующий шаг</span><span class="v'+(p.next_action && p.next_action.label?'':' ghost')+'">'+
+          (p.next_action && p.next_action.label ? escapeHtml(p.next_action.label)+' <span style="color:var(--ink-faint);font-size:11px;">('+escapeHtml(p.next_action.confidence||"")+')</span>' : "требует уточнения")+'</span></div>' +
+        '<div class="meta-row"><span class="k">Плановый срок</span><span class="v'+(p.deadline?(engIsOverdue(p)?' overdue':''):' ghost')+'">'+escapeHtml(p.deadline ? formatDue(p.deadline) : "не указан")+'</span></div>' +
+        '<div class="meta-row"><span class="k">Приоритет (действ.)</span><span class="v">'+ENG_PRIORITY_LABELS[p.prio]+
+          '<span style="color:var(--ink-faint);font-size:11px;"> · источник: '+escapeHtml(ENG_PRIORITY_SOURCE_LABELS[p.priority_source]||p.priority_source||"—")+'</span></span></div>' +
+        (p.priority_reasons && p.priority_reasons.length ? '<div class="meta-row" style="flex-direction:column;align-items:flex-start;"><span class="k">Обоснование приоритета</span>' +
+          '<span class="v" style="text-align:left;font-size:11.5px;color:var(--ink-soft);">'+p.priority_reasons.map(escapeHtml).join("<br>")+'</span></div>' : '') +
         '<div class="meta-row"><span class="k">Статус работ</span><span class="v'+(p.work_status?'':' ghost')+'">'+escapeHtml(p.work_status?(ENG_WORK_STATUS_LABELS[p.work_status]||p.work_status):"не определён")+'</span></div>' +
         (ex.plan_comment ? '<div class="meta-row"><span class="k">Комментарий плана</span><span class="v">'+escapeHtml(ex.plan_comment)+'</span></div>' : '') +
         '<div class="meta-row"><span class="k">Источник</span><span class="v'+(src?'':' ghost')+'">'+escapeHtml(src||"вручную")+'</span></div>' +
       '</div>' +
+      engAttentionReviewHtml(p) +
       '<div class="eng-sec"><div class="eng-sec-head"><span>Редактирование</span></div>' +
         '<div class="eng-form-row"><span style="width:110px;">Этап</span><select class="eng-input" id="engEditStage">'+stageOpts+'</select>' +
           '<button type="button" class="btn" data-action="eng-save-stage">Подтвердить этап</button></div>' +
@@ -1842,24 +2180,88 @@
       '<table class="eng-table"><tr><th>Позиция</th><th>Работа</th><th>Исполнитель</th><th>Планирование (из плана)</th><th>Выполнимо</th><th>План, ч</th><th>Источник</th></tr>'+rowsB+'</table></div>';
   }
 
-  function engReviewHtml(){
-    if(!engReview.length) return '<div class="eng-empty">Очередь проверки пуста.</div>';
-    var KIND = { plan_record:"Запись плана", image:"Фото", project:"Проект без идентификатора", telegram_photo:"Фото Telegram",
-      plan_source_issue:"Файл плана", plan_auto_sync_held:"Автосинхронизация: требует утверждения" };
-    var rows = engReview.map(function(r){
+  var ENG_REVIEW_KIND = { plan_record:"Запись плана", image:"Фото", project:"Проект без идентификатора", telegram_photo:"Фото Telegram",
+    plan_source_issue:"Файл плана", plan_auto_sync_held:"Автосинхронизация: требует утверждения" };
+  function engReviewTableHtml(list, title, emptyText){
+    if(!list.length) return '<div class="eng-empty">'+escapeHtml(emptyText)+'</div>';
+    var rows = list.map(function(r){
       var pl = r.payload || {}; var acts = pl.activities || [];
       var hrsP = acts.reduce(function(s,a){ return s+(a.planned_hours||0); },0), hrsF = acts.reduce(function(s,a){ return s+(a.actual_hours||0); },0);
       var who = acts.map(function(a){ return a.assignee || a.assignee_original; }).filter(Boolean);
       who = who.filter(function(v,i){ return who.indexOf(v)===i; }).join(", ");
-      return '<tr><td>'+escapeHtml(KIND[r.kind]||r.kind)+'</td><td>'+escapeHtml(pl.project_name||pl.caption||pl.original_filename||(pl.file&&pl.file.name)||"—")+
-        (pl.url?'<div><a href="'+escapeHtml(pl.url)+'" target="_blank" rel="noopener" style="color:var(--accent-ink);font-size:11px;">открыть файл</a></div>':'')+'</td>' +
+      var thumb = pl.url && (r.kind === "image" || r.kind === "telegram_photo")
+        ? '<div class="eng-thumb" style="width:48px;height:48px;display:inline-block;vertical-align:middle;margin-right:8px;background-image:url(\''+encodeURI(pl.url)+'\')" data-action="eng-lightbox" data-url="'+escapeHtml(pl.url)+'" data-cap="'+escapeHtml(pl.caption||"")+'"></div>' : '';
+      var recordLabel = pl.project_name || pl.external_project_id || pl.caption || pl.original_filename || (pl.file&&pl.file.name) || "—";
+      var stageControls = "";
+      if(pl.project_id && pl.recommended_stage){
+        var curLabel = pl.current_stage ? (ENG_STAGE_LABELS[pl.current_stage]||pl.current_stage) : null;
+        stageControls = (curLabel ? '<div style="font-size:11px;color:var(--ink-faint);margin-bottom:4px;">сейчас подтверждён: '+escapeHtml(curLabel)+'</div>' : '') +
+          '<button type="button" class="eng-mini-btn" data-action="eng-review-confirm-stage" data-id="'+escapeHtml(pl.project_id)+'" data-stage="'+escapeHtml(pl.recommended_stage)+'" data-review-id="'+r.id+'">Подтвердить «'+escapeHtml(ENG_STAGE_LABELS[pl.recommended_stage]||pl.recommended_stage)+'»</button> ' +
+          '<select class="eng-review-stage-pick" style="font-size:11px;" data-id="'+escapeHtml(pl.project_id)+'" data-review-id="'+r.id+'">' +
+          '<option value="">выбрать другой этап…</option>' +
+          ENG_STAGES.map(function(s){ return '<option value="'+s+'">'+escapeHtml(ENG_STAGE_LABELS[s]||s)+'</option>'; }).join("") +
+          '</select>';
+      }
+      return '<tr><td>'+escapeHtml(ENG_REVIEW_KIND[r.kind]||r.kind)+'</td><td>'+thumb+escapeHtml(recordLabel)+
+        (pl.url && !thumb?'<div><a href="'+escapeHtml(pl.url)+'" target="_blank" rel="noopener" style="color:var(--accent-ink);font-size:11px;">открыть файл</a></div>':'')+'</td>' +
         '<td style="max-width:360px;">'+escapeHtml(r.reason||"")+'</td><td>'+escapeHtml(who||"—")+'</td>' +
         '<td class="num">'+(acts.length?fmtH(hrsP)+' / '+fmtH(hrsF):'—')+'</td>' +
         '<td>'+escapeHtml(pl.source_sheet ? pl.source_sheet+"!"+(pl.source_rows||[]).join(",") : "—")+'</td>' +
-        '<td><button type="button" class="eng-mini-btn" data-action="eng-resolve-review" data-id="'+r.id+'">Разобрано</button></td></tr>';
+        '<td>'+stageControls+'<div style="margin-top:4px;"><button type="button" class="eng-mini-btn" data-action="eng-resolve-review" data-id="'+r.id+'">Разобрано</button></div></td></tr>';
     }).join("");
-    return '<div class="eng-panel"><h3>На проверке</h3><div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Записи, которые нельзя надёжно сопоставить с проектом. Они не попадают на доску, пока их не разберёт человек.</div>' +
+    return '<div class="eng-panel"><h3>'+escapeHtml(title)+'</h3><div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Записи, которые нельзя надёжно сопоставить с проектом. Они не попадают на доску, пока их не разберёт человек.</div>' +
       '<table class="eng-table"><tr><th>Тип</th><th>Запись</th><th>Причина</th><th>Исполнители</th><th>План / факт, ч</th><th>Источник</th><th></th></tr>'+rows+'</table></div>';
+  }
+  function engReviewHtml(){
+    var list = engReview.filter(function(r){ return r.kind !== "image" && r.kind !== "telegram_photo"; });
+    return engReviewTableHtml(list, "На проверке", "Очередь проверки пуста.");
+  }
+  function engPhotosQueueHtml(){
+    var list = engReview.filter(function(r){ return r.kind === "image" || r.kind === "telegram_photo"; });
+    return engReviewTableHtml(list, "Нераспределённые фото",
+      "Нераспределённых фото нет. Снимки из Telegram, которые агент не смог уверенно сопоставить с проектом, появятся здесь для ручного подтверждения.");
+  }
+
+  // ---- completed projects: a lifecycle status independent of the Kanban stage (section 10) ----
+  var engCompletedSearch = "";
+  var engCompletedSort = { key:"actual_completion_date", dir:-1 };
+  function engCompletedTableHtml(){
+    var list = engCompletedProjects.filter(function(p){
+      if(!engCompletedSearch) return true;
+      var hay = (p.make+" "+p.model+" "+p.product+" "+(p.article_number||"")+" "+(p.engineer||"")+" "+p.id).toLowerCase();
+      return hay.indexOf(engCompletedSearch.toLowerCase()) !== -1;
+    });
+    var k = engCompletedSort.key, dir = engCompletedSort.dir;
+    list = list.slice().sort(function(a,b){
+      var av = a[k], bv = b[k];
+      if(k === "priority"){ av = ENG_PRIORITY_ORDER[a.prio]; bv = ENG_PRIORITY_ORDER[b.prio]; }
+      if(av == null && bv == null) return 0;
+      if(av == null) return 1; if(bv == null) return -1;
+      return av < bv ? -dir : (av > bv ? dir : 0);
+    });
+    var head = function(key, label){
+      var active = engCompletedSort.key === key;
+      return '<th class="sortable" data-action="eng-completed-sort" data-key="'+key+'" style="cursor:pointer;">'+escapeHtml(label)+
+        (active ? (engCompletedSort.dir === 1 ? ' ▲' : ' ▼') : '')+'</th>';
+    };
+    var rows = list.map(function(p){
+      var photo = (p.images || []).filter(function(i){ return i.is_primary; })[0] || (p.images || [])[0];
+      var thumb = photo ? '<div class="eng-thumb" style="width:40px;height:40px;background-image:url(\''+encodeURI(photo.url)+'\')"></div>' : '<div class="eng-thumb" style="width:40px;height:40px;"></div>';
+      return '<tr class="clickable" data-action="open-eng-project" data-id="'+p.id+'">' +
+        '<td>'+thumb+'</td>' +
+        '<td>'+escapeHtml(p.make||"—")+'</td><td>'+escapeHtml(p.model||"—")+'</td><td>'+escapeHtml(p.product||"—")+'</td>' +
+        '<td'+(p.engineer?'':' class="ghost"')+'>'+escapeHtml(p.engineer||"Не назначен")+'</td>' +
+        '<td>'+fmtDateOnly(p.actual_completion_date)+'</td>' +
+        '<td><span class="eng-priority-pill '+p.prio+'"><span class="dot"></span>'+ENG_PRIORITY_LABELS[p.prio]+'</span></td>' +
+        '<td style="font-family:\'JetBrains Mono\',monospace;font-size:11px;">'+escapeHtml(p.article_number || p.project_id)+'</td>' +
+      '</tr>';
+    }).join("");
+    return '<div class="eng-panel"><h3>Сданные проекты ('+engCompletedProjects.length+')</h3>' +
+      '<div class="eng-form-row" style="margin-bottom:8px;"><input class="eng-input" id="engCompletedSearchInput" style="flex:1 1 220px;" placeholder="Поиск по марке, модели, продукту, инженеру, артикулу…" value="'+escapeHtml(engCompletedSearch)+'"></div>' +
+      (list.length ? '<table class="eng-table"><tr><th></th>'+head("make","Марка")+head("model","Модель")+head("product","Продукт")+
+        head("engineer","Инженер")+head("actual_completion_date","Дата сдачи")+head("priority","Приоритет")+'<th>Идентификатор</th></tr>'+rows+'</table>'
+        : '<div class="eng-empty">Сданных проектов нет'+(engCompletedSearch?' по этому запросу':' — они появятся здесь по мере того, как в плане будет указана дата сдачи (actual_completion_date)')+'.</div>') +
+    '</div>';
   }
 
   var engImports = [];
@@ -1980,10 +2382,13 @@
 
   function renderEngSubviewLists(){
     var a = document.getElementById("engAdditionalView"), b = document.getElementById("engBacklogView"),
-        rv = document.getElementById("engReviewView"), im = document.getElementById("engImportView");
+        rv = document.getElementById("engReviewView"), im = document.getElementById("engImportView"),
+        cp = document.getElementById("engCompletedView"), ph = document.getElementById("engPhotosView");
     if(engSubview === "additional") a.innerHTML = engRecordsTable("additional_work");
     if(engSubview === "backlog") b.innerHTML = engRecordsTable("backlog");
     if(engSubview === "review") rv.innerHTML = engReviewHtml();
+    if(engSubview === "photos") ph.innerHTML = engPhotosQueueHtml();
+    if(engSubview === "completed" && !(document.activeElement && cp.contains(document.activeElement))) cp.innerHTML = engCompletedTableHtml();
     if(engSubview === "import" && !(document.activeElement && im.contains(document.activeElement))) im.innerHTML = engImportHtml();
   }
 
@@ -1992,6 +2397,8 @@
     Array.prototype.forEach.call(document.querySelectorAll(".eng-subtab"), function(b){
       b.classList.toggle("active", b.getAttribute("data-subview") === v); });
     document.getElementById("engBoardView").style.display = v === "board" ? "" : "none";
+    document.getElementById("engCompletedView").style.display = v === "completed" ? "" : "none";
+    document.getElementById("engPhotosView").style.display = v === "photos" ? "" : "none";
     document.getElementById("engAdditionalView").style.display = v === "additional" ? "" : "none";
     document.getElementById("engBacklogView").style.display = v === "backlog" ? "" : "none";
     document.getElementById("engReviewView").style.display = v === "review" ? "" : "none";
@@ -2023,6 +2430,20 @@
     if(act === "eng-resolve-review"){
       apiFetch("/api/review-queue/"+encodeURIComponent(btn.getAttribute("data-id"))+"/resolve", { method:"POST", body:{ resolution:"resolved" } })
         .then(loadEngProjects).catch(function(err){ showSyncNote(err.message); });
+      return;
+    }
+    if(act === "eng-review-confirm-stage"){
+      e.stopPropagation();
+      var pid = btn.getAttribute("data-id"), stage = btn.getAttribute("data-stage");
+      apiFetch("/api/projects/"+encodeURIComponent(pid)+"/stage", { method:"POST", body:{ stage: stage } })
+        .then(loadEngProjects).catch(function(err){ showSyncNote("Этап не изменён: "+err.message); });
+      return;
+    }
+    if(act === "eng-completed-sort"){
+      var sk = btn.getAttribute("data-key");
+      engCompletedSort.dir = (engCompletedSort.key === sk) ? -engCompletedSort.dir : 1;
+      engCompletedSort.key = sk;
+      renderEngSubviewLists();
       return;
     }
     if(act === "eng-plan-analyze"){
@@ -2074,14 +2495,67 @@
     var card = e.target.closest('[data-action="open-eng-project"]');
     if(card){ openEngDetail(card.getAttribute("data-id")); return; }
     if(e.target.closest("#engFilterClearBtn")){
-      engFilters = { search:"", make:"", model:"", product:"", engineer:"", priority:"" };
+      engFilters = { search:"", make:"", model:"", product:"", engineer:"", priority:"", overdueOnly:false, noEngineerOnly:false };
+      engActiveKpi = null;
       document.getElementById("engSearchInput").value = "";
       document.getElementById("engFilterPriority").value = "";
       renderEngBoard();
+      return;
+    }
+    var kpiTile = e.target.closest(".kpi-tile[data-kpi]");
+    if(kpiTile){
+      var kpi = kpiTile.getAttribute("data-kpi");
+      engActiveKpi = engActiveKpi === kpi ? null : kpi;
+      engFilters.priority = "";
+      engFilters.overdueOnly = false;
+      engFilters.noEngineerOnly = false;
+      document.getElementById("engFilterPriority").value = "";
+      if(engActiveKpi === "critical") { engFilters.priority = "critical"; document.getElementById("engFilterPriority").value = "critical"; }
+      else if(engActiveKpi === "overdue") engFilters.overdueOnly = true;
+      else if(engActiveKpi === "noengineer") engFilters.noEngineerOnly = true;
+      renderEngBoard();
+      return;
     }
   });
   document.getElementById("engSearchInput").addEventListener("input", function(e){
     engFilters.search = e.target.value;
+    renderEngBoard();
+  });
+  document.getElementById("engView").addEventListener("change", function(e){
+    if(!e.target.classList || !e.target.classList.contains("eng-review-stage-pick")) return;
+    var stage = e.target.value;
+    if(!stage) return;
+    var pid = e.target.getAttribute("data-id");
+    apiFetch("/api/projects/"+encodeURIComponent(pid)+"/stage", { method:"POST", body:{ stage: stage } })
+      .then(loadEngProjects).catch(function(err){ showSyncNote("Этап не изменён: "+err.message); });
+  });
+  document.getElementById("engView").addEventListener("input", function(e){
+    if(e.target.id === "engCompletedSearchInput"){
+      engCompletedSearch = e.target.value;
+      var pos = e.target.selectionStart;
+      document.getElementById("engCompletedView").innerHTML = engCompletedTableHtml();
+      var el = document.getElementById("engCompletedSearchInput");
+      if(el){ el.focus(); try{ el.setSelectionRange(pos, pos); }catch(err){ /* ignore */ } }
+    }
+  });
+  document.getElementById("engSortSelect").addEventListener("change", function(e){
+    engSortMode = e.target.value;
+    renderEngBoard();
+  });
+  setIcon("engDensityIconCompact","list",14);
+  setIcon("engDensityIconImages","image",14);
+  function applyEngDensityButtons(){
+    Array.prototype.forEach.call(document.querySelectorAll(".eng-density-btn"), function(b){
+      b.classList.toggle("active", b.getAttribute("data-density") === engDensity);
+    });
+  }
+  applyEngDensityButtons();
+  document.getElementById("engDensityToggle").addEventListener("click", function(e){
+    var b = e.target.closest(".eng-density-btn");
+    if(!b) return;
+    engDensity = b.getAttribute("data-density");
+    try{ localStorage.setItem(ENG_DENSITY_KEY, engDensity); }catch(err){ /* ignore */ }
+    applyEngDensityButtons();
     renderEngBoard();
   });
   ["engFilterMake","engFilterModel","engFilterProduct","engFilterEngineer","engFilterPriority"].forEach(function(id){
@@ -2090,6 +2564,7 @@
       var k = el.getAttribute("data-filter-key");
       engFilters[k] = e.target.value;
       if(k === "make") engFilters.model = "";
+      if(k === "priority") engActiveKpi = null;
       renderEngBoard();
     });
   });
