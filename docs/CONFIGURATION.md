@@ -28,6 +28,8 @@ Secrets live only in environment variables, or in a secret manager that sets the
 | `PLAN_SOURCE_READ_ATTEMPTS`, `PLAN_SOURCE_RETRY_SECONDS` | app | snapshot attempts per check and the pause between them (default 3 and 5 s); used when the workbook changes during the copy or a real sharing violation occurs |
 | `PM_DASHBOARD_URL` | `verify-deployment` | dashboard page URL, if it differs from the API |
 | `PLAN_AGENT_REQUIRE_VERIFIED_DEPLOYMENT` | agent CLI | `1` (default): a command-line sync runs only after `verify-deployment` reported READY. In-app imports set `0`, because the agent talks to its own server |
+| `WINDOWS_AGENT_API_KEY`, `AGENT_JOB_LEASE_MS`, `AGENT_HEARTBEAT_STALE_MS`, `AGENT_REPLAY_WINDOW_MS`, `AGENT_RATE_LIMIT_MAX`, `AGENT_RATE_LIMIT_WINDOW_MS` | app | the Windows-laptop job queue, used only when `PLAN_SOURCE_TYPE=remote_agent` — see `docs/RAILWAY_DEPLOYMENT.md` |
+| `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `DASHBOARD_SESSION_SECRET`, `DASHBOARD_SESSION_MS`, `FORCE_SECURE_COOKIE` | app | optional dashboard login; a no-op (today's unauthenticated behaviour) unless both `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` are set — see `docs/RAILWAY_DEPLOYMENT.md` |
 
 ## `config/vocabulary.yaml`: how the agent reads files
 

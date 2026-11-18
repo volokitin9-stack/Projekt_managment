@@ -226,6 +226,7 @@ npm test
 * `docs/WORKFLOW_AUTOMATION.md`: automatic stage, activity status, priority, next action, stage time, review queue (rules in `config/workflow_automation.json`)
 * `docs/WINDOWS.md`: Windows setup, the agent's Python interpreter and a verification procedure
 * `docs/FILE_SOURCE.md`: daily schedule, production calendar, «Обновить», file-source configuration (corporate share) and troubleshooting
+* `docs/RAILWAY_DEPLOYMENT.md`: running centrally on Railway with the Excel workbook staying on an always-on Windows laptop (`plan_agent/windows_agent.py`, `windows/`), persistent storage, migration, and security
 
 ## Production
 
