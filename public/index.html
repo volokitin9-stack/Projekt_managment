@@ -530,7 +530,7 @@
   .eng-card{
     background:var(--surface-2); border:1px solid var(--line); border-radius:12px;
     box-shadow:var(--shadow); cursor:pointer; transition:border-color .15s ease, background .15s ease;
-    display:flex; flex-direction:column; overflow:hidden;
+    display:flex; flex-direction:column; overflow:hidden; flex-shrink:0;
   }
   .eng-card:hover{ border-color:var(--accent); background:var(--surface-3); }
   .eng-card.critical{ border-left:3px solid var(--crit); }
@@ -1711,7 +1711,7 @@
     var photo = (p.images || []).filter(function(i){ return i.is_primary; })[0] || (p.images || [])[0];
     var img = photo
       ? '<div class="eng-card-img has-photo" style="background-image:url(\''+encodeURI(photo.url)+'\')"></div>'
-      : '<div class="eng-card-img">'+iconSvg('image',26,1.5)+'</div>';
+      : '';
     return (
       '<div class="eng-card '+p.prio+'" data-action="open-eng-project" data-id="'+p.id+'" draggable="true">' +
         img +
