@@ -24,6 +24,9 @@ function uiState(run, result) {
   switch (run.outcome) {
     case "busy":
       return { state: "busy", message: "Обновление уже выполняется — дождитесь завершения" };
+    case "queued":
+      return { state: "busy", message: "Задача поставлена в очередь для агента на компьютере — ожидаем, пока ноутбук её выполнит",
+        job_id: run.job_id || null };
     case "unchanged":
       return { state: "no_changes", message: `Изменений нет (${CHECKED.toLowerCase()})` };
     case "synced":
@@ -90,7 +93,11 @@ router.post("/approve", async (req, res) => {
   }
   const by = String(req.body.approved_by || "dashboard_user").slice(0, 80);
   const r = await monitor.approvePending(by);
-  const code = r.status === "synced" ? 200 : r.status === "busy" ? 409 : r.status === "nothing_pending" ? 409 : 422;
+  // "queued": a remote_agent deployment - approval queued a job for the Windows laptop to run the
+  // actual sync and submit its result later (see monitor.enqueueRemoteApproval()); that is success
+  // here too, not a 422 - the sync itself has not failed, it just hasn't happened yet.
+  const code = r.status === "synced" || r.status === "queued" ? 200
+    : r.status === "busy" ? 409 : r.status === "nothing_pending" ? 409 : 422;
   res.status(code).json(Object.assign({ result: r }, { state: fullStatus() }));
 });
 

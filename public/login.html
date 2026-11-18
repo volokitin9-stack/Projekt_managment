@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Штурман — вход</title>
+<style>
+  body{background:#0D1722;color:#E7EFF8;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+  form{background:#142230;padding:28px 32px;border-radius:10px;width:280px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+  h1{font-size:18px;margin:0 0 18px}
+  label{display:block;font-size:13px;color:#91A9BC;margin:12px 0 4px}
+  input{width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid #21364A;background:#192A3A;color:#E7EFF8;font-size:14px}
+  button{margin-top:18px;width:100%;padding:9px;border:none;border-radius:6px;background:#5296FF;color:#fff;font-size:14px;cursor:pointer}
+  button:hover{opacity:.9}
+  #err{color:#E56B70;font-size:13px;margin-top:10px;min-height:16px}
+</style>
+</head>
+<body>
+  <form id="f">
+    <h1>Штурман — вход</h1>
+    <label>Логин</label>
+    <input type="text" id="u" autocomplete="username" required>
+    <label>Пароль</label>
+    <input type="password" id="p" autocomplete="current-password" required>
+    <button type="submit">Войти</button>
+    <div id="err"></div>
+  </form>
+<script>
+document.getElementById("f").addEventListener("submit", function(e){
+  e.preventDefault();
+  var err = document.getElementById("err"); err.textContent = "";
+  fetch("/api/login", { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ username: document.getElementById("u").value, password: document.getElementById("p").value }) })
+    .then(function(r){ return r.json().then(function(j){ return { ok:r.ok, j:j }; }); })
+    .then(function(res){
+      if (!res.ok) { err.textContent = res.j.error || "Ошибка входа"; return; }
+      var params = new URLSearchParams(location.search);
+      location.href = params.get("next") || "/";
+    })
+    .catch(function(){ err.textContent = "Сервер недоступен"; });
+});
+</script>
+</body>
+</html>

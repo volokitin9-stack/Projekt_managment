@@ -180,9 +180,16 @@ function newStoredPath(id) {
 }
 
 /** Dry run of a registered import. Caller holds the job lock. */
-async function analyzeImport(id) {
+/** analyzeImport(id, precomputed?): precomputed = { json, python } already produced by a remote
+ *  agent (Railway deployment: the Windows laptop ran `plan_agent analyze` itself, against the real
+ *  file, and submitted the resulting --json report - see server/agentJobs.js). Same post-processing
+ *  either way; only the source of the JSON differs. */
+async function analyzeImport(id, precomputed) {
   const imp = getImport(id);
-  const r = await runAgent(["analyze", imp.stored_path, "--month", imp.plan_month, "--name", imp.original_name, "--json"]);
+  const r = precomputed
+    ? { json: precomputed.json, python: precomputed.python || null, code: precomputed.json ? 0 : -1,
+        err: precomputed.error || "", launchError: precomputed.launchError || null }
+    : await runAgent(["analyze", imp.stored_path, "--month", imp.plan_month, "--name", imp.original_name, "--json"]);
   const json = r.json;
   const ok = !!(json && json.status && json.status !== "Failed" && json.mode !== "none");
   const summary = { dry_run: json, python: r.python || null,
@@ -196,8 +203,8 @@ async function analyzeImport(id) {
 /** Approve the mapping of this analysis (fingerprint-bound) and synchronise.
  *  autoSafe: unattended mode, only safe changes (see plan_agent sync --auto-safe).
  *  Caller holds the job lock. */
-async function approveAndSync(imp, by, { autoSafe = false } = {}) {
-  if (!autoSafe) {
+async function approveAndSync(imp, by, { autoSafe = false, precomputed = null } = {}) {
+  if (!autoSafe && !precomputed) {
     const appr = await runAgent(["approve", "--by", by, "--fingerprint", imp.fingerprint || "", "--json"]);
     if (!appr.json || !appr.json.approved) {
       const error = appr.launchError || (appr.json && appr.json.error) || appr.err.slice(-2000);
@@ -207,9 +214,17 @@ async function approveAndSync(imp, by, { autoSafe = false } = {}) {
     imp.summary = Object.assign({}, imp.summary || {}, { approval: appr.json });
   }
   updateImport(imp.id, { status: "syncing" });
-  const args = ["sync", imp.stored_path, "--month", imp.plan_month, "--name", imp.original_name, "--json"];
-  if (autoSafe) args.push("--auto-safe");
-  const r = await runAgent(args);
+  // precomputed: the Windows agent already ran `plan_agent sync` locally (its own HTTP client wrote
+  // the project data through /api/agent/* against this same server, see docs/EXTERNAL_AGENT.md) and
+  // submitted the --json report. Nothing here re-runs the sync or re-applies writes.
+  const r = precomputed
+    ? { json: precomputed.json, python: precomputed.python || null, code: precomputed.json ? 0 : -1,
+        err: precomputed.error || "", launchError: precomputed.launchError || null }
+    : await (async () => {
+        const args = ["sync", imp.stored_path, "--month", imp.plan_month, "--name", imp.original_name, "--json"];
+        if (autoSafe) args.push("--auto-safe");
+        return runAgent(args);
+      })();
   const json = r.json;
   const synced = !!(json && /^Completed/.test(json.status || ""));
   const complete = !!(json && json.status === "Completed");   // every project written without errors

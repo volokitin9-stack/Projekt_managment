@@ -24,6 +24,7 @@ const store = require("../store");
 const reviewQueue = require("../reviewQueueModel");
 const imports = require("../routes/planImports");
 const { createSource, SourceError } = require("./adapters");
+const agentJobs = require("../agentJobs");
 
 const REPO_ROOT = path.join(__dirname, "..", "..");
 const MAX_EVENTS = 300;
@@ -49,7 +50,9 @@ function config(env = process.env) {
     type,
     path: p,
     pattern: (env.PLAN_SOURCE_PATTERN || "").trim() || null,
-    configured: !!(type && p),
+    // remote_agent needs no local PLAN_SOURCE_PATH - Railway has no access to the corporate file by
+    // design; the Windows agent is the only thing that ever reads it (docs/RAILWAY_DEPLOYMENT.md).
+    configured: !!(type && (p || type === "remote_agent")),
     monitorEnabled: bool(env.PLAN_AUTO_MONITOR_ENABLED, true),
     scheduleEnabled: bool(env.PLAN_SCHEDULE_ENABLED, true),
     scheduleTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(time) ? time : null,
@@ -340,12 +343,12 @@ async function checkInner({ trigger = "manual", force = false } = {}, ph) {
 }
 
 /** Sync a version. Caller holds the job lock. */
-async function syncVersion(versionId, { autoSafe, by, startedAt, trigger }, ph) {
+async function syncVersion(versionId, { autoSafe, by, startedAt, trigger, precomputed = null }, ph) {
   const version = store.read((s) => JSON.parse(JSON.stringify(s.plan_source_versions.find((x) => x.id === versionId))));
   const imp = imports.getImport(version.import_id);
   updateVersion(version.id, { status: "syncing", phase: autoSafe ? "auto_sync" : "sync" });
   setState({ running: { started_at: startedAt || nowIso(), trigger, phase: "sync" } });
-  const r = await imports.approveAndSync(imp, by, { autoSafe });
+  const r = await imports.approveAndSync(imp, by, { autoSafe, precomputed });
   const counts = r.json ? r.json.counts : null;
   if (ph) ph.sync = r.complete ? "ok" : "failed";
   if (r.complete) {
@@ -365,7 +368,10 @@ async function syncVersion(versionId, { autoSafe, by, startedAt, trigger }, ph) 
   return { status: "sync_failed", error: err };
 }
 
-/** Manual approval of the pending version (mode A). */
+/** Manual approval of the pending version (mode A). A version detected through the Windows agent
+ *  (source.type === "remote_agent") has no file on this server to re-run `sync` against locally -
+ *  approval instead queues a new agent job so the laptop performs the approve+sync itself; see
+ *  enqueueRemoteApproval() and the POST /api/agent-jobs/agent/:id/result handler. */
 async function approvePending(by) {
   const st = getState();
   const vid = st.current_version_id;
@@ -375,12 +381,180 @@ async function approvePending(by) {
   }
   const imp = imports.getImport(version.import_id);
   if (!imp || !["analyzed", "interrupted", "sync_failed"].includes(imp.status)) return { status: "nothing_pending" };
+  if (version.source && version.source.type === "remote_agent") {
+    return enqueueRemoteApproval(version, by);
+  }
   if (!imports.tryLock("plan_source:approve")) return { status: "busy", owner: imports.jobs.owner };
   try {
     return await syncVersion(version.id, { autoSafe: false, by, trigger: "approve" });
   } finally {
     imports.unlock();
   }
+}
+
+// ============================================================================================
+// Railway + Windows-agent topology: no local file access, the Windows laptop runs the pipeline.
+// See server/agentJobs.js for the job lifecycle and docs/RAILWAY_DEPLOYMENT.md for the full flow.
+// Both functions below reuse the exact same post-processing checkInner() already has (classifyDryRun,
+// review items, version/import bookkeeping, syncVersion) - only the *source* of the --json report
+// differs: a locally-run plan_agent CLI there, an agent-submitted report here.
+// ============================================================================================
+
+function isRemoteMode(cfg = config()) {
+  return cfg.type === "remote_agent";
+}
+
+/** POST /api/plan-source/update and the 09:00 scheduler, when PLAN_SOURCE_TYPE=remote_agent:
+ *  enqueue a job instead of reading a local file. Holds the same global import/check lock a local
+ *  check would hold, released only once applyRemoteAnalyze()/applyRemoteSync() finishes - so a
+ *  manual upload or a second remote check still cannot overlap this one. */
+function enqueueRemoteCheck({ trigger, scheduledDate = null, scheduledFor = null, force = false } = {}) {
+  if (!imports.tryLock(`plan_source:${trigger}`)) {
+    logEvent("info", "skipped_busy", `проверка пропущена: идёт другая обработка (${imports.jobs.owner})`);
+    return { status: "busy", owner: imports.jobs.owner };
+  }
+  const cfg = config();
+  let month;
+  try {
+    month = targetMonth(cfg);
+  } catch (e) {
+    imports.unlock();
+    setState({ status: "error", last_error: e.message });
+    return { status: "not_configured", error: e.message };
+  }
+  const { job } = agentJobs.enqueue({ type: "check", trigger, scheduledDate, scheduledFor, force });
+  setState({ running: { started_at: nowIso(), trigger, phase: "await_agent", job_id: job.id }, status: "awaiting_agent",
+    current_month: month });
+  logEvent("info", "job_queued", `задача ${job.id} поставлена в очередь для агента ноутбука (${trigger})`, { job_id: job.id });
+  // Intentionally does not call imports.unlock() here: the lock is released by applyRemoteAnalyze()/
+  // applyRemoteSync() (success or failure) or by the job-timeout sweep reconciling a stuck "busy" state
+  // on the next status()/check() call - see reconcileStuckRemoteLock() below.
+  return { status: "queued", job };
+}
+
+/** If the job that is holding the global lock timed out (lease expired, laptop went offline) and
+ *  nothing ever called applyRemoteAnalyze/applyRemoteSync to release it, free the lock so the next
+ *  attempt is not blocked forever. Cheap to call from status(). */
+function reconcileStuckRemoteLock() {
+  if (!imports.jobs.busy || !String(imports.jobs.owner || "").startsWith("plan_source:")) return;
+  agentJobs.sweep(); // a job's lease can have expired since it was last claimed/heartbeated/enqueued
+  const st = getState();
+  const jobId = st.running && st.running.job_id;
+  if (!jobId) return;
+  const job = agentJobs.get(jobId);
+  if (job && (job.status === "timed_out" || job.status === "failed")) {
+    setState({ running: null, status: "error", last_error: job.error || "задача агента прервана" });
+    imports.unlock();
+  }
+}
+
+/** The agent submitted its `analyze` --json report for a job. Mirrors checkInner()'s post-probe
+ *  logic (lines ~216-323 above) exactly, with the agent-reported file metadata standing in for a
+ *  local source.probe()/fetchTo(). */
+async function applyRemoteAnalyze({ sha256, size, mtime, name, month, analyzeJson, launchError, autoApply }) {
+  const cfg = config();
+  const fileInfo = { name, size, mtime, sha256, open_in_excel: false };
+  const auto = autoSyncEnabled(cfg) && autoApply !== false;
+  let version = findVersion(sha256, month);
+  if (version && FINAL.includes(version.status)) {
+    setState({ running: null, status: version.status === "synced" ? "up_to_date" : version.status,
+      last_check_result: "unchanged", last_file: fileInfo, last_error: null, current_version_id: version.id,
+      last_successful_check_at: nowIso() });
+    imports.unlock();
+    return { status: "unchanged", version };
+  }
+  const isNew = !version;
+  if (isNew) {
+    const id = uuidv4();
+    store.tx((s) => s.plan_source_versions.push({ id, sha256, size, mtime, name, plan_month: month,
+      source: { type: "remote_agent", location: "windows-laptop" }, detected_at: nowIso(), updated_at: nowIso(),
+      status: "analyzing", phase: "analyze", import_id: null, sync_import_id: null, synced_at: null,
+      dry_run_ready: false, counts: null, error: null }));
+    version = findVersion(sha256, month);
+    setState({ last_change_at: nowIso() });
+  }
+  setState({ last_file: fileInfo, last_successful_check_at: nowIso() });
+  if (launchError) {
+    updateVersion(version.id, { status: "interrupted", phase: null, error: launchError });
+    logEvent("error", "agent_launch_error", launchError, { version_id: version.id });
+    setState({ running: null, status: "error", last_error: launchError, last_check_result: "error" });
+    imports.unlock();
+    return { status: "error", code: "agent_launch_error", error: launchError };
+  }
+  const importId = imports.createImport({ storedPath: null, name, sha256, size, month, origin: "plan_source_remote",
+    sourceMeta: { type: "remote_agent" } });
+  updateVersion(version.id, { status: "analyzing", phase: "analyze", import_id: importId });
+  const r = await imports.analyzeImport(importId, { json: analyzeJson });
+  const outcome = classifyDryRun(r.json);
+  const counts = r.json ? r.json.counts : null;
+  setState({ last_counts: counts });
+  if (outcome === "failed") {
+    const err = (r.row && r.row.error) || "анализ не выполнен";
+    updateVersion(version.id, { status: "failed", phase: null, error: err, counts });
+    reviewItem(`plan_source:${sha256}:${month}`, "plan_source_issue", `Файл ${name} не обработан: ${err}`,
+      { version_id: version.id, import_id: importId, file: fileInfo, plan_month: month });
+    setState({ running: null, status: "failed", last_error: err, last_check_result: "failed" });
+    imports.unlock();
+    return { status: "failed", error: err };
+  }
+  if (outcome === "retry") {
+    updateVersion(version.id, { status: "interrupted", phase: null, error: "отчёт агента не распознан", counts });
+    setState({ running: null, status: "error", last_error: "отчёт агента не распознан", last_check_result: "retry" });
+    imports.unlock();
+    return { status: "retry" };
+  }
+  if (outcome === "blocked" || outcome === "awaiting_approval") {
+    const notes = ((r.json && r.json.notes) || []).filter((n) => /VERIFICATION|STRUCTURE|INITIAL/.test(n));
+    if (r.json && r.json.fatal_error) notes.unshift(r.json.fatal_error);
+    const reason = outcome === "blocked"
+      ? `Требуется проверка файла ${name} (${month}): ${notes.join("; ") || r.json.status}`
+      : `Файл ${name} (${month}) ожидает утверждения сопоставления: ${notes.join("; ") || r.json.status}`;
+    updateVersion(version.id, { status: outcome, phase: null, counts, error: null, dry_run_ready: false });
+    reviewItem(`plan_source:${sha256}:${month}`, "plan_source_issue", reason,
+      { version_id: version.id, import_id: importId, file: fileInfo, plan_month: month, notes });
+    setState({ running: null, status: outcome, last_error: outcome === "blocked" ? reason : null,
+      last_check_result: "changed", current_version_id: version.id, pending_import_id: importId });
+    imports.unlock();
+    return { status: outcome, version: findVersion(sha256, month) };
+  }
+  updateVersion(version.id, { counts, dry_run_ready: true });
+  if (!auto) {
+    updateVersion(version.id, { status: "awaiting_approval", phase: null, error: null });
+    setState({ running: null, status: "awaiting_approval", last_error: null, last_check_result: "changed",
+      current_version_id: version.id, pending_import_id: importId });
+    imports.unlock();
+    return { status: "awaiting_approval", version: findVersion(sha256, month) };
+  }
+  // Auto-sync is on: the analyze job is done (it completes normally, below); chain a second,
+  // separate "sync" job for the agent to pick up next, carrying the version id. The global lock
+  // started by enqueueRemoteCheck() is deliberately NOT released here - it stays held across both
+  // jobs and is only released by applyRemoteSync() once the chain finishes, so nothing else (a
+  // manual upload, a second check) can interleave between the two.
+  updateVersion(version.id, { status: "analyzed", phase: "await_sync", error: null });
+  const { job: syncJob } = agentJobs.enqueueChained({ type: "sync", trigger: "schedule", versionId: version.id });
+  setState({ running: { started_at: nowIso(), trigger: "schedule", phase: "await_agent_sync", job_id: syncJob.id } });
+  logEvent("info", "job_queued", `задача синхронизации ${syncJob.id} поставлена в очередь (авто) после анализа ${version.name}`,
+    { job_id: syncJob.id, version_id: version.id });
+  return { status: "awaiting_agent_sync", version: findVersion(sha256, month), chained_job: syncJob };
+}
+
+/** The agent submitted its `sync` --json report (auto-safe routine sync, or a human-approved
+ *  deferred approval - see enqueueRemoteApproval()). Mirrors syncVersion()'s own logic. */
+async function applyRemoteSync({ versionId, syncJson, by, autoSafe }) {
+  const result = await syncVersion(versionId, { autoSafe: !!autoSafe, by: by || "windows_agent",
+    trigger: "remote_agent", precomputed: { json: syncJson } }, {});
+  imports.unlock();
+  return result;
+}
+
+/** A human clicked "approve" in «Импорт плана» for a remote-agent-sourced version: the laptop must
+ *  run the approve+sync itself (it still has - or can re-read - the real file; Railway never does). */
+function enqueueRemoteApproval(version, by) {
+  if (!imports.tryLock("plan_source:approve")) return { status: "busy", owner: imports.jobs.owner };
+  const { job } = agentJobs.enqueueChained({ type: "sync", trigger: "approve", requestedBy: by, versionId: version.id });
+  setState({ running: { started_at: nowIso(), trigger: "approve", phase: "await_agent_sync", job_id: job.id } });
+  logEvent("info", "job_queued", `задача утверждения ${job.id} поставлена в очередь для агента ноутбука`, { job_id: job.id, version_id: version.id });
+  return { status: "queued", job };
 }
 
 /** Versions synced through «Импорт плана» directly count as synced. */
@@ -403,6 +577,7 @@ function reconcile() {
 
 function status() {
   reconcile();
+  if (isRemoteMode()) reconcileStuckRemoteLock();
   const cfg = config();
   const st = getState();
   const versions = store.read((s) => s.plan_source_versions.slice(-10).reverse().map((v) => JSON.parse(JSON.stringify(v))));
@@ -436,7 +611,13 @@ function status() {
     last_successful_check_at: st.last_successful_check_at || null,
     last_recalc_at: st.last_recalc_at || null,
     versions,
-    events
+    events,
+    remote_agent: cfg.type === "remote_agent" ? {
+      enabled: true,
+      agent: agentJobs.presence(),
+      active_job: agentJobs.activeJob(),
+      recent_jobs: agentJobs.recent(10)
+    } : null
   };
 }
 
@@ -485,6 +666,9 @@ function outcomeOf(r) {
       return "busy";
     case "not_configured":
       return "not_configured";
+    case "queued":
+    case "awaiting_agent_sync":
+      return "queued";
     default:
       return "error";
   }
@@ -526,18 +710,24 @@ async function recalculate({ trigger = "manual", scheduledDate = null } = {}) {
   }
 }
 
-/** Run a check and record it. trigger: "schedule" | "manual". */
+/** Run a check and record it. trigger: "schedule" | "manual". In remote_agent mode this enqueues a
+ *  job and returns immediately ("queued") instead of reading a file and running Python locally -
+ *  completion happens later, asynchronously, when the Windows agent submits a result (see
+ *  applyRemoteAnalyze/applyRemoteSync and POST /api/agent-jobs/agent/:id/result). */
 async function runRecorded({ trigger, scheduledDate = null, scheduledFor = null }) {
   const startedAt = nowIso();
-  const r = await check({ trigger });
+  const r = isRemoteMode()
+    ? enqueueRemoteCheck({ trigger, scheduledDate, scheduledFor })
+    : await check({ trigger });
   const v = r.version || {};
   const run = recordRun({ trigger, scheduled_date: scheduledDate, scheduled_for: scheduledFor, started_at: startedAt,
     finished_at: nowIso(), outcome: outcomeOf(r), result: r.status, phases: r.phases || null,
     version_id: v.id || null, sha256: v.sha256 || null, counts: v.counts || null, held_for_review: v.held_for_review || 0,
-    error: r.error || null, error_code: r.code || null });
+    error: r.error || null, error_code: r.code || null, job_id: (r.job && r.job.id) || null });
   return { run, result: r };
 }
 
 module.exports = { config, targetMonth, check, runRecorded, recordRun, outcomeOf, approvePending, status, preview, setAutoSync,
   recalculate,
-  classifyDryRun, logEvent };
+  classifyDryRun, logEvent,
+  isRemoteMode, applyRemoteAnalyze, applyRemoteSync };

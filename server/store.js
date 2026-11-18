@@ -30,9 +30,9 @@ const TEMPLATE = path.join(DATA_DIR, "templates", "shturman.empty.json");
 const SCHEMA_VERSION = 1;
 const COLLECTIONS = ["stages", "docs", "projects", "project_activities", "project_history", "project_files",
   "agent_events", "review_queue", "sync_runs", "plan_imports", "plan_source_versions", "plan_source_events",
-  "plan_source_runs"];
+  "plan_source_runs", "agent_jobs"];
 // Single-object sections (added without a format change: missing = empty).
-const OBJECTS = ["plan_source"];
+const OBJECTS = ["plan_source", "agent_status"];
 
 const DEFAULT_STAGES = [
   { key: "scanning", label: "Сканирование", sort_order: 1 },

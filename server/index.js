@@ -15,12 +15,17 @@ const agentRouter = require("./routes/agent");
 const reviewQueueRouter = require("./routes/reviewQueue");
 const planImportsRouter = require("./routes/planImports");
 const planSourceRouter = require("./routes/planSource");
+const agentJobsRouter = require("./routes/agentJobs");
 const planScheduler = require("./planSource/scheduler");
 const store = require("./store");
+const agentJobs = require("./agentJobs");
+const dashboardAuth = require("./dashboardAuth");
 
 seed();
 // maintenance of review items created by an earlier build (resolved, never deleted)
 require("./workflowModel").resolveStageItemsOfNonMain(store);
+// a restart must not leave a Windows-agent job "running" forever past its lease (Railway deployment only)
+agentJobs.recoverAtBoot();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -32,6 +37,18 @@ if (corsOrigins.length) {
 
 app.use(express.json({ limit: "2mb" }));
 
+// Dashboard session auth (Railway: set DASHBOARD_USERNAME + DASHBOARD_PASSWORD; see
+// docs/RAILWAY_DEPLOYMENT.md). A no-op for the existing local/single-machine install when unset -
+// server/dashboardAuth.js. Agent routes below have their own, separate auth and are not covered by
+// this - a human operator's session and the Windows agent's credential are deliberately different.
+app.post("/api/login", express.json(), dashboardAuth.login);
+app.post("/api/logout", dashboardAuth.logout);
+app.get("/api/whoami", dashboardAuth.whoAmI);
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/agent") || req.path === "/api/health" || req.path === "/login.html") return next();
+  dashboardAuth.requireDashboardSession(req, res, next);
+});
+
 // Dashboard-facing document collections (tasks/globals board data).
 app.use("/api/tasks", buildDocRouter("tasks"));
 app.use("/api/globals", buildDocRouter("globals"));
@@ -42,6 +59,9 @@ app.use("/api/stages", stagesRouter);
 app.use("/api/review-queue", reviewQueueRouter);
 app.use("/api/plan-imports", planImportsRouter);
 app.use("/api/plan-source", planSourceRouter);
+// Windows-agent job queue (Railway deployment only) - its own auth (WINDOWS_AGENT_API_KEY +
+// replay/rate-limit guard), not the dashboard session above. See server/routes/agentJobs.js.
+app.use("/api/agent-jobs", agentJobsRouter);
 
 // Synchronisation runs recorded by the planning agent (read-only for the dashboard).
 app.get("/api/sync-runs", (req, res) => {
