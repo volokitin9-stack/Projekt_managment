@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  Reference Task Scheduler definition for plan_agent/windows_agent.py, for operators who prefer
+  `schtasks /create /xml` or Group Policy deployment over install_task_scheduler.ps1.
+
+  This is a TEMPLATE: replace every __PLACEHOLDER__ before importing it, and set the task's
+  run-as account and password yourself in Task Scheduler's UI (or `schtasks /change /tn ... /ru
+  ... /rp ...`) after import - a password is deliberately not part of this file.
+
+  A <Task> action has no field for environment variables, unlike install_task_scheduler.ps1
+  (which sets them at Machine scope before registering the task). Using this XML directly, set
+  every variable from windows_agent.env.example yourself first, e.g. for each line:
+  `setx VARNAME "value" /M` (run as Administrator, then sign out/in or reboot once before the
+  task's first run so the new machine-scope variables are visible to it).
+
+  Equivalent to what install_task_scheduler.ps1 configures: run at startup, run whether the user
+  is logged on or not, restart on failure, no execution time limit, no visible window.
+-->
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Штурман Windows agent: polls the Railway job queue and runs plan_agent against the corporate Excel workbook. See docs/RAILWAY_DEPLOYMENT.md.</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+    </BootTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>__SERVICE_ACCOUNT__</UserId>
+      <LogonType>Password</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>999</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>__PYTHON_EXE__</Command>
+      <Arguments>-m plan_agent.windows_agent</Arguments>
+      <WorkingDirectory>__PROJECT_ROOT__</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

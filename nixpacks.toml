@@ -1,0 +1,17 @@
+# Railway build config (server/index.js only — see docs/RAILWAY_DEPLOYMENT.md).
+#
+# This repo also has requirements.txt (the plan_agent Python package), which Nixpacks' own
+# auto-detection could mistake for the primary app or try to build alongside Node. Railway never
+# needs Python: in the remote_agent topology this service is deployed under, the corporate Excel
+# file is read and plan_agent is run entirely on the Windows laptop
+# (plan_agent/windows_agent.py) — this service only ever receives an already-produced --json
+# report over HTTPS. Pinning the Node-only build here keeps the Railway build fast and avoids that
+# ambiguity; it has no effect on the Windows laptop, which never reads this file.
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm ci --omit=dev"]
+
+[start]
+cmd = "npm start"
