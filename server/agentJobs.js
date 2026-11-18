@@ -88,11 +88,11 @@ function enqueue({ type = "check", trigger = "manual", scheduledDate = null, sch
  *  approval path) - called while the *previous* job is still technically "running", so it must skip
  *  enqueue()'s active-job guard (that guard is for external callers like the «Обновить» button, not
  *  for the server's own pipeline chaining one job into the next under the same held lock). */
-function enqueueChained({ type, trigger, requestedBy = null, versionId = null, month = null } = {}) {
+function enqueueChained({ type, trigger, requestedBy = null, versionId = null, month = null, fingerprint = null } = {}) {
   return store.tx((s) => {
     const job = {
       id: uuidv4(), type, trigger, scheduled_date: null, scheduled_for: null,
-      force: true, requested_by: requestedBy, version_id: versionId, month,
+      force: true, requested_by: requestedBy, version_id: versionId, month, fingerprint,
       status: "queued", created_at: nowIso(), updated_at: nowIso(),
       claimed_at: null, lease_expires_at: null, heartbeat_at: null,
       attempts: 0, result: null, error: null

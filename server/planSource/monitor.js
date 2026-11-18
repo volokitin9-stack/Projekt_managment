@@ -552,11 +552,16 @@ async function applyRemoteSync({ versionId, syncJson, by, autoSafe }) {
 }
 
 /** A human clicked "approve" in «Импорт плана» for a remote-agent-sourced version: the laptop must
- *  run the approve+sync itself (it still has - or can re-read - the real file; Railway never does). */
+ *  run the approve+sync itself (it still has - or can re-read - the real file; Railway never does).
+ *  The mapping-approval step itself (plan_agent's own fingerprint-bound proposal store) only ever
+ *  makes sense on the machine that holds that state, i.e. the laptop - so the fingerprint travels
+ *  on the job and plan_agent/windows_agent.py runs `plan_agent approve` before `sync`, exactly as
+ *  runAgent()'s local, non-auto-safe path already does (server/routes/planImports.js). */
 function enqueueRemoteApproval(version, by) {
   if (!imports.tryLock("plan_source:approve")) return { status: "busy", owner: imports.jobs.owner };
+  const imp = imports.getImport(version.import_id);
   const { job } = agentJobs.enqueueChained({ type: "sync", trigger: "approve", requestedBy: by,
-    versionId: version.id, month: version.plan_month });
+    versionId: version.id, month: version.plan_month, fingerprint: (imp && imp.fingerprint) || null });
   setState({ running: { started_at: nowIso(), trigger: "approve", phase: "await_agent_sync", job_id: job.id } });
   logEvent("info", "job_queued", `задача утверждения ${job.id} поставлена в очередь для агента ноутбука`, { job_id: job.id, version_id: version.id });
   return { status: "queued", job };
