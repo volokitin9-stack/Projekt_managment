@@ -32,6 +32,7 @@ def test_migrate_unit_scenarios(tmp_path):
         "corrupted_source_safe_fail": True,
         "missing_sections_safe_fail": True,
         "refuses_while_locked": True,
+        "legacy_missing_optional_collections_backfilled": True,
     }
 
 

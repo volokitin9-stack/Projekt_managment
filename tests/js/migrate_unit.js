@@ -6,7 +6,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
-const { runStagingMigrationIfRequested } = require("../../server/migrate");
+const { runStagingMigrationIfRequested, REQUIRED_COLLECTIONS, OPTIONAL_COLLECTIONS } = require("../../server/migrate");
 
 const [scratch] = process.argv.slice(2);
 const results = {};
@@ -140,7 +140,7 @@ let successTarget;
 
   // same for a well-formed JSON file that is missing required sections.
   const sourceJson2 = buildStaging(fresh("staging-missing-section"), { json: { meta: { format: "shturman-json" } } });
-  assert.throws(() => runStagingMigrationIfRequested(targetEnv(target, sourceJson2)), /missing expected section/);
+  assert.throws(() => runStagingMigrationIfRequested(targetEnv(target, sourceJson2)), /missing required legacy section/);
   results.missing_sections_safe_fail = true;
 }
 
@@ -158,6 +158,35 @@ let successTarget;
   const sourceJson = buildStaging(fresh("staging-locked"), { json: emptyShturman() });
   assert.throws(() => runStagingMigrationIfRequested(targetEnv(target, sourceJson)), /in use by another/);
   results.refuses_while_locked = true;
+}
+
+// 7. a real legacy export: has every REQUIRED_COLLECTIONS section (the original JSON-storage
+//    format) but predates every later-added OPTIONAL_COLLECTIONS section, agent_jobs included -
+//    it must migrate successfully, with every missing optional section backfilled to [], and
+//    every existing record/field preserved exactly as it was in the legacy file.
+{
+  const target = fresh("legacy-no-agent-jobs");
+  const staging = fresh("staging-legacy");
+  const legacy = { meta: { format: "shturman-json", schema_version: 1 } };
+  REQUIRED_COLLECTIONS.forEach((c) => { legacy[c] = []; });
+  legacy.projects = [{ id: "legacy-proj-1", name: "Pre-Railway project", custom_field: "must survive" }];
+  // Deliberately does NOT set any OPTIONAL_COLLECTIONS key (agent_jobs, plan_source_versions,
+  // plan_source_events, plan_source_runs) - this is the exact shape of the real staged database.
+  OPTIONAL_COLLECTIONS.forEach((c) => assert.ok(!(c in legacy), `test setup bug: ${c} should be absent`));
+
+  const sourceJson = buildStaging(staging, { json: legacy });
+  const r = runStagingMigrationIfRequested(targetEnv(target, sourceJson));
+  assert.strictEqual(r.ran, true, "a legacy export missing only optional collections must migrate, not be rejected");
+
+  const targetDataDir = targetEnv(target, sourceJson).DATA_DIR;
+  const written = JSON.parse(fs.readFileSync(path.join(targetDataDir, "shturman.json"), "utf-8"));
+  OPTIONAL_COLLECTIONS.forEach((c) => {
+    assert.ok(Array.isArray(written[c]), `${c} must be backfilled to an empty array`);
+    assert.strictEqual(written[c].length, 0);
+  });
+  assert.deepStrictEqual(written.projects, legacy.projects, "existing records/fields must be preserved unchanged");
+  assert.strictEqual(r.info.record_counts.agent_jobs, 0);
+  results.legacy_missing_optional_collections_backfilled = true;
 }
 
 console.log(JSON.stringify(results));

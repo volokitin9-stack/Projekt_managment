@@ -23,6 +23,17 @@ const COLLECTIONS = ["stages", "docs", "projects", "project_activities", "projec
   "agent_events", "review_queue", "sync_runs", "plan_imports", "plan_source_versions", "plan_source_events",
   "plan_source_runs", "agent_jobs"];
 
+// REQUIRED_COLLECTIONS: present since the original JSON-storage format (server/store.js @ 76fd8f8) -
+// a staged export missing one of these is not a valid Штурман database and must be rejected.
+// Everything else in COLLECTIONS was added later, each time "without a format change: missing =
+// empty" (store.js's own convention - see its loadState, which already defaults any missing
+// collection to []). A staged export from before one of those additions is still a perfectly
+// valid legacy database; it just predates that collection. agent_jobs, for instance, only exists
+// since the Railway job-queue work (65d386d) and is absent from every pre-Railway Windows export.
+const REQUIRED_COLLECTIONS = ["stages", "docs", "projects", "project_activities", "project_history",
+  "project_files", "agent_events", "review_queue", "sync_runs", "plan_imports"];
+const OPTIONAL_COLLECTIONS = COLLECTIONS.filter((c) => !REQUIRED_COLLECTIONS.includes(c));
+
 const SKIP_NAMES = new Set([".shturman.lock"]); // never copy a lock file from staging into the live install
 function shouldSkip(name) {
   return SKIP_NAMES.has(name) || /\.tmp-/.test(name) || /\.env$/i.test(name) || /secret|credential/i.test(name);
@@ -91,9 +102,21 @@ function validateStagedJson(sourceJson) {
   if (!parsed.meta || parsed.meta.format !== "shturman-json") {
     throw new Error(`staged source ${sourceJson} is not a Штурман data file (meta.format mismatch)`);
   }
-  const missing = COLLECTIONS.filter((c) => !Array.isArray(parsed[c]));
+  const missing = REQUIRED_COLLECTIONS.filter((c) => !Array.isArray(parsed[c]));
   if (missing.length) {
-    throw new Error(`staged source ${sourceJson} is missing expected section(s): ${missing.join(", ")}`);
+    throw new Error(`staged source ${sourceJson} is missing required legacy section(s): ${missing.join(", ")}`);
+  }
+  // Collections introduced after this export was taken: initialize to empty, leave everything
+  // else in the parsed object (including every existing record and field) exactly as read.
+  const backfilled = [];
+  OPTIONAL_COLLECTIONS.forEach((c) => {
+    if (!Array.isArray(parsed[c])) {
+      parsed[c] = [];
+      backfilled.push(c);
+    }
+  });
+  if (backfilled.length) {
+    console.log(`[migrate] staged source predates these collections - initializing empty: ${backfilled.join(", ")}`); // eslint-disable-line no-console
   }
   return parsed;
 }
@@ -203,4 +226,7 @@ function runStagingMigrationIfRequested(env = process.env) {
   return { ran: true, info };
 }
 
-module.exports = { runStagingMigrationIfRequested, resolveTargetPaths, resolveStagingPaths, validateStagedJson, COLLECTIONS };
+module.exports = {
+  runStagingMigrationIfRequested, resolveTargetPaths, resolveStagingPaths, validateStagedJson,
+  COLLECTIONS, REQUIRED_COLLECTIONS, OPTIONAL_COLLECTIONS
+};
