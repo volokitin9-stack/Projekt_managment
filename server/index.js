@@ -2,6 +2,16 @@
 
 require("./env");   // .env from the project folder, backslashes kept literally
 
+// Must run before ./seed (or anything else that touches ./store) is required: store.js takes the
+// data-dir lock and loads/creates shturman.json as a side effect of being required, so a staged
+// database has to be swapped in first or that require would load/lock the pre-migration file.
+try {
+  require("./migrate").runStagingMigrationIfRequested();
+} catch (e) {
+  console.error(`[migrate] staging migration failed - server will not start: ${e.message}`);
+  process.exit(1);
+}
+
 const path = require("path");
 const express = require("express");
 const cors = require("cors");

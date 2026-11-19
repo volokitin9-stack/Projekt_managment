@@ -136,6 +136,71 @@ manual stage overrides, full `project_history`, effective priority, workload/`pr
 review queue items, plan import/version history, and photo/attachment references (the files
 themselves move with `uploads/`). Comments live in `project_history`/`docs` the same way.
 
+### Automated one-time migration (an already-staged export)
+
+If an export has already been uploaded and extracted onto the Railway volume (e.g. to
+`/data/migration-staging/extracted/data/shturman.json`, with `uploads/` and/or `plan-imports/` as
+siblings of that `data/` folder - the layout `scripts/snapshot_data.js` itself produces), `server/migrate.js`
+can fold it into the live database automatically, once, on the next boot, instead of a manual copy.
+
+**It never touches `/data` unless you explicitly ask it to.** The flag below is read before
+anything else is required (including `server/store.js`, which would otherwise create/lock
+`shturman.json` as a side effect of merely being loaded) - with the flag unset, `server/migrate.js`
+makes zero filesystem calls and the server boots exactly as it always has.
+
+**Enable it once, then disable it:**
+1. In the Railway service's variables, set `RAILWAY_MIGRATE_FROM_STAGING=1`.
+   (Optional: `MIGRATION_STAGING_SOURCE_JSON` if the staged `shturman.json` is not at the default
+   path above.)
+2. Deploy/restart once. Watch the deploy log for lines starting `[migrate]`. On success the log
+   ends with `[migrate] done. {...record counts...}` and the server then starts normally.
+3. **Immediately unset `RAILWAY_MIGRATE_FROM_STAGING`** (delete the variable, or set it to `0`)
+   and redeploy, so a later, unrelated restart can never re-trigger it.
+   (Belt-and-suspenders: a completion marker at `<DATA_DIR>/.migration-from-staging-complete.json`
+   makes every run after the first a no-op even if the flag is accidentally left set - but treat
+   that as a safety net, not a reason to leave the flag on.)
+
+What it does, in order, on that one boot: parses and validates the staged `shturman.json` (correct
+`meta.format` and all expected sections present - fails loudly and leaves the live database
+completely untouched if not); refuses if another process currently holds the target's
+`.shturman.lock`; backs up whatever is currently at `DATA_DIR`/`UPLOADS_DIR`/`PLAN_IMPORT_DIR` (if
+anything) to `<DATA_DIR>/migration-backups/<timestamp>/`; copies the staged uploads and
+plan-imports, explicitly skipping any `.shturman.lock` found in the staged export so a stale lock
+can never leak into the live install; and only as the very last step, atomically replaces
+`shturman.json` itself (temp file, fsync, rename - the same pattern `store.js` uses for every
+write) so that a failure at any earlier step leaves the previous live database exactly as it was.
+The original staged export under `migration-staging/` is never modified or deleted - re-running
+the migration (e.g. after deleting the completion marker, see rollback below) can always start
+from it again. Railway environment variables and credentials (`AGENT_API_KEY`,
+`WINDOWS_AGENT_API_KEY`, `DASHBOARD_*`, etc.) are never read, written, or copied by this process.
+
+**Rollback** (undo a migration that completed but turned out to be wrong):
+```bash
+# find the backup folder the migration log reported, e.g.:
+#   [migrate] backing up current data to /data/migration-backups/2026-11-19T04-50-09-693Z
+cp /data/migration-backups/<timestamp>/data/shturman.json /data/shturman.json
+rm -rf /data/uploads && cp -r /data/migration-backups/<timestamp>/uploads /data/uploads
+rm -rf /data/plan-imports && cp -r /data/migration-backups/<timestamp>/plan-imports /data/plan-imports
+rm /data/.migration-from-staging-complete.json   # also delete this to allow a future re-run
+```
+(Stop the server first - the same single-writer lock that protects normal operation applies here.)
+
+**Force a re-run** (different from rollback: re-copies the staged export again, e.g. after fixing
+a bad staging export) is the same idea in reverse - delete just the marker and leave the flag set
+for one more deploy:
+```bash
+rm /data/.migration-from-staging-complete.json
+# RAILWAY_MIGRATE_FROM_STAGING=1 still set -> redeploy -> unset it again per step 3 above
+```
+
+**Validation command** (run after either path, before trusting the result):
+```bash
+node scripts/verify_migration.js \
+  /data/migration-staging/extracted/data /data/migration-staging/extracted/uploads \
+  /data /data/uploads
+```
+Must print `RESULT: OK` (or only `[info]` lines - see step 4 of the manual procedure above).
+
 ## Windows agent: setup and startup
 
 Full detail in `windows/README.md` and `windows/windows_agent.env.example`; summary:
