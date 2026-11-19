@@ -9,11 +9,25 @@ const monitor = require("../planSource/monitor");
 const scheduler = require("../planSource/scheduler");
 const { getPython } = require("../pythonResolver");
 
-function fullStatus() {
+// In remote_agent mode the Excel file is read and the plan_agent CLI runs entirely on the Windows
+// laptop (server/agentJobs.js / server/routes/agentJobs.js) - this server never spawns Python at
+// all, so whether a local interpreter happens to resolve here says nothing about whether the
+// board can update. Reporting resolvePython()'s result in that mode is worse than useless: a
+// Railway container normally has no Python installed, which would show as a red "Python not
+// found" error for a deployment that is working exactly as intended. Report "not applicable"
+// instead, without even trying to resolve one.
+function pythonStatus() {
+  if (monitor.isRemoteMode()) {
+    return { ok: true, not_applicable: true, executable: null, source: null, error: null, warnings: [], attempted: [],
+      reason: "PLAN_SOURCE_TYPE=remote_agent: план обрабатывается на ноутбуке агента, Python на этом сервере не требуется" };
+  }
   const py = getPython();
-  return Object.assign(monitor.status(), { schedule: scheduler.status(),
-    python: { ok: py.ok, executable: py.executable || null, source: py.source || null, error: py.error || null,
-      warnings: py.warnings || [], attempted: py.attempted || [] } });
+  return { ok: py.ok, executable: py.executable || null, source: py.source || null, error: py.error || null,
+    warnings: py.warnings || [], attempted: py.attempted || [] };
+}
+
+function fullStatus() {
+  return Object.assign(monitor.status(), { schedule: scheduler.status(), python: pythonStatus() });
 }
 
 // Button state and message for the board («Обновить»).

@@ -8,6 +8,20 @@ Nothing is written to the dashboard.  The agent-authentication check sends an
 EMPTY create request, which the Штурман API rejects with 400 "Validation
 failed" after authenticating (401 = wrong key, 501 = server has no key).
 
+Every check below talks ONLY to the dashboard page, /api/health and the
+agent-facing /api/agent/* endpoints (Authorization: Bearer <api_key>) -
+never the dashboard's own data endpoints (/api/stages, /api/projects), which
+a Railway deployment gates behind the human operator's browser session
+(DASHBOARD_USERNAME/PASSWORD, see server/dashboardAuth.js). This script has
+no browser session and never acquires one; /api/agent/* is deliberately
+excluded from that session check (server/index.js) precisely so an
+unattended agent like this one can always reach it with just its key,
+Railway or not. /api/stages is still tried as a secondary, unauthenticated
+signal - purely to tell "not a Штурман deployment at all" apart from
+"Штурман, but the configured key is wrong", on a deployment old enough or
+configured such that even /api/agent/schema is unreachable; it is never
+required for the checks below to pass.
+
 A real synchronisation is refused (see service.PlanAgent) until a check for the
 same API URL has status "ready": dashboard page reachable, API healthy, agent
 authenticated, not a local/temporary host, data confirmed to survive a restart,
@@ -118,42 +132,65 @@ def verify(api_url: Optional[str], api_key: Optional[str], state_dir: Path, dash
     if c.status == "fail":
         return _finish(result, state_dir, base)
 
-    # 3. detect API flavour (Штурман serves the configurable workflow stages)
+    # 3. detect API flavour. Primary signal: the agent-protected schema endpoint - it is never
+    # gated by the dashboard's own session auth (Railway or not), so a correct key always reaches
+    # it. Secondary/fallback signal: the public /api/stages, tried only when the primary call
+    # itself could not identify the API (e.g. it is unreachable, or the key is wrong) - purely so
+    # a wrong-key report still says "Штурман, bad key" rather than "unknown API", on a deployment
+    # old enough to not expose agent/schema at all. Never required for the checks below.
     flavor = None
+    schema = None
+    agent_hdr = {"Authorization": f"Bearer {api_key or ''}"}
     try:
-        r = get("/api/stages")
-        if r.status_code == 200 and isinstance(r.json(), list):
-            flavor = "shturman"
-            result["stages"] = [x.get("key") for x in r.json()]
+        r = get("/api/agent/schema", headers=agent_hdr)
+        if r.status_code == 200:
+            body = r.json()
+            if isinstance(body, dict) and body.get("app") == "shturman":
+                flavor, schema = "shturman", body
     except (requests.RequestException, ValueError):
         pass
+    if flavor is None:
+        try:
+            r = get("/api/stages")
+            if r.status_code == 200 and isinstance(r.json(), list):
+                flavor = "shturman"
+                result["stages"] = [x.get("key") for x in r.json()]
+        except (requests.RequestException, ValueError):
+            pass
+    if schema:
+        result["stages"] = schema.get("stages") or result.get("stages")
     result["flavor"] = flavor
 
-    # 4. agent authentication (no write)
+    # 4. agent authentication (no write). Tried regardless of whether flavour detection above
+    # found the API: it is itself talking to an agent-protected endpoint, so it authenticates
+    # correctly on a Railway deployment even when flavour detection's fallback (/api/stages) is
+    # blocked by the dashboard session - that used to make this check unreachable there.
     c = Check("agent authentication")
     try:
-        hdr = {"Authorization": f"Bearer {api_key or ''}", "Content-Type": "application/json"}
-        if flavor == "shturman":
-            r = s.post(base + "/api/agent/projects", data="{}", headers=hdr, timeout=timeout)
-            if r.status_code == 400:
-                c.set("pass", "authenticated (empty probe rejected with 400 validation error; nothing written)")
-            elif r.status_code == 401:
-                c.set("fail", "key rejected (401) - PM_AGENT_API_KEY does not match the server's AGENT_API_KEY")
-            elif r.status_code == 501:
-                c.set("fail", "the server has no AGENT_API_KEY configured (501)")
-            else:
-                c.set("fail", f"unexpected HTTP {r.status_code} - the probe may have been accepted; check the server")
-        else:
+        hdr = dict(agent_hdr, **{"Content-Type": "application/json"})
+        r = s.post(base + "/api/agent/projects", data="{}", headers=hdr, timeout=timeout)
+        if r.status_code == 400:
+            c.set("pass", "authenticated (empty probe rejected with 400 validation error; nothing written)")
+            flavor = flavor or "shturman"  # this exact validation-error shape only comes from Штурман
+        elif r.status_code == 401:
+            c.set("fail", "key rejected (401) - PM_AGENT_API_KEY does not match the server's AGENT_API_KEY")
+        elif r.status_code == 501:
+            c.set("fail", "the server has no AGENT_API_KEY configured (501)")
+        elif flavor is None:
             c.set("fail", "unknown API: the Штурман dashboard API was not detected")
+        else:
+            c.set("fail", f"unexpected HTTP {r.status_code} - the probe may have been accepted; check the server")
     except requests.RequestException as exc:
         c.set("fail", f"request failed ({type(exc).__name__})")
     checks.append(c)
+    result["flavor"] = flavor
 
-    # 5. project data + persistence snapshot
+    # 5. project data + persistence snapshot - via the agent-protected read endpoint, for the same
+    # reason as check 3: /api/projects is a dashboard-session-gated endpoint on Railway.
     c = Check("database contents")
     projects = None
     try:
-        r = get("/api/projects")
+        r = get("/api/agent/projects", headers=agent_hdr)
         body = r.json()
         projects = body if isinstance(body, list) else body.get("projects")
         seeds = sum(1 for p in projects if p.get("source") == "seed")
@@ -202,15 +239,19 @@ def verify(api_url: Optional[str], api_key: Optional[str], state_dir: Path, dash
         c.set("pass", f"remote host {host}")
     checks.append(c)
 
-    # 7. agent <-> API compatibility
+    # 7. agent <-> API compatibility - reuses the schema already fetched in check 3 when that
+    # succeeded; re-fetched here only if flavour was instead confirmed via a fallback signal
+    # (the /api/stages path, or the check-4 validation-error shape) that does not carry a schema.
     c = Check("agent payload compatibility")
     if flavor == "shturman":
-        try:
-            r = get("/api/agent/schema", headers={"Authorization": f"Bearer {api_key or ''}"})
-            sch = r.json() if r.status_code == 200 else {}
-        except (requests.RequestException, ValueError):
-            sch = {}
-        missing = REQUIRED_SUPPORT - set(sch.get("supports") or [])
+        sch = schema
+        if sch is None:
+            try:
+                r = get("/api/agent/schema", headers=agent_hdr)
+                sch = r.json() if r.status_code == 200 else {}
+            except (requests.RequestException, ValueError):
+                sch = {}
+        missing = REQUIRED_SUPPORT - set((sch or {}).get("supports") or [])
         if sch and not missing:
             c.set("pass", f"integrated Штурман API (schema v{sch.get('schema_version')}): categories, activities, "
                           "history, review queue and sync runs supported")

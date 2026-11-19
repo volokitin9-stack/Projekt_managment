@@ -8,9 +8,23 @@ import pytest
 from plan_agent.deployment import load_status, verify
 
 KEY = "k-123"
+# The real /api/agent/schema's "supports" list (server/routes/agent.js) - a build with the full
+# planning integration advertises all of these.
+FULL_SUPPORTS = ["expected_version", "duplicate_detection", "field_sources", "history", "sync_runs", "activities",
+                 "review_queue", "stage_transitions", "telegram_photos", "create_only", "workflow", "review_severity"]
 
 
-def fake_shturman(projects):
+def fake_shturman(projects, supports=None, gate_dashboard_endpoints=False):
+    """A fake Штурман backend.
+
+    gate_dashboard_endpoints simulates a Railway deployment with DASHBOARD_USERNAME/PASSWORD set:
+    /api/stages and /api/projects (dashboard-session-gated, server/dashboardAuth.js) always 401
+    without a session, which this script never has - only /api/agent/* (Authorization: Bearer,
+    never covered by that session check) works. The checks under test must still pass in this mode.
+    """
+    def agent_ok(handler):
+        return handler.headers.get("Authorization") == f"Bearer {KEY}"
+
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
@@ -33,17 +47,34 @@ def fake_shturman(projects):
             elif self.path == "/api/health":
                 self._j(200, {"ok": True})
             elif self.path == "/api/stages":
-                self._j(200, [{"key": "scanning"}, {"key": "prototype"}])
+                if gate_dashboard_endpoints:
+                    self._j(401, {"error": "Not authenticated. POST /api/login first."})
+                else:
+                    self._j(200, [{"key": "scanning"}, {"key": "prototype"}])
             elif self.path == "/api/projects":
-                self._j(200, projects)
+                if gate_dashboard_endpoints:
+                    self._j(401, {"error": "Not authenticated. POST /api/login first."})
+                else:
+                    self._j(200, projects)
+            elif self.path == "/api/agent/schema":
+                if not agent_ok(self):
+                    return self._j(401, {"error": "Missing or invalid Authorization: Bearer <AGENT_API_KEY> header"})
+                self._j(200, {"version": 2, "app": "shturman", "schema_version": 3,
+                               "stages": ["scanning", "prototype"], "supports": supports or []})
+            elif self.path == "/api/agent/projects":
+                if not agent_ok(self):
+                    return self._j(401, {"error": "Missing or invalid Authorization: Bearer <AGENT_API_KEY> header"})
+                self._j(200, {"projects": projects})
             else:
                 self._j(404, {"error": "Not found"})
 
         def do_POST(self):
             self.rfile.read(int(self.headers.get("Content-Length") or 0))
-            if self.headers.get("Authorization") != f"Bearer {KEY}":
-                return self._j(401, {"error": "bad key"})
-            self._j(400, {"error": "Validation failed"})
+            if self.path == "/api/agent/projects":
+                if not agent_ok(self):
+                    return self._j(401, {"error": "bad key"})
+                return self._j(400, {"error": "Validation failed"})
+            self._j(404, {"error": "Not found"})
 
     srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -100,6 +131,9 @@ def test_sync_blocked_until_deployment_verified(backend, make_agent, fixtures_di
     out = agent.receive(fixtures_dir / "engineering_plan_v1.xlsx", "cli")
     assert out.report["mode"] == "dry_run" and out.status == "Dry run - deployment not verified"
     assert any("SYNC BLOCKED" in n for n in out.report["notes"])
+    # the deployment-verification failure only downgrades sync to dry_run - it must not suppress
+    # the analysis itself: the report/rendered text still reflect the real, completed comparison.
+    assert out.text and out.report.get("projects") and "counts" in out.report
     res = verify(backend, "secret-test-key", agent.settings.state_dir)
     c = by(res)
     assert res["flavor"] == "shturman"
@@ -107,3 +141,29 @@ def test_sync_blocked_until_deployment_verified(backend, make_agent, fixtures_di
     assert c["agent payload compatibility"]["status"] == "pass"           # integrated Штурман API
     assert c["production host"]["status"] == "fail" and not res["ready"]  # local test instance
     assert load_status(agent.settings.state_dir, backend)["ready"] is False
+
+
+def test_railway_dashboard_session_auth_does_not_block_detection(tmp_path):
+    """The actual bug report this guards against: a Railway deployment with DASHBOARD_USERNAME/
+    PASSWORD set gates /api/stages and /api/projects behind a human operator's browser session
+    (server/dashboardAuth.js) that this unattended script never has and never acquires. Flavour
+    detection, agent authentication and the project/persistence checks must all still work, using
+    only the agent-protected /api/agent/* endpoints - none of them may depend on those two
+    session-gated endpoints to pass."""
+    data = [{"id": "a", "created_at": "t1", "source": "agent"}]
+    srv = fake_shturman(data, supports=FULL_SUPPORTS, gate_dashboard_endpoints=True)
+    try:
+        url = f"http://127.0.0.1:{srv.server_address[1]}"
+        res = verify(url, KEY, tmp_path)
+        c = by(res)
+        assert res["flavor"] == "shturman", "flavour detection must not depend on the session-gated /api/stages"
+        assert c["agent authentication"]["status"] == "pass"
+        assert c["database contents"]["status"] == "pass"
+        assert c["persistent database (survives restart)"]["status"] == "pending"
+        assert c["agent payload compatibility"]["status"] == "pass"
+        # a wrong key must still be reported correctly even though neither session-gated endpoint helps
+        bad = by(verify(url, "wrong", tmp_path))
+        assert bad["agent authentication"]["status"] == "fail"
+        assert "key rejected" in bad["agent authentication"]["detail"]
+    finally:
+        srv.shutdown()

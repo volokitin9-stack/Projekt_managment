@@ -104,6 +104,10 @@ def test_status_shows_configuration_without_secrets(srv, inbox):
     assert st["configured"] and st["source"] == {"type": "local", "location": str(inbox), "pattern": None}
     assert st["auto_sync_enabled"] is False and st["current_month"] == "2026-11" and st["timezone"] == "Asia/Yekaterinburg"
     assert "secret-test-key" not in json.dumps(st)
+    # PLAN_SOURCE_TYPE=local actually runs plan_agent on this server, so (unlike remote_agent -
+    # see tests/test_remote_agent.py) a real Python resolution is reported, not "not applicable".
+    assert st["python"].get("not_applicable") is not True
+    assert isinstance(st["python"]["ok"], bool)
 
 
 # ---------------------------------------------------------------- manual mode (A)

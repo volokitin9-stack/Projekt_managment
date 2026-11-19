@@ -70,6 +70,22 @@ SYNC_OK = {"type": "sync", "syncJson": {"status": "Completed", "run_id": "r2", "
                                         "held_for_review": 0}}
 
 
+# --------------------------------------------------------------------------- Python status
+
+def test_status_reports_python_not_applicable_in_remote_agent_mode(srv):
+    """In this mode the Excel file is read and plan_agent runs entirely on the Windows laptop
+    (this test file's own module docstring) - this server never spawns Python, so whether one
+    happens to be resolvable on the Railway container is meaningless. Before the fix,
+    /api/plan-source/status always reported server/pythonResolver.js's result regardless of mode,
+    which on a real Railway container (no Python installed) rendered as a red "Python not found"
+    error for a deployment that was working exactly as intended."""
+    st = status(srv)
+    assert st["python"]["not_applicable"] is True
+    assert st["python"]["ok"] is True
+    assert st["python"]["error"] is None
+    assert st["python"]["executable"] is None
+
+
 # --------------------------------------------------------------------------- auth guard
 
 def test_agent_jobs_require_auth(srv):
