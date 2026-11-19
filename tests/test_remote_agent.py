@@ -8,12 +8,13 @@ takes analyze/sync reports straight from the request body, exactly as the real W
 submit them after running the unmodified plan_agent CLI locally - so these tests exercise the same
 server-side code a real laptop drives, without needing one.
 """
+import json
 import time
 
 import pytest
 import requests
 
-from conftest import ShturmanServer
+from conftest import ROOT, ShturmanServer
 
 WINKEY = "winagent-secret-test-key"
 
@@ -84,6 +85,85 @@ def test_status_reports_python_not_applicable_in_remote_agent_mode(srv):
     assert st["python"]["ok"] is True
     assert st["python"]["error"] is None
     assert st["python"]["executable"] is None
+
+
+# --------------------------------------------------------------------------- plan_source.status lifecycle
+
+def test_dry_run_check_works_in_remote_agent_mode(srv):
+    """The reported bug: POST /api/plan-source/check (the "Пробный анализ" dry-run button) used to
+    call checkInner() unconditionally, regardless of PLAN_SOURCE_TYPE - reaching
+    createSource("remote_agent", ...), which has no such adapter (server/planSource/adapters/
+    index.js only registers "local"), and failing with "неизвестный PLAN_SOURCE_TYPE
+    «remote_agent» (доступно: local)". monitor.check() must now route this to the job queue in
+    remote_agent mode exactly like the "Обновить" button and the 09:00 scheduler already did."""
+    r = requests.post(srv.url + "/api/plan-source/check", json={"dry_run": True}, timeout=10)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["result"]["status"] == "queued"
+    assert body["result"]["job"]["type"] == "check"
+    st = status(srv)
+    assert st["status"] == "awaiting_agent"
+    assert "неизвестный PLAN_SOURCE_TYPE" not in json.dumps(st)
+    assert st["remote_agent"]["active_job"]["id"] == body["result"]["job"]["id"]
+
+
+def test_manual_approval_mode_is_not_reported_as_an_error(srv):
+    """Disabled auto-sync (require_approval's default, manual mode) is a normal, intended
+    configuration - not a problem. awaiting_approval after a confirmed analysis must be a distinct,
+    non-error status and must carry no error, whether or not auto-sync happens to be on."""
+    assert status(srv)["auto_sync_enabled"] is False  # the fixture's own default: manual mode
+    update(srv)
+    job = next_job(srv)
+    resp = submit_result(srv, job["id"], ANALYZE_READY)
+    assert resp.status_code == 200, resp.text
+    st = status(srv)
+    assert st["status"] == "awaiting_approval" and st["status"] != "error"
+    assert st["last_error"] is None
+    # the frontend must never render awaiting_approval with the "err" (red) class
+    html = (ROOT / "public" / "index.html").read_text()
+    assert 'st.status === "error" || st.status === "failed" || st.status === "blocked"' in html
+
+
+def test_stale_error_does_not_mask_a_confirmed_awaiting_approval_outcome(srv):
+    """Regression for the actual reported scenario: the Windows agent successfully completed its
+    analysis job (status correctly reached "awaiting_approval", with current_version_id and
+    pending_import_id set), but a LATER, unrelated failed check (e.g. the dry-run bug above, before
+    its fix) left plan_source.status/last_error/last_error_code pointing at a dead error - without
+    touching current_version_id/pending_import_id, which still correctly named the real pending
+    import. The dashboard must show the real, already-confirmed outcome, not the stale error, and
+    must never lose track of the pending import in the process."""
+    r = update(srv)
+    assert r["ui"]["state"] == "busy" and r["run"]["job_id"], r
+    job = next_job(srv)
+    resp = submit_result(srv, job["id"], ANALYZE_READY)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["result"]["status"] == "awaiting_approval"
+    before = status(srv)
+    assert before["status"] == "awaiting_approval" and before["last_error"] is None
+    pending_import_id, version_id = before["pending_import_id"], before["current_version"]["id"]
+    assert pending_import_id and version_id
+
+    srv.stop()
+    data = json.loads(srv.data_file.read_text())
+    assert data["plan_source"]["current_version_id"] == version_id          # sanity: real state, not test setup drift
+    assert data["plan_source"]["pending_import_id"] == pending_import_id
+    data["plan_source"]["status"] = "error"
+    data["plan_source"]["last_error"] = "неизвестный PLAN_SOURCE_TYPE «remote_agent» (доступно: local)"
+    data["plan_source"]["last_error_code"] = "not_configured"
+    srv.data_file.write_text(json.dumps(data))
+    srv.start()
+
+    st = status(srv)
+    assert st["status"] == "awaiting_approval"
+    assert st["last_error"] is None
+    assert st["pending_import_id"] == pending_import_id, "the pending import must never be lost while recovering"
+    assert st["current_version"]["id"] == version_id
+    assert st["current_version"]["status"] == "awaiting_approval"
+
+    srv.stop()
+    cleaned = json.loads(srv.data_file.read_text())
+    assert cleaned["plan_source"].get("last_error_code") is None
+    srv.start()  # leave it running for the fixture's own teardown
 
 
 # --------------------------------------------------------------------------- auth guard

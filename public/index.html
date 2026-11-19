@@ -2271,7 +2271,10 @@
   var engSource = null, engSourcePreview = null, engSourceBusy = "";
   var ENG_SOURCE_STATUS = { not_configured:"Источник не настроен", idle:"Ожидание первой проверки", up_to_date:"Актуально",
     awaiting_approval:"Есть изменения — ожидает утверждения", blocked:"Требуется проверка файла", failed:"Файл не обработан",
-    waiting:"Файл изменяется, повторная попытка", error:"Ошибка", interrupted:"Прервано — будет повторено" };
+    waiting:"Файл изменяется, повторная попытка", error:"Ошибка", interrupted:"Прервано — будет повторено",
+    // version-level (current_version.status) values, distinct from the top-level status above:
+    analyzing:"Анализ выполняется", analyzed:"Анализ выполнен", synced:"Синхронизировано",
+    syncing:"Синхронизация выполняется", sync_failed:"Синхронизация не удалась" };
   var ENG_SOURCE_CHANGE = { "new":"Новый", update:"Изменение", review:"На проверку", duplicate:"Дубликат?", error:"Ошибка" };
   function engSourceHtml(){
     var st = engSource;
@@ -2301,6 +2304,13 @@
       row("Последняя синхронизация", st.last_sync_at ? fmtTs(st.last_sync_at) : "—") +
       (st.last_file ? row("Файл", escapeHtml(st.last_file.name)+' · SHA-256 '+escapeHtml(String(st.last_file.sha256).slice(0,12))+'…') : "") +
       row("Создано / обновлено / без изменений / на проверку", (c.new||0)+" / "+(c.updated||0)+" / "+(c.unchanged||0)+" / "+(c.review||0)) +
+      (st.remote_agent ? (function(){ var ra = st.remote_agent, ag = ra.agent||{}, job = ra.active_job;
+        var agentCls = ag.online ? "ok" : "warn";
+        return row("Ноутбук-агент (Windows)", '<span class="eng-status '+agentCls+'">'+(ag.online ? "онлайн" : "офлайн")+'</span>' +
+          (ag.last_seen_at ? ' <span style="color:var(--ink-faint);">последний раз на связи '+fmtTs(ag.last_seen_at)+'</span>' : ' <span style="color:var(--ink-faint);">ещё не выходил на связь</span>') +
+          (job ? '<div style="font-size:11px;">задача: '+escapeHtml(job.type||"")+' · '+escapeHtml(job.status||"")+'</div>' : "")); })() : "") +
+      (cv ? row("Результат анализа (текущая версия)", '<span class="eng-status '+(cv.status === "awaiting_approval" || cv.status === "synced" ? "ok" : (cv.status === "blocked" || cv.status === "failed" || cv.status === "sync_failed") ? "err" : "warn")+'">'+
+        escapeHtml(ENG_SOURCE_STATUS[cv.status]||cv.status)+'</span>' + (cv.error ? '<div style="font-size:11px;color:var(--warn);">'+escapeHtml(cv.error)+'</div>' : "")) : "") +
       (st.last_error ? row("Последняя ошибка", '<span class="eng-status err">'+escapeHtml(st.last_error)+'</span>') : "") +
       (function(){ var sc = st.schedule || {}; var tz = sc.timezone || st.timezone;
         return row("Расписание", sc.schedule_active ? ("рабочие дни (календарь "+escapeHtml(sc.work_calendar)+") в "+escapeHtml(sc.schedule_time||"—")+" "+escapeHtml(tz)+

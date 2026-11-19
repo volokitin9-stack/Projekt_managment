@@ -178,6 +178,14 @@ const PYTHON_LAUNCH_FAILURE = /Python was not found|Не удалось запу
  *            «Синхронизировать» in the import view)
  */
 async function check(opts = {}) {
+  // Single dispatch point for every caller (the manual «Обновить»/«Пробный анализ» buttons, the
+  // 09:00 scheduler, runRecorded() below): PLAN_SOURCE_TYPE=remote_agent has no local file to probe
+  // and no adapter registered for it (server/planSource/adapters/index.js only knows "local") - it
+  // is enqueued for the Windows laptop instead. Checking isRemoteMode() here, rather than relying on
+  // each caller to branch on it, is what actually fixes the bug this guards against: one caller
+  // (the «Пробный анализ» dry-run route) used to call checkInner() directly in remote_agent mode,
+  // which reached createSource("remote_agent", ...) and threw "неизвестный PLAN_SOURCE_TYPE".
+  if (isRemoteMode()) return enqueueRemoteCheck(opts);
   const ph = { check: "not_run", analysis: "not_run", sync: "not_run" };
   const r = await checkInner(opts, ph);
   r.phases = ph;
@@ -567,6 +575,12 @@ function enqueueRemoteApproval(version, by) {
   return { status: "queued", job };
 }
 
+// A version whose own status reflects a confirmed, successful outcome - set in the very same
+// transaction as plan_source.status/last_error at the moment it got there (see checkInner()'s and
+// applyRemoteAnalyze()'s setState() calls throughout this module) - is the source of truth for
+// what plan_source.status ought to say once its stale "not_configured" error (see below) is gone.
+const CONFIRMED_SUCCESS_TOP_STATUS = { awaiting_approval: "awaiting_approval", synced: "up_to_date" };
+
 /** Versions synced through «Импорт плана» directly count as synced. */
 function reconcile() {
   store.tx((s) => {
@@ -582,6 +596,21 @@ function reconcile() {
         }
       }
     });
+    // check()'s dispatch on isRemoteMode() (see its own comment) means PLAN_SOURCE_TYPE=remote_agent
+    // can no longer ever reach createSource() - checkInner(), the only place that throws
+    // last_error_code "not_configured" into plan_source, is skipped entirely in that mode. So a
+    // persisted "not_configured" error while in remote_agent mode is necessarily a stale leftover
+    // from before that fix, never a fresh report about anything happening now - unlike an "empty"/
+    // "corrupt"/etc. error, which IS always about the current check attempt and must never be
+    // second-guessed here. Clearing it only ever touches status/last_error/last_error_code: a
+    // pending import (current_version_id/pending_import_id, and the version itself) is left exactly
+    // as it is - there is no reason here for the app to touch it.
+    if (isRemoteMode() && s.plan_source.status === "error" && s.plan_source.last_error_code === "not_configured") {
+      const cur = s.plan_source.current_version_id &&
+        s.plan_source_versions.find((v) => v.id === s.plan_source.current_version_id);
+      const topStatus = cur && CONFIRMED_SUCCESS_TOP_STATUS[cur.status];
+      Object.assign(s.plan_source, { status: topStatus || "idle", last_error: null, last_error_code: null });
+    }
   });
 }
 
@@ -726,9 +755,7 @@ async function recalculate({ trigger = "manual", scheduledDate = null } = {}) {
  *  applyRemoteAnalyze/applyRemoteSync and POST /api/agent-jobs/agent/:id/result). */
 async function runRecorded({ trigger, scheduledDate = null, scheduledFor = null }) {
   const startedAt = nowIso();
-  const r = isRemoteMode()
-    ? enqueueRemoteCheck({ trigger, scheduledDate, scheduledFor })
-    : await check({ trigger });
+  const r = await check({ trigger, scheduledDate, scheduledFor });
   const v = r.version || {};
   const run = recordRun({ trigger, scheduled_date: scheduledDate, scheduled_for: scheduledFor, started_at: startedAt,
     finished_at: nowIso(), outcome: outcomeOf(r), result: r.status, phases: r.phases || null,
