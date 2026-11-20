@@ -191,12 +191,30 @@ on the test bot:
 
 ## Stage 4 — data migration (do this only after Stage 3 passes)
 
-Export the Claude Artifact's real `tasks` collection (`ArtifactData list`) and import each record
-into `/api/tasks` (`POST` with the same `id` if you want to preserve Telegram reply-linking — the
-doc store accepts a caller-supplied id), skipping anything whose `id` already exists. **Do this
-once, read-only against the Artifact, and verify counts before and after** — do not assume
-Telegram will backfill missed history once the new handler is live; it only ever sees messages
-sent after the webhook is set.
+The Claude Artifact board now has an **«Экспорт задач в JSON»** button (added directly to the
+board's action row) that downloads its entire `tasks` collection as one JSON file — exact field
+values, nothing invented or backfilled; see the file's own `export_meta` block for exactly which
+fields this artifact's data model does and doesn't have (no `description`, `priority`, `comments`,
+a `stage` distinct from `quadrant`, per-field history, or a link to an engineering-project id — the
+artifact never had those, so the export doesn't fabricate them).
+
+Import that file with `scripts/import_artifact_tasks.js`:
+
+```bash
+node scripts/import_artifact_tasks.js path/to/shturman_tasks_export.json            # dry run
+node scripts/import_artifact_tasks.js path/to/shturman_tasks_export.json --write    # import
+```
+
+Run it against the target `DATA_DIR` (e.g. `railway run`, or directly on the host with `DATA_DIR`
+pointed at the mounted volume) **with the server stopped first** — same single-writer rule as every
+other one-time script in `scripts/`. It writes directly into the `tasks` doc store (not over HTTP,
+so no dashboard-session login is needed), skips any `id` that already exists rather than
+overwriting it, and never touches any other collection. This makes it **safe to re-run**: export
+again after more tasks accumulate in the Artifact and re-run the same command — only the genuinely
+new records get added, nothing already-imported or created directly on the new board is touched or
+duplicated. **Do this read-only against the Artifact** (the export button never writes) **and
+verify record counts before and after** — do not assume Telegram will backfill missed history once
+the new handler is live; it only ever sees messages sent after the webhook is set.
 
 ## Stage 5 — cutover
 
