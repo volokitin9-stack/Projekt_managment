@@ -14,6 +14,7 @@
 
 const { v4: uuidv4 } = require("uuid");
 const store = require("./store");
+const storage = require("./storage");
 const workflowModel = require("./workflowModel");
 
 const VALID_PRIORITIES = ["critical", "high", "normal", "low"];
@@ -368,6 +369,84 @@ function allRows() {
   return store.read((s) => clone(s.projects));
 }
 
+/**
+ * Find project(s) by reliable identifiers only, in priority order: external_project_id ->
+ * article_number (normalised) -> manufacturer+vehicle_model+product_type (main projects only).
+ * Shared by the agent's telegram/photos receiver and the Telegram engineering-chat channel so
+ * both ever use exactly one matching algorithm - never guessed per caller.
+ * Returns { matches: row[], method: string|null }. `matches.length !== 1` means "no match" or
+ * "ambiguous" - callers must queue for review rather than pick one.
+ */
+function matchByIdentifiers({ external_project_id, article_number, manufacturer, vehicle_model, product_type } = {}) {
+  const rows = allRows();
+  let matches = [];
+  let method = null;
+  if (external_project_id) {
+    matches = rows.filter((r) => r.external_project_id === external_project_id);
+    method = "external_project_id";
+  }
+  if (!matches.length && article_number) {
+    const art = normKey(article_number);
+    matches = rows.filter((r) => art && normKey((r.data || {}).article_number) === art);
+    method = "article_number";
+  }
+  if (!matches.length && manufacturer && vehicle_model && product_type) {
+    const want = [manufacturer, vehicle_model, product_type].map(normKey).join("|");
+    matches = rows.filter((r) => {
+      const d = r.data || {};
+      return (r.record_category || "main_project") === "main_project" &&
+        [d.manufacturer, d.vehicle_model, d.product_type].map(normKey).join("|") === want;
+    });
+    method = "manufacturer+model+product";
+  }
+  return { matches, method };
+}
+
+/**
+ * Attach an already-received file (bytes already in memory, not tied to any particular Express
+ * request) to a project. Shared core of the agent's multipart /telegram/photos and /images routes
+ * and the Telegram engineering-chat channel, which downloads a Telegram file server-side instead
+ * of receiving multipart form data - one implementation of the file/history/idempotency logic
+ * either caller relies on.
+ *
+ * file: {buffer, originalname, mimetype, size} (the shape multer and a Telegram file download are
+ * both normalised to). meta: {source, uploadedBy, caption, isPrimary, technicalComment, eventAt,
+ * telegramMessageId, telegramChatId, telegramRef}.
+ */
+function attachProjectFile(projectId, file, meta = {}) {
+  const telegramMessageId = meta.telegramMessageId || null;
+  const telegramChatId = meta.telegramChatId || null;
+  if (telegramMessageId && telegramChatId) {
+    const existing = store.read((s) => s.project_files.find((f) => f.telegram_chat_id === String(telegramChatId) &&
+      f.telegram_message_id === String(telegramMessageId)));
+    if (existing) return { duplicate: true, id: existing.id };
+  }
+  if (meta.eventAt && Number.isNaN(Date.parse(meta.eventAt))) {
+    const err = new Error('"event_at" must be an ISO timestamp');
+    err.status = 400;
+    throw err;
+  }
+  const { storageKey } = storage.saveProjectFile(projectId, file);
+  const fileId = uuidv4();
+  const kind = file.mimetype === "application/pdf" ? "attachment" : "image";
+  const isPrimary = !!meta.isPrimary;
+  const caption = meta.caption || null;
+  store.tx((s) => {
+    if (isPrimary) s.project_files.filter((f) => f.project_id === projectId).forEach((f) => { f.is_primary = false; });
+    s.project_files.push({ id: fileId, project_id: projectId, kind, storage_key: storageKey,
+      original_filename: file.originalname || null, mime_type: file.mimetype, size: file.size,
+      is_primary: isPrimary, caption, source: meta.source || null,
+      telegram_message_id: telegramMessageId ? String(telegramMessageId) : null,
+      telegram_chat_id: telegramChatId ? String(telegramChatId) : null, uploaded_by: meta.uploadedBy || null,
+      uploaded_at: nowIso(), technical_comment: meta.technicalComment || null, event_at: meta.eventAt || null,
+      telegram_ref: meta.telegramRef || null });
+    pushHistory(s, projectId, "file_uploaded", meta.source || null, meta.uploadedBy || null, null,
+      { fileId, kind, caption, telegram_message_id: telegramMessageId });
+  });
+  const updated = getProject(projectId);
+  return updated.images.concat(updated.attachments).find((f) => f.id === fileId);
+}
+
 function listProjects({ category, includeRelations = true } = {}) {
   return store.read((s) => {
     const index = includeRelations ? buildIndex(s) : null;
@@ -675,6 +754,8 @@ module.exports = {
   getProjectByExternalId,
   findRow,
   allRows,
+  matchByIdentifiers,
+  attachProjectFile,
   listProjects,
   createProject,
   updateProject,

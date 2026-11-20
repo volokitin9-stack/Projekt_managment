@@ -200,38 +200,17 @@ router.post("/projects/:id/stage-transitions", (req, res) => {
 });
 
 // ---- images / attachments ---------------------------------------------------------------
+// Adapts the multipart request into projectsModel.attachProjectFile()'s plain-arg shape - the one
+// shared implementation also used by the Telegram engineering-chat channel (server/telegram/
+// engineeringChannel.js), which has no Express req (it downloads the file itself).
 function storeProjectFile(row, req, { source, uploadedBy }) {
-  const telegramMessageId = req.body.telegram_message_id || null;
-  const telegramChatId = req.body.telegram_chat_id || null;
-  if (telegramMessageId && telegramChatId) {
-    const existing = store.read((s) => s.project_files.find((f) => f.telegram_chat_id === String(telegramChatId) &&
-      f.telegram_message_id === String(telegramMessageId)));
-    if (existing) return { duplicate: true, id: existing.id };
-  }
-  if (req.body.event_at && Number.isNaN(Date.parse(req.body.event_at))) {
-    const err = new Error('"event_at" must be an ISO timestamp');
-    err.status = 400;
-    throw err;
-  }
-  const { storageKey } = storage.saveProjectFile(row.id, req.file);
-  const fileId = uuidv4();
-  const kind = req.file.mimetype === "application/pdf" ? "attachment" : "image";
-  const isPrimary = String(req.body.is_primary || "").toLowerCase() === "true";
-  const caption = req.body.caption || req.body.description || null;
-  store.tx((s) => {
-    if (isPrimary) s.project_files.filter((f) => f.project_id === row.id).forEach((f) => { f.is_primary = false; });
-    s.project_files.push({ id: fileId, project_id: row.id, kind, storage_key: storageKey,
-      original_filename: req.file.originalname || null, mime_type: req.file.mimetype, size: req.file.size,
-      is_primary: isPrimary, caption, source: req.body.source || source,
-      telegram_message_id: telegramMessageId ? String(telegramMessageId) : null,
-      telegram_chat_id: telegramChatId ? String(telegramChatId) : null, uploaded_by: uploadedBy, uploaded_at: nowIso(),
-      technical_comment: req.body.technical_comment || null, event_at: req.body.event_at || null,
-      telegram_ref: req.body.telegram_ref || null });
-    projectsModel.pushHistory(s, row.id, "file_uploaded", source, uploadedBy, null,
-      { fileId, kind, caption, telegram_message_id: telegramMessageId });
+  return projectsModel.attachProjectFile(row.id, req.file, {
+    source: req.body.source || source, uploadedBy, caption: req.body.caption || req.body.description || null,
+    isPrimary: String(req.body.is_primary || "").toLowerCase() === "true",
+    technicalComment: req.body.technical_comment || null, eventAt: req.body.event_at || null,
+    telegramMessageId: req.body.telegram_message_id || null, telegramChatId: req.body.telegram_chat_id || null,
+    telegramRef: req.body.telegram_ref || null
   });
-  const updated = projectsModel.getProject(row.id);
-  return updated.images.concat(updated.attachments).find((f) => f.id === fileId);
 }
 
 router.post("/projects/:id/images", upload.single("file"), (req, res) => {
@@ -296,27 +275,7 @@ router.post("/telegram/photos", upload.single("file"), (req, res) => {
   if (!(h.telegram_message_id && h.telegram_chat_id)) {
     return res.status(400).json({ error: '"telegram_chat_id" and "telegram_message_id" are required (idempotency)' });
   }
-  const rows = projectsModel.allRows();
-  let matches = [];
-  let method = null;
-  if (h.external_project_id) {
-    matches = rows.filter((r) => r.external_project_id === h.external_project_id);
-    method = "external_project_id";
-  }
-  if (!matches.length && h.article_number) {
-    const art = projectsModel.normKey(h.article_number);
-    matches = rows.filter((r) => art && projectsModel.normKey((r.data || {}).article_number) === art);
-    method = "article_number";
-  }
-  if (!matches.length && h.manufacturer && h.vehicle_model && h.product_type) {
-    const want = [h.manufacturer, h.vehicle_model, h.product_type].map(projectsModel.normKey).join("|");
-    matches = rows.filter((r) => {
-      const d = r.data || {};
-      return (r.record_category || "main_project") === "main_project" &&
-        [d.manufacturer, d.vehicle_model, d.product_type].map(projectsModel.normKey).join("|") === want;
-    });
-    method = "manufacturer+model+product";
-  }
+  const { matches, method } = projectsModel.matchByIdentifiers(h);
   if (matches.length !== 1) {
     const reason = matches.length ? `ambiguous: ${matches.length} projects match by ${method}` : "no project matches the identifiers";
     const r = queueImage(req, reason, h);

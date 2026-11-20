@@ -708,6 +708,7 @@
     <button type="button" class="tab-btn active" id="tabBoardBtn" data-tab="board" title="Доска"><span class="icon" id="navIconBoard"></span><span class="label">Доска</span></button>
     <button type="button" class="tab-btn" id="tabGlobalBtn" data-tab="global" title="Глобально"><span class="icon" id="navIconGlobal"></span><span class="label">Глобально</span></button>
     <button type="button" class="tab-btn" id="tabEngBtn" data-tab="eng" title="Конструкторский отдел"><span class="icon" id="navIconEng"></span><span class="label">Конструкторский отдел</span></button>
+    <button type="button" class="tab-btn" id="tabIntegrationsBtn" data-tab="integrations" title="Интеграции"><span class="icon" id="navIconIntegrations"></span><span class="label">Интеграции</span></button>
   </nav>
   <div class="sidebar-foot">
     <button type="button" class="sidebar-collapse-btn" id="sidebarCollapseBtn" title="Свернуть/развернуть меню"><span class="icon" id="navIconCollapse"></span><span class="label">Свернуть</span></button>
@@ -864,6 +865,10 @@
   <div id="engReviewView" class="eng-list-wrap" style="display:none;"></div>
   <div id="engImportView" class="eng-list-wrap" style="display:none;"></div>
 
+</div>
+
+<div id="integrationsView" style="display:none;padding:14px 20px;">
+  <div id="integrationsBody">Загрузка…</div>
 </div>
 
 </div><!-- /main-area -->
@@ -1039,6 +1044,7 @@
   setIcon("navIconBoard","list",15);
   setIcon("navIconGlobal","globe",15);
   setIcon("navIconEng","tool",15);
+  setIcon("navIconIntegrations","link",15);
   setIcon("navIconMenu","menu",16);
   setIcon("navIconCollapse","chevrons-left",14);
 
@@ -3227,23 +3233,81 @@
     poolListKind = null;
   }
 
+  // ---- integrations page (Telegram) ----
+  var integrationsLogFilter = null;
+  function integrationsRow(k, v){ return '<tr><td>'+k+'</td><td>'+v+'</td></tr>'; }
+  function integrationsPill(ok){ return '<span class="eng-status '+(ok?"ok":"err")+'">'+(ok?"подключено":"не настроено")+'</span>'; }
+  function renderIntegrationsView(){
+    var body = document.getElementById("integrationsBody");
+    Promise.all([apiFetch("/api/telegram/status"), apiFetch("/api/telegram/log?limit=30"+(integrationsLogFilter?"&channel="+integrationsLogFilter:""))])
+      .then(function(r){
+        var st = r[0], log = r[1].entries || [];
+        var p = st.personal, en = st.engineering;
+        var html = '<div class="eng-panel"><h3>Личный Telegram-бот</h3><table class="eng-table" style="max-width:640px;">' +
+          integrationsRow("Статус", integrationsPill(p.connected)) +
+          integrationsRow("Разрешённые пользователи", (p.allowed_users||[]).length ? escapeHtml(p.allowed_users.join(", ")) : '<span style="color:var(--ink-faint);">любой в разрешённом чате</span>') +
+          integrationsRow("Последняя команда", p.last_command_at ? fmtTs(p.last_command_at) : "—") +
+          integrationsRow("Последнее действие", p.last_action ? escapeHtml(p.last_action) : "—") +
+          integrationsRow("Создано задач", p.tasks_created) +
+          integrationsRow("Ошибок обработки", p.processing_errors>0 ? '<span class="eng-status err">'+p.processing_errors+'</span>' : p.processing_errors) +
+          '</table></div>';
+        html += '<div class="eng-panel"><h3>Чат конструкторов</h3><table class="eng-table" style="max-width:640px;">' +
+          integrationsRow("Статус", en.chat_id ? integrationsPill(en.connected) : '<span style="color:var(--ink-faint);">chat_id не настроен — канал отключён</span>') +
+          integrationsRow("Идентификатор чата", en.chat_id ? escapeHtml(String(en.chat_id)) : "—") +
+          integrationsRow("Последнее сообщение", en.last_message_at ? fmtTs(en.last_message_at) : "—") +
+          integrationsRow("Обработано сообщений", en.messages_processed) +
+          integrationsRow("Событий по проектам", en.events_recorded) +
+          integrationsRow("Сохранено фотографий", en.photos_saved) +
+          integrationsRow("На проверке (неоднозначные/предложения этапа)", en.stage_proposals_pending + en.ambiguous_projects_pending) +
+          integrationsRow("Нераспределённых фото", en.unassigned_photos_pending) +
+          integrationsRow("Ошибок обработки", en.processing_errors>0 ? '<span class="eng-status err">'+en.processing_errors+'</span>' : en.processing_errors) +
+          '</table></div>';
+        html += '<div class="eng-panel"><h3>Журнал обработки сообщений</h3>' +
+          '<div class="eng-form-row" style="margin-bottom:8px;">' +
+          '<button type="button" class="eng-mini-btn" data-action="integ-log-filter" data-ch="">Все</button>' +
+          '<button type="button" class="eng-mini-btn" data-action="integ-log-filter" data-ch="personal">Личный бот</button>' +
+          '<button type="button" class="eng-mini-btn" data-action="integ-log-filter" data-ch="engineering">Чат конструкторов</button></div>' +
+          (log.length ? '<table class="eng-table"><tr><th>Время</th><th>Канал</th><th>Сообщение</th><th>Результат</th></tr>' +
+            log.map(function(e){
+              var cls = e.outcome === "error" ? "err" : (e.outcome === "rejected" || e.outcome === "ignored") ? "" : "ok";
+              return '<tr><td>'+fmtTs(e.at)+'</td><td>'+escapeHtml(e.channel||"")+'</td>' +
+                '<td style="max-width:360px;font-size:11.5px;">'+escapeHtml((e.message_text||"").slice(0,160))+'</td>' +
+                '<td><span class="eng-status '+cls+'">'+escapeHtml(e.outcome||"")+'</span>'+(e.detail?' <span style="font-size:11px;color:var(--ink-soft);">'+escapeHtml(String(e.detail))+'</span>':'')+(e.error?' <span style="font-size:11px;" class="eng-status err">'+escapeHtml(e.error)+'</span>':'')+'</td></tr>';
+            }).join("") + '</table>' : '<div class="eng-empty">Журнал пуст.</div>') +
+          '</div>';
+        body.innerHTML = html;
+      }).catch(function(err){ body.innerHTML = '<div class="eng-empty">Не удалось загрузить статус: '+escapeHtml(err.message)+'</div>'; });
+  }
+  document.getElementById("integrationsView").addEventListener("click", function(e){
+    var btn = e.target.closest ? e.target.closest("[data-action]") : null;
+    if(!btn) return;
+    if(btn.getAttribute("data-action") === "integ-log-filter"){
+      integrationsLogFilter = btn.getAttribute("data-ch") || null;
+      renderIntegrationsView();
+    }
+  });
+
   // ---- tabs ----
   function setTab(tab){
     activeTab = tab;
     document.getElementById("boardView").style.display = tab === "board" ? "" : "none";
     document.getElementById("globalView").style.display = tab === "global" ? "" : "none";
     document.getElementById("engView").style.display = tab === "eng" ? "" : "none";
+    document.getElementById("integrationsView").style.display = tab === "integrations" ? "" : "none";
     document.getElementById("tabBoardBtn").classList.toggle("active", tab === "board");
     document.getElementById("tabGlobalBtn").classList.toggle("active", tab === "global");
     document.getElementById("tabEngBtn").classList.toggle("active", tab === "eng");
-    document.getElementById("fabAdd").style.display = tab === "eng" ? "none" : "flex";
+    document.getElementById("tabIntegrationsBtn").classList.toggle("active", tab === "integrations");
+    document.getElementById("fabAdd").style.display = (tab === "eng" || tab === "integrations") ? "none" : "flex";
     if(tab === "board") renderTree();
     else if(tab === "global") renderGlobalTree();
-    else renderEngBoard();
+    else if(tab === "eng") renderEngBoard();
+    else renderIntegrationsView();
   }
   document.getElementById("tabBoardBtn").addEventListener("click", function(){ setTab("board"); });
   document.getElementById("tabGlobalBtn").addEventListener("click", function(){ setTab("global"); });
   document.getElementById("tabEngBtn").addEventListener("click", function(){ setTab("eng"); });
+  document.getElementById("tabIntegrationsBtn").addEventListener("click", function(){ setTab("integrations"); });
 
   // ---- event delegation: toggle / delete / status / subtasks / filters (document-wide) ----
   document.addEventListener("change", function(e){

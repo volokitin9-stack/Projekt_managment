@@ -26,6 +26,8 @@ const reviewQueueRouter = require("./routes/reviewQueue");
 const planImportsRouter = require("./routes/planImports");
 const planSourceRouter = require("./routes/planSource");
 const agentJobsRouter = require("./routes/agentJobs");
+const telegramWebhookRouter = require("./routes/telegramWebhook");
+const telegramAdminRouter = require("./routes/telegramAdmin");
 const planScheduler = require("./planSource/scheduler");
 const store = require("./store");
 const agentJobs = require("./agentJobs");
@@ -55,7 +57,11 @@ app.post("/api/login", express.json(), dashboardAuth.login);
 app.post("/api/logout", dashboardAuth.logout);
 app.get("/api/whoami", dashboardAuth.whoAmI);
 app.use((req, res, next) => {
-  if (req.path.startsWith("/api/agent") || req.path === "/api/health" || req.path === "/login.html") return next();
+  // /api/telegram/webhook has its own secret (X-Telegram-Bot-Api-Secret-Token, see
+  // server/routes/telegramWebhook.js) - Telegram can never present this session's cookie. Every
+  // other /api/telegram/* path (the "Интеграции → Telegram" status/log reads) stays session-gated.
+  if (req.path.startsWith("/api/agent") || req.path === "/api/health" || req.path === "/login.html" ||
+      req.path === "/api/telegram/webhook") return next();
   dashboardAuth.requireDashboardSession(req, res, next);
 });
 
@@ -72,6 +78,11 @@ app.use("/api/plan-source", planSourceRouter);
 // Windows-agent job queue (Railway deployment only) - its own auth (WINDOWS_AGENT_API_KEY +
 // replay/rate-limit guard), not the dashboard session above. See server/routes/agentJobs.js.
 app.use("/api/agent-jobs", agentJobsRouter);
+
+// Telegram integration (both channels - see server/telegram/). /webhook is public with its own
+// secret (exempted above); /status and /log stay dashboard-session-gated.
+app.use("/api/telegram", telegramWebhookRouter);
+app.use("/api/telegram", telegramAdminRouter);
 
 // Synchronisation runs recorded by the planning agent (read-only for the dashboard).
 app.get("/api/sync-runs", (req, res) => {
