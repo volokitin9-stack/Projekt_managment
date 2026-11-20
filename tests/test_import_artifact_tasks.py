@@ -6,6 +6,7 @@ Synthetic export data only - no real board content.
 """
 import json
 import subprocess
+from pathlib import Path
 
 import requests
 
@@ -117,3 +118,72 @@ def test_rejects_a_file_with_no_tasks_array(tmp_path):
     bad.write_text(json.dumps({"something": "else"}), encoding="utf-8")
     r = run([str(bad)], srv.env())
     assert r.returncode == 2 and "tasks" in r.stderr
+
+
+# ---------------------------------------------------------- критическое требование №3: pre-import
+# analysis, duplicate detection, rollback (ТЗ "Дополнение к ТЗ Telegram-интеграции «Штурмана»")
+
+def test_dry_run_reports_preliminary_analysis(tmp_path):
+    srv = ShturmanServer(tmp_path / "srv")
+    env = srv.env()
+    src = export_file(tmp_path, [
+        {"id": "c1", "title": "Новая", "quadrant": "inbox", "done": False},
+        {"id": "c2", "title": "Другая", "quadrant": "do", "done": True},
+    ])
+    out = run([str(src)], env).stdout
+    assert "2 record(s)" in out and "inbox=1" in out and "do=1" in out
+    assert "1 done, 1 active" in out
+    assert "0 existing task(s)" in out
+    assert "2 new, 0 duplicate" in out
+
+
+def test_write_produces_a_rollback_manifest_and_rollback_removes_exactly_those_ids(tmp_path):
+    srv = ShturmanServer(tmp_path / "srv")
+    env = srv.env()
+    src = export_file(tmp_path, [
+        {"id": "r1", "title": "Задача 1", "quadrant": "inbox", "done": False},
+        {"id": "r2", "title": "Задача 2", "quadrant": "do", "done": False},
+    ])
+    out = run([str(src), "--write"], env).stdout
+    assert "Rollback manifest written" in out
+    manifest_path = [line.split(": ", 1)[1].strip() for line in out.splitlines()
+                      if line.startswith("Rollback manifest written")][0]
+    manifest = json.loads(Path(manifest_path).read_text())
+    assert set(manifest["created_ids"]) == {"r1", "r2"}
+
+    srv.start()
+    try:
+        assert {t["id"] for t in requests.get(srv.url + "/api/tasks", timeout=10).json()} == {"r1", "r2"}
+        # a task created directly on the board afterwards must never be touched by a rollback
+        requests.post(srv.url + "/api/tasks", json={"id": "manual1", "title": "Создана вручную"}, timeout=10)
+    finally:
+        srv.stop()
+
+    dry = run(["--rollback", manifest_path], env)
+    assert dry.returncode == 0 and "Would remove 2" in dry.stdout and "r1" in dry.stdout and "r2" in dry.stdout
+    srv.start()
+    try:
+        assert {t["id"] for t in requests.get(srv.url + "/api/tasks", timeout=10).json()} == {"r1", "r2", "manual1"}
+    finally:
+        srv.stop()
+
+    done = run(["--rollback", manifest_path, "--write"], env)
+    assert done.returncode == 0 and "Removed 2 task(s)" in done.stdout
+    srv.start()
+    try:
+        ids = {t["id"] for t in requests.get(srv.url + "/api/tasks", timeout=10).json()}
+        assert ids == {"manual1"}, "rollback must remove exactly the manifest's own ids, nothing else"
+    finally:
+        srv.stop()
+
+    # rolling back the same manifest again is a safe no-op, not an error
+    again = run(["--rollback", manifest_path, "--write"], env)
+    assert again.returncode == 0 and "Removed 0 task(s)" in again.stdout and "already gone" in again.stdout
+
+
+def test_rollback_rejects_a_file_that_is_not_an_import_manifest(tmp_path):
+    srv = ShturmanServer(tmp_path / "srv")
+    bad = tmp_path / "not-a-manifest.json"
+    bad.write_text(json.dumps({"something": "else"}), encoding="utf-8")
+    r = run(["--rollback", str(bad)], srv.env())
+    assert r.returncode == 2 and "created_ids" in r.stderr

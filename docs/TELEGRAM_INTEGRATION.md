@@ -37,7 +37,7 @@ implementation).
 | NL command → task, by a Claude session re-reading a prompt | none | `server/telegram/aiClient.js` (Anthropic) + `server/telegram/personalChannel.js` |
 | `tasks` collection in the artifact's own DB | `server/docStore.js` "tasks" (same engine the dashboard already uses) | reused directly — **not** a new task store |
 | reply-to-notification → subtask | artifact-specific `telegram_messages` collection | not reimplemented (see "Known gaps" below) |
-| morning digest | a third Claude trigger | not reimplemented (see "Known gaps" below) |
+| morning digest | a third Claude trigger | `server/telegram/dailyDigest.js` - same schedule, same content rules, see below |
 | construction-chat monitoring, photo→project matching | did not exist | `server/telegram/engineeringChannel.js`, reusing `/api/agent/telegram/photos`'s matching/attach logic |
 | stage-change proposal UI | did not exist for Telegram | reuses the dashboard's *existing* review-queue "Подтвердить «стадия»" button (`public/index.html`'s `engReviewTableHtml`) — no new UI needed for this part |
 | idempotency (`lastUpdateId`) | n/a | `telegram_updates` collection, keyed by `update_id` (webhook delivery, not polling, so no cursor is needed — see below) |
@@ -50,11 +50,22 @@ implementation).
   the AI resolves against the existing task by title. If you specifically need reply-threading
   semantics, that is additional, well-scoped work (store the bot's own `message_id` → task id,
   exactly like the old `telegram_messages` collection) — flag it and it can be added.
-- **Morning digest.** Not reimplemented as a Railway cron in this change (the existing Excel 09:00
-  scheduler pattern in `server/planSource/scheduler.js` is the template to follow). Until it is,
-  keep the Claude morning-digest trigger running — it reads the Claude Artifact's own `tasks`
-  collection, which Stage 4 below retires, so it would need to be either ported to read `/api/tasks`
-  or disabled once you stop maintaining data in the Artifact.
+- **Morning digest.** Reimplemented (критическое требование №2, "Дополнение к ТЗ Telegram-интеграции
+  «Штурмана»") in `server/telegram/dailyDigest.js`, following the same self-rearming-timer pattern
+  as `server/planSource/scheduler.js`. Schedule and content are copied from the old Claude trigger's
+  own prompt, not reinvented: weekdays only, 07:53 Europe/Moscow (`CRON_TZ=Europe/Moscow 53 7 * * 1-5`,
+  **no** work-calendar/holiday awareness — the Excel scheduler has that, the old digest never did),
+  sent to `TELEGRAM_OWNER_CHAT_ID` only, reading `tasks` (`done:false`, grouped by `quadrant` in the
+  fixed order inbox/do/plan/delegate/drop), one line per task with whichever of
+  направление/от/ответственный/срок is set, "— просрочено" for an unfinished task whose срок has
+  passed. At most one send per local calendar date (`telegram_digest` object in `server/store.js`,
+  independent of `plan_source`/`plan_source_runs` — ticking one scheduler never touches the other's
+  state or timer, see `tests/test_telegram_digest.py::test_does_not_interfere_with_the_excel_planning_agent_schedule`).
+  A restart does not resend today's digest; a run more than 30 minutes late (including a server that
+  started after 07:53) is recorded as missed and not replayed, same rule as the Excel scheduler.
+  Status is reported under `daily_digest` in `GET /api/telegram/status`. Never creates, updates or
+  deletes a task — read-only against `tasks`. Only ever sends to `TELEGRAM_OWNER_CHAT_ID`; it never
+  even references `TELEGRAM_ENGINEERING_CHAT_ID`, and the hard guard below would refuse it anyway.
 - **Data migration (ТЗ Stage 4).** Not performed by this change. The Artifact's live `tasks`
   collection (34 real records at audit time) and `server/docStore.js`'s `tasks` collection
   (`server/seed.js`'s demo data) are **different data** today. Stage 4 below must copy the real
@@ -96,6 +107,31 @@ already, a webhook reacts immediately rather than up to an hour late like the ol
 polling, and it needs no new always-running process — the Windows agent's poll model exists
 because the *laptop* has no public endpoint, which doesn't apply here.
 
+### The engineering chat is read-only - enforced at the outbound-call level, not per handler
+
+Критическое требование №1 ("Дополнение к ТЗ Telegram-интеграции «Штурмана»"): the bot must never
+send *anything* to `TELEGRAM_ENGINEERING_CHAT_ID` — no reply, confirmation, greeting, notification,
+error, digest, or clarification request, from any code path (a main handler, an exception handler,
+a background job, a retry).
+
+Today's code already has only one outbound call site (`personalChannel.js`'s `sendMessage`, always
+to the resolved *personal* chat id by construction) and `engineeringChannel.js` never calls
+`sendMessage`/`sendPhoto`/`sendDocument` at all — but relying on "the code currently happens not to
+call it" is not a guarantee. The guard instead lives in `server/telegram/botApi.js`'s shared `call()`
+function, the one chokepoint every outbound Telegram API request goes through: any call whose
+`chat_id` matches `TELEGRAM_ENGINEERING_CHAT_ID` is refused (`engineering_chat_is_read_only`) before
+the HTTP request is even made, regardless of method name — covering `sendMessage`, `sendPhoto`,
+`sendDocument`, and any method added later with no per-method enumeration needed. `getFile`/file
+download (reading, not sending) is unaffected — the chat is read-only, not unreachable.
+
+Tests: `tests/js/telegram_readonly_unit.js` (direct proof the guard fires for every method, string
+and numeric `chat_id` alike, and leaves the owner chat/unconfigured case unaffected) and
+`tests/test_telegram.py`'s `test_engineering_channel_never_sends_anything_to_telegram_across_every_scenario`
+/ `test_engineering_channel_ai_failure_path_never_sends_anything_either` (the full existing
+engineering-channel scenario matrix — relevant message, irrelevant message, photo queued then
+attached, unauthorized chat, AI-unavailable fallback — against a real fake Telegram server, with
+zero outbound requests recorded).
+
 ### Why two *logically* separate handlers, one bot
 
 The task spec requires strict separation of business logic, not strict separation of
@@ -134,7 +170,7 @@ design note for that future work, not something this change needed.
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | both channels | from `@BotFather` |
 | `TELEGRAM_WEBHOOK_SECRET` | both channels | the webhook refuses every request (501) without it |
-| `TELEGRAM_OWNER_CHAT_ID`, `TELEGRAM_OWNER_USER_ID` | channel 1 | your own numeric Telegram ids |
+| `TELEGRAM_OWNER_CHAT_ID`, `TELEGRAM_OWNER_USER_ID` | channel 1 | your own numeric Telegram ids; `TELEGRAM_OWNER_CHAT_ID` is also where the daily digest (`dailyDigest.js`) sends - no separate variable |
 | `TELEGRAM_ENGINEERING_CHAT_ID` | channel 2 | unset = channel 2 fully disabled |
 | `TELEGRAM_ENGINEERING_ALLOWED_USER_IDS` | channel 2 (optional) | comma-separated; unset = whole chat |
 | `ANTHROPIC_API_KEY` | both channels | server-only; never reaches the client |
@@ -201,8 +237,10 @@ artifact never had those, so the export doesn't fabricate them).
 Import that file with `scripts/import_artifact_tasks.js`:
 
 ```bash
-node scripts/import_artifact_tasks.js path/to/shturman_tasks_export.json            # dry run
-node scripts/import_artifact_tasks.js path/to/shturman_tasks_export.json --write    # import
+node scripts/import_artifact_tasks.js path/to/shturman_tasks_export.json             # dry run: pre-import analysis only
+node scripts/import_artifact_tasks.js path/to/shturman_tasks_export.json --write     # import
+node scripts/import_artifact_tasks.js --rollback path/to/import-manifest-*.json      # dry run: what rollback would remove
+node scripts/import_artifact_tasks.js --rollback path/to/import-manifest-*.json --write  # rollback
 ```
 
 Run it against the target `DATA_DIR` (e.g. `railway run`, or directly on the host with `DATA_DIR`
@@ -215,6 +253,29 @@ new records get added, nothing already-imported or created directly on the new b
 duplicated. **Do this read-only against the Artifact** (the export button never writes) **and
 verify record counts before and after** — do not assume Telegram will backfill missed history once
 the new handler is live; it only ever sees messages sent after the webhook is set.
+
+**Pre-import analysis (критическое требование №3).** Every run, dry or `--write`, first prints: how
+many records the export file has (by quadrant, done vs. active), how many tasks already exist in
+the target, and — the duplicate check — exactly which ids from the export already exist there and
+would therefore be skipped, vs. which ids are genuinely new. Nothing is written until you have seen
+this and chosen `--write`.
+
+**Rollback.** Every `--write` import that creates at least one record also writes an
+`import-manifest-<timestamp>.json` file (next to the export file) listing exactly the ids *that
+run* created. `--rollback <manifest>` reads only that file and removes exactly those ids — never a
+record imported by an earlier run, and never a record created directly on the board since (proven
+in `tests/test_import_artifact_tasks.py::test_write_produces_a_rollback_manifest_and_rollback_removes_exactly_those_ids`,
+which creates a task directly on the board between import and rollback and checks it survives).
+Like the import itself, rollback defaults to a dry run; `--write` applies it. Re-running a rollback
+against the same manifest a second time is a safe no-op (ids already gone are reported, not an
+error).
+
+**Production.** Neither this script nor this change has been run against the real Railway volume —
+only against synthetic data in this test suite and locally. Nothing in production has been
+modified. Running the real import against the real Railway `DATA_DIR` is Stage 4's own step, to be
+done only when you give the explicit go-ahead ("не изменять production до отдельного
+подтверждения"), with the server stopped and a backup taken first (Stage 5 step 1 below covers the
+backup; do that before, not instead of, this step).
 
 ## Stage 5 — cutover
 
@@ -242,14 +303,18 @@ the new handler is live; it only ever sees messages sent after the webhook is se
 - No data already written by the new handler needs to be undone — it only ever appends
   (`project_history`/`agent_events`) or goes through the same review-queue/approval path as every
   other source; nothing is deleted by rollback.
+- **Stage 4's task import specifically**: use `scripts/import_artifact_tasks.js --rollback
+  <import-manifest.json>` (see Stage 4 above) — this is the one part of this change that does write
+  new records outside the append-only/review-queue pattern, so it is the one part with its own
+  dedicated, manifest-scoped rollback.
 
 ## Checklist before disabling the Claude Artifact (ТЗ Stage 6 / §12.12)
 
 - [ ] All of Stage 3's tests pass on the test bot
 - [ ] Stage 4's data migration completed and record counts verified
 - [ ] Stage 5 cutover completed and both channels confirmed live for at least one full working day
-- [ ] The morning-digest and reply-to-subtask gaps above are either accepted or have their own
-      follow-up plan
+- [ ] The reply-to-subtask gap above is either accepted or has its own follow-up plan (the
+      morning-digest gap is closed — see "Known gaps" above)
 - [ ] A fresh backup (Stage 5 step 1) exists from *after* cutover, not just before
 - [ ] Only then: stop/delete the two Claude scheduled triggers for good, and decide what (if
       anything) to do with the Claude Artifact itself — it is not deleted by anything in this change

@@ -3262,6 +3262,14 @@
           integrationsRow("Нераспределённых фото", en.unassigned_photos_pending) +
           integrationsRow("Ошибок обработки", en.processing_errors>0 ? '<span class="eng-status err">'+en.processing_errors+'</span>' : en.processing_errors) +
           '</table></div>';
+        var dd = st.daily_digest || {};
+        html += '<div class="eng-panel"><h3>Ежедневная сводка задач (личный чат)</h3><table class="eng-table" style="max-width:640px;">' +
+          integrationsRow("Статус", integrationsPill(dd.active)) +
+          integrationsRow("Расписание", dd.schedule_time ? escapeHtml(dd.schedule_time+" ("+dd.timezone+"), будни") : "—") +
+          integrationsRow("Последняя отправка", dd.last_sent_date ? escapeHtml(dd.last_sent_date)+(dd.last_sent_at?" — "+fmtTs(dd.last_sent_at):"") : "—") +
+          integrationsRow("Активных задач в последней сводке", dd.last_active_count != null ? dd.last_active_count : "—") +
+          (dd.last_missed_date ? integrationsRow("Пропущенный запуск", '<span class="eng-status err">'+escapeHtml(dd.last_missed_date)+'</span>') : "") +
+          '</table></div>';
         html += '<div class="eng-panel"><h3>Журнал обработки сообщений</h3>' +
           '<div class="eng-form-row" style="margin-bottom:8px;">' +
           '<button type="button" class="eng-mini-btn" data-action="integ-log-filter" data-ch="">Все</button>' +

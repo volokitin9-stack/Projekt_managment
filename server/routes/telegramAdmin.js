@@ -11,6 +11,7 @@ const telegramLog = require("../telegram/log");
 const aiClient = require("../telegram/aiClient");
 const botApi = require("../telegram/botApi");
 const reviewQueue = require("../reviewQueueModel");
+const dailyDigest = require("../telegram/dailyDigest");
 
 const router = express.Router();
 
@@ -48,7 +49,8 @@ router.get("/status", (req, res) => {
       unassigned_photos_pending: unassignedPhotos,
       ambiguous_projects_pending: ambiguousProjects,
       processing_errors: engineering.errors
-    }
+    },
+    daily_digest: dailyDigest.status()
   });
 });
 
@@ -57,5 +59,17 @@ router.get("/log", (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 50, 500);
   res.json({ entries: telegramLog.recent(channel, limit) });
 });
+
+// Test hooks: only with TELEGRAM_DIGEST_TEST_HOOKS=1 (automated tests); absent in normal operation.
+if (dailyDigest.TEST_HOOKS) {
+  router.post("/digest/_test/clock", (req, res) => {
+    dailyDigest.setClock(req.body && req.body.now);
+    res.json({ now: dailyDigest.now().toISOString() });
+  });
+  router.post("/digest/_test/tick", async (req, res) => {
+    const t = req.body && req.body.now ? new Date(req.body.now) : dailyDigest.now();
+    res.json(await dailyDigest.tick(t));
+  });
+}
 
 module.exports = router;

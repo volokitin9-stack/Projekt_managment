@@ -5,13 +5,14 @@ services - the same approach already used for a staged Railway export (server/mi
 deployment-verification fake backend (tests/test_deployment.py).
 """
 import json
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 import requests
 
-from conftest import ShturmanServer
+from conftest import ROOT, ShturmanServer
 
 SECRET = "wh-secret-test"
 BOTKEY = "tg-bot-test-key"
@@ -401,3 +402,60 @@ def test_status_endpoint_requires_dashboard_session_when_configured(tmp_path, an
         assert requests.get(srv.url + "/api/telegram/status", timeout=10).status_code == 401
     finally:
         srv.stop()
+
+
+# ------------------------------------------------------------------ критическое требование №1:
+# общий чат конструкторов строго READ ONLY (server/telegram/botApi.js)
+
+def test_botapi_refuses_every_outbound_method_to_the_engineering_chat(telegram):
+    """Unit-level proof that the guard lives in the one shared call() every outbound Telegram API
+    request goes through - sendMessage, any other current or future send method, string vs numeric
+    chat_id - while leaving reads (getFile), the owner chat, and an unconfigured engineering chat
+    id entirely unaffected. See tests/js/telegram_readonly_unit.js."""
+    base = f"http://127.0.0.1:{telegram.server_address[1]}"
+    r = subprocess.run(["node", "tests/js/telegram_readonly_unit.js", base], cwd=ROOT, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    results = json.loads(r.stdout.strip().splitlines()[-1])
+    assert all(results.values()), results
+    # the refused calls must never have reached the fake Telegram server at all - only the owner-chat
+    # send, and the final send made once TELEGRAM_ENGINEERING_CHAT_ID is deliberately unset, go through
+    assert telegram.sent_messages == [{"chat_id": OWNER_CHAT, "text": "hi owner"},
+                                       {"chat_id": ENG_CHAT, "text": "no eng chat id configured"}]
+
+
+@pytest.mark.parametrize("anthropic", [ENGINEERING_RULES], indirect=True)
+def test_engineering_channel_never_sends_anything_to_telegram_across_every_scenario(tmp_path, anthropic, telegram):
+    """Runs the full engineering-channel scenario matrix (relevant message, irrelevant message,
+    photo queued then attached, unauthorized chat, AI-unavailable fallback) end to end and checks
+    the one shared fake Telegram server's sendMessage log - not just that today's code happens not
+    to call it, but that nothing in any of these paths (handlers, exception handling, the photo
+    background queue, the unresolved-caption retry) ever does."""
+    srv = _server(tmp_path, anthropic, telegram)
+    try:
+        post(srv, update(ENG_CHAT, "501",
+                          "Сегодня установили тестовый образец защиты HAVAL Jolion. Необходимо доработать правый кронштейн.",
+                          update_id=20))
+        post(srv, update(ENG_CHAT, "501", "непонятное сообщение без проекта", update_id=21))
+        group = "mg-readonly"
+        post(srv, update(ENG_CHAT, "501", text=None, update_id=22, photo=True, media_group_id=group))
+        post(srv, update(ENG_CHAT, "501", update_id=23, photo=True, media_group_id=group,
+                          caption="Сегодня установили тестовый образец защиты HAVAL Jolion."))
+        post(srv, update(ENG_CHAT, "999", "сообщение от неавторизованного участника", update_id=24))
+        assert telegram.sent_messages == [], "the engineering chat must never receive any outbound message"
+    finally:
+        srv.stop()
+
+
+def test_engineering_channel_ai_failure_path_never_sends_anything_either(tmp_path, telegram):
+    """The AI-unavailable fallback (queue for manual review, log, move on) is itself a form of
+    exception handling - it must stay silent toward the engineering chat exactly like the happy path."""
+    anthropic_srv = fake_anthropic([])  # no rules match -> aiClient.classify() always throws
+    try:
+        srv = _server(tmp_path, anthropic_srv, telegram)
+        try:
+            post(srv, update(ENG_CHAT, "501", "любое сообщение, пока ИИ недоступен", update_id=30))
+            assert telegram.sent_messages == []
+        finally:
+            srv.stop()
+    finally:
+        anthropic_srv.shutdown()

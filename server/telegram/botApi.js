@@ -20,8 +20,25 @@ function configured() {
   return !!token();
 }
 
+// Критическое требование №1 (ТЗ "Дополнение к ТЗ Telegram-интеграции «Штурмана»"): the engineering
+// chat is strictly read-only - no sendMessage/sendPhoto/sendDocument/etc may ever reach it, from
+// any code path (handlers, error handling, background jobs, retries). Enforced here, in the one
+// function every outbound Telegram API call goes through, rather than per call site, so it covers
+// every current and future outbound method with no per-method enumeration.
+function isBannedOutboundChat(body) {
+  const engineeringChatId = process.env.TELEGRAM_ENGINEERING_CHAT_ID;
+  if (!engineeringChatId || !body || body.chat_id === undefined || body.chat_id === null) return false;
+  return String(body.chat_id) === String(engineeringChatId);
+}
+
 async function call(method, body) {
   if (!configured()) throw Object.assign(new Error("TELEGRAM_BOT_TOKEN is not configured"), { code: "not_configured" });
+  if (isBannedOutboundChat(body)) {
+    throw Object.assign(
+      new Error(`Refusing to call ${method}: the engineering chat (TELEGRAM_ENGINEERING_CHAT_ID) is read-only`),
+      { code: "engineering_chat_is_read_only", method }
+    );
+  }
   const res = await fetch(`${baseUrl()}/bot${token()}/${method}`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {})
   });

@@ -29,6 +29,7 @@ const agentJobsRouter = require("./routes/agentJobs");
 const telegramWebhookRouter = require("./routes/telegramWebhook");
 const telegramAdminRouter = require("./routes/telegramAdmin");
 const planScheduler = require("./planSource/scheduler");
+const telegramDailyDigest = require("./telegram/dailyDigest");
 const store = require("./store");
 const agentJobs = require("./agentJobs");
 const dashboardAuth = require("./dashboardAuth");
@@ -125,6 +126,9 @@ if (require.main === module) {
     // Daily working-day plan check: active only when PLAN_SOURCE_TYPE and PLAN_SOURCE_PATH are set
     // and PLAN_AUTO_MONITOR_ENABLED / PLAN_SCHEDULE_ENABLED are not false.
     planScheduler.start();
+    // Daily personal-task digest to TELEGRAM_OWNER_CHAT_ID, independent of the above (separate
+    // schedule, separate idempotency state - see server/telegram/dailyDigest.js).
+    telegramDailyDigest.start();
     const py = require("./pythonResolver").getPython();
     (py.warnings || []).forEach((w) => console.warn(`ВНИМАНИЕ: ${w}`)); // eslint-disable-line no-console
     if (py.ok) console.log(`Python для агента планирования: ${py.executable} (${py.source})`); // eslint-disable-line no-console
