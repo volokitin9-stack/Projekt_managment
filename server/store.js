@@ -15,13 +15,17 @@
 //   throws, the state is restored and nothing is written.
 // * Single writer: a lock file (<DATA_DIR>/.shturman.lock) prevents two server
 //   processes from using the same data directory. The planning agent never
-//   touches these files - it talks to the server's HTTP API.
+//   touches these files - it talks to the server's HTTP API. Staleness after a
+//   container restart (PIDs reset, the Volume doesn't) is handled by
+//   server/storeLock.js - see its own header comment for why a bare PID isn't
+//   enough on Railway.
 // * Versioned format: meta.schema_version; future format changes are applied
 //   by MIGRATIONS with a backup copy written first. A file from a NEWER version
 //   is refused instead of being overwritten.
 
 const fs = require("fs");
 const path = require("path");
+const storeLock = require("./storeLock");
 
 const DATA_DIR = path.resolve(process.env.DATA_DIR || "./data");
 const FILE = path.join(DATA_DIR, "shturman.json");
@@ -62,30 +66,12 @@ function emptyState() {
   return state;
 }
 
-function pidAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return e.code === "EPERM";
-  }
-}
-
 function acquireLock() {
-  if (fs.existsSync(LOCK)) {
-    const pid = Number(String(fs.readFileSync(LOCK, "utf-8")).trim());
-    if (pid && pid !== process.pid && pidAlive(pid)) {
-      throw new Error(`data directory ${DATA_DIR} is in use by another Штурман process (pid ${pid})`);
-    }
+  try {
+    storeLock.acquire(LOCK);
+  } catch (e) {
+    throw new Error(`data directory ${DATA_DIR} ${e.message}`);
   }
-  fs.writeFileSync(LOCK, String(process.pid));
-  const release = () => {
-    try {
-      if (fs.existsSync(LOCK) && String(fs.readFileSync(LOCK, "utf-8")).trim() === String(process.pid)) fs.unlinkSync(LOCK);
-    } catch (e) { /* ignore */ }
-  };
-  process.on("exit", release);
-  ["SIGINT", "SIGTERM"].forEach((sig) => process.on(sig, () => { release(); process.exit(0); }));
 }
 
 function writeAtomic(file, text) {

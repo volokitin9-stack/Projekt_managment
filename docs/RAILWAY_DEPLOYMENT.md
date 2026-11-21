@@ -94,6 +94,38 @@ ephemeral disk, which is wiped on every redeploy.
 not replaced. Back it up anyway before any risky change - see `scripts/snapshot_data.js` above the
 migration section's own backup step.
 
+### The single-writer lock survives container restarts correctly
+
+**Incident and fix.** A redeploy once left the service `Crashed` with "No running instances" and
+`Error: data directory /data is in use by another Штурман process (pid 15)` in the deploy logs,
+even though nothing else was actually running. Root cause: the lock file
+(`<DATA_DIR>/.shturman.lock`) lives on the persistent Volume, so it survives a redeploy, but PIDs
+do not - every new container gets its own fresh PID namespace, usually starting back near PID 1.
+The old lock file recorded only a bare PID from the *previous* container; checking "is this PID
+alive" in the *new* container answers a different question than intended, and some unrelated
+process in the new container happened to have that same PID number, so the check wrongly reported
+the lock as still held - permanently, since every subsequent restart hit the exact same false
+positive.
+
+The fix (`server/storeLock.js`, `server/procStartTime.js`) records not just the PID but *when that
+specific process started*, read from the kernel via `/proc/<pid>/stat` + `/proc/uptime`. A later
+start checks staleness by re-reading `/proc` for whoever currently holds that PID number: if the
+reported start time doesn't match what was recorded, the PID has been recycled for an unrelated
+process since - stale, safe to take over, no matter how long ago or which container wrote it. If it
+matches exactly, it is genuinely the same, still-running process - never touched, so two writers
+are still never let in at once. A lock file written before this fix (a bare PID, no start time -
+the exact shape that caused the incident) is handled too: the live PID's actual start time is
+compared against the lock file's own `mtime` instead - a process can't have written a file before
+it existed, so any process alive under that PID in a genuinely new container is necessarily newer
+than the old lock's `mtime` and is still correctly recognized as stale. See
+`server/storeLock.js`'s own header comment for the full reasoning, and
+`tests/test_store_lock.py`/`tests/js/store_lock_unit.js` for the regression tests (fresh lock,
+genuinely active lock, dead-PID lock, PID-reused-by-an-unrelated-process lock, and both legacy-
+format cases).
+
+This never modifies `shturman.json` itself, never re-runs any migration, and makes no change to
+Telegram or the Excel agent - it only changes how `.shturman.lock` is written and checked.
+
 ## Migration (moving existing data onto Railway)
 
 Because storage is already one JSON file plus plain upload files, migrating is copying two
