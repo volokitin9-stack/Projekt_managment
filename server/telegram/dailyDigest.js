@@ -156,7 +156,12 @@ function arm() {
 /** Called once when the server starts listening, alongside planScheduler.start(). */
 function start() {
   if (!configuredToRun()) return false;
-  tick(now(), { startup: true }).catch((e) => console.error(e)); // eslint-disable-line no-console
+  // Under TEST_HOOKS, setClock() can only run after the server is already listening (it's an HTTP
+  // call) - too late for this startup tick. TELEGRAM_DIGEST_TEST_NOW, set before the process
+  // starts, lets a test control this one instant too, same as planSource/scheduler.js's
+  // PLAN_SCHEDULER_TEST_NOW.
+  const startNow = TEST_HOOKS && process.env.TELEGRAM_DIGEST_TEST_NOW ? new Date(process.env.TELEGRAM_DIGEST_TEST_NOW) : now();
+  tick(startNow, { startup: true }).catch((e) => console.error(e)); // eslint-disable-line no-console
   if (!TEST_HOOKS) arm();
   return true;
 }

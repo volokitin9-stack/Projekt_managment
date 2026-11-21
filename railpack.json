@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "provider": "node",
+  "packages": {
+    "node": "20"
+  },
+  "steps": {
+    "install": {
+      "commands": ["npm ci --omit=dev"]
+    }
+  },
+  "deploy": {
+    "startCommand": "npm start"
+  }
+}

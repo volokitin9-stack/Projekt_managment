@@ -1,4 +1,9 @@
-# Railway build config (server/index.js only — see docs/RAILWAY_DEPLOYMENT.md).
+# Railway build config for the legacy Nixpacks builder (server/index.js only — see
+# docs/RAILWAY_DEPLOYMENT.md). INACTIVE while Railway's Builder is set to Railpack (the current
+# default, see railpack.json at the repo root) - Railpack does not read this file at all. Kept
+# only so the Node-only pin below still applies automatically if the Builder is ever switched back
+# to Nixpacks; it is not consulted otherwise, and silently diverging from railpack.json here would
+# go unnoticed, so keep the two in sync if you change one.
 #
 # This repo also has requirements.txt (the plan_agent Python package), which Nixpacks' own
 # auto-detection could mistake for the primary app or try to build alongside Node. Railway never

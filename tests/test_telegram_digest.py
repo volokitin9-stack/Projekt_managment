@@ -63,7 +63,7 @@ def make_server(tmp_path, telegram_srv, start_now, **env):
     e = {
         "TELEGRAM_BOT_TOKEN": "tg-bot-test-key", "TELEGRAM_OWNER_CHAT_ID": OWNER_CHAT,
         "TELEGRAM_API_BASE_URL": f"http://127.0.0.1:{telegram_srv.server_address[1]}",
-        "TELEGRAM_DIGEST_TEST_HOOKS": "1",
+        "TELEGRAM_DIGEST_TEST_HOOKS": "1", "TELEGRAM_DIGEST_TEST_NOW": start_now,
     }
     e.update(env)
     srv = ShturmanServer(tmp_path / "srv", extra_env=e)
@@ -225,7 +225,7 @@ def test_does_not_interfere_with_the_excel_planning_agent_schedule(tmp_path, tel
     e = {
         "TELEGRAM_BOT_TOKEN": "tg-bot-test-key", "TELEGRAM_OWNER_CHAT_ID": OWNER_CHAT,
         "TELEGRAM_API_BASE_URL": f"http://127.0.0.1:{telegram.server_address[1]}",
-        "TELEGRAM_DIGEST_TEST_HOOKS": "1",
+        "TELEGRAM_DIGEST_TEST_HOOKS": "1", "TELEGRAM_DIGEST_TEST_NOW": at(FRI, "06:00"),
     }
     srv = excel.make_server(tmp_path, inbox, start_now=at(FRI, "06:00"), **e)
     try:

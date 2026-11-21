@@ -267,13 +267,46 @@ See `windows/windows_agent.env.example` for the full, commented list. The requir
 `WINDOWS_AGENT_API_KEY` (= Railway's `WINDOWS_AGENT_API_KEY`), and `WINDOWS_AGENT_WORKBOOK_PATH`
 (or `WINDOWS_AGENT_WORKBOOK_FOLDER` + `WINDOWS_AGENT_WORKBOOK_PATTERN`).
 
+## Build configuration (Railpack)
+
+Railway's current builder is **Railpack** (the successor to Nixpacks). `railpack.json` at the repo
+root is what it actually reads; `nixpacks.toml` is now inactive (kept only as a fallback - see its
+own header comment - in case the project's Builder setting is ever switched back to Nixpacks, in
+which case keep the two in sync).
+
+**Incident and fix.** A deploy once reported "Deployment successful" but the app was unreachable,
+with `/bin/bash: line 1: npm: command not found` repeating in the deploy logs. Root cause: Railpack
+auto-detects the app's language by trying a fixed, ordered list of providers and using the first
+match (`php, golang, java, rust, ruby, elixir, python, deno, dotnet, node, ...` -
+[`core/providers/provider.go`](https://github.com/railwayapp/railpack/blob/main/core/providers/provider.go)).
+Python is checked *before* Node, and Python's own detection matches on `requirements.txt` alone
+([`core/providers/python/python.go`](https://github.com/railwayapp/railpack/blob/main/core/providers/python/python.go)) -
+which this repo has at the root, for the unrelated `plan_agent` Python package (built and run
+entirely on the Windows laptop, never on Railway; see `plan_agent/windows_agent.py`). Railpack
+therefore built a Python-only image with no Node/npm installed at all, then tried to run the
+configured `npm start` start command in it.
+
+The fix is `railpack.json`'s root `"provider": "node"` - the same role `nixpacks.toml`'s
+`[phases.setup] nixPkgs = ["nodejs_20"]` played for the old builder, forcing a Node-only build
+regardless of `requirements.txt`. `railpack.json` also pins `packages.node` to `20` (what
+`nixpacks.toml` pinned before) and overrides the install step to `npm ci --omit=dev` (production
+dependencies only, matching the prior Nixpacks config) - see `tests/test_railway_build_config.py`
+for the regression tests covering this (the provider pin itself, and that every config file
+agrees on `npm start`/`/api/health`).
+
+Confirm in the Railway dashboard under **Settings → Build** that Builder shows **Railpack** (it
+already did when this was diagnosed) and that **Custom Start Command** is empty - `railpack.json`'s
+own `deploy.startCommand` (and `railway.json`'s) already say `npm start`, so a dashboard override
+is unnecessary and would just be one more place to keep in sync.
+
 ## Exact Railway UI setup steps
 
 1. **New project** → **Deploy from GitHub repo** → select this repository, branch
    `claude/railway-deployment` (or wherever this is merged to) once you've reviewed it.
-2. Railway detects `railway.json`/`nixpacks.toml` automatically - no manual build/start command
-   entry needed. Confirm under **Settings → Deploy** that the start command shows `npm start` and
-   the healthcheck path shows `/api/health`.
+2. Railway detects `railway.json`/`railpack.json` automatically - no manual build/start command
+   entry needed. Confirm under **Settings → Build** that Builder shows **Railpack**, and under
+   **Settings → Deploy** that the start command shows `npm start` and the healthcheck path shows
+   `/api/health`.
 3. **Settings → Networking** → generate a public domain (or attach your own).
 4. **Settings → Volumes → New Volume**, mount path `/data`.
 5. **Variables** tab: add every variable from the two tables above that applies to Railway (not
@@ -283,7 +316,8 @@ See `windows/windows_agent.env.example` for the full, commented list. The requir
    `DASHBOARD_SESSION_SECRET`, `PLAN_TARGET_MONTH` (or leave `auto`), `PLAN_AUTO_SYNC_ENABLED`
    (`true`/`false` per your workflow).
 6. **Deploy.** Watch the build log; it should show only the Node install (no Python step - see
-   `nixpacks.toml`'s comment on why).
+   `railpack.json`'s `"provider": "node"` and the "Build configuration" section above for why that
+   pin matters here).
 7. Once healthy, open the generated domain, log in with `DASHBOARD_USERNAME`/`DASHBOARD_PASSWORD`,
    and confirm the board loads (empty, until the first sync or migration).
 8. Set up the Windows agent (above) pointed at this same domain, then run through "Verifying the
@@ -326,9 +360,11 @@ never against the real services. Do not treat anything here as a live deployment
 - Node syntax-checked (`node --check`) on every modified/new server file.
 
 **NOT verified here - confirm yourself before relying on this:**
-- That Railway's real builder actually produces a healthy deploy from `railway.json`/`nixpacks.toml`,
-  that a real Railway volume behaves as documented, and that the generated domain is reachable
-  from the browser.
+- That Railway's real builder actually produces a healthy deploy from `railway.json`/`railpack.json`
+  (this sandbox has no Railpack binary to run against this repo - the provider-order root cause in
+  "Build configuration" above was confirmed by reading Railpack's own source, not by reproducing
+  the build here), that a real Railway volume behaves as documented, and that the generated domain
+  is reachable from the browser.
 - That `install_task_scheduler.ps1` / `install_nssm_service.ps1` actually register a working
   task/service on a real Windows machine - they were written and reviewed, not executed (no
   Windows machine in this sandbox). `windows/README.md` lists exactly what to check.
