@@ -16,6 +16,23 @@ requirements.txt, the same role nixpacks.toml's `[phases.setup] nixPkgs = ["node
 the old Nixpacks builder (which nixpacks.toml itself notes is now inactive - Railpack does not read
 nixpacks.toml at all). This file is the regression test for that pin, plus the more basic
 consistency checks (start command, health check path) across every config file Railway might read.
+
+Second, related incident this file also guards against: an earlier version of railpack.json added
+`"steps": {"install": {"commands": ["npm ci --omit=dev"]}}` to make the install production-only,
+which broke the build a different way - "npm error code EUSAGE / The npm ci command can only
+install with an existing package-lock.json". Root cause (confirmed by reading Railpack's own
+source - railwayapp/railpack core/generate/context.go's step-merge loop and core/plan/spread.go's
+Spread()): a user-supplied `steps.<name>.commands` array *without* a leading `"..."` entry
+*replaces* the provider's entire auto-generated commands list for that step, not just appends to
+it - including the Node provider's own commands that copy `package.json`/`package-lock.json` into
+the build context before running install (core/providers/node/package_manager.go's
+installDependencies()/installDeps()). The override above ran `npm ci --omit=dev` in a directory
+that no longer had a lockfile copied into it at all. The fix is simply not to override `steps` -
+Railpack's own Node provider already detects the committed `package-lock.json` and runs a correct
+install; overriding it needs the `"..."` spread marker (`["...", "npm ci --omit=dev"]`) to keep the
+auto-generated commands, and even then runs install twice (once auto, once overridden) for no
+benefit, so the straightforward fix is to not specify `steps.install` in railpack.json at all - see
+the Railpack docs' own "Array Extending" section for how `"..."` works.
 """
 import json
 
@@ -36,6 +53,21 @@ def test_railpack_json_pins_the_node_provider():
         "without this, Railpack's own provider order (python before node - see module docstring) "
         "picks Python instead, because requirements.txt also exists at the root")
     assert cfg["deploy"]["startCommand"] == "npm start"
+
+
+def test_railpack_json_does_not_override_the_install_step():
+    """Regression test for the second incident (see module docstring): a `steps.install` override
+    without the `...` spread marker silently drops the Node provider's own package.json/
+    package-lock.json copy commands, breaking `npm ci` with "no lockfile". The standard install
+    step (no `steps` override at all) is what the Railpack docs recommend using unless there is a
+    specific need to customize it - and if one is ever added back, it must use `"..."` to keep the
+    auto-generated commands rather than silently replacing them."""
+    cfg = json.loads((ROOT / "railpack.json").read_text())
+    steps = cfg.get("steps") or {}
+    install = steps.get("install")
+    assert install is None or (isinstance(install.get("commands"), list) and install["commands"][:1] == ["..."]), (
+        "a `steps.install.commands` override must start with the \"...\" spread marker to keep "
+        "Railpack's own package.json/package-lock.json copy commands - see the module docstring")
 
 
 def test_railway_json_builder_matches_the_configured_railpack_json():

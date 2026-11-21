@@ -289,10 +289,36 @@ configured `npm start` start command in it.
 The fix is `railpack.json`'s root `"provider": "node"` - the same role `nixpacks.toml`'s
 `[phases.setup] nixPkgs = ["nodejs_20"]` played for the old builder, forcing a Node-only build
 regardless of `requirements.txt`. `railpack.json` also pins `packages.node` to `20` (what
-`nixpacks.toml` pinned before) and overrides the install step to `npm ci --omit=dev` (production
-dependencies only, matching the prior Nixpacks config) - see `tests/test_railway_build_config.py`
-for the regression tests covering this (the provider pin itself, and that every config file
-agrees on `npm start`/`/api/health`).
+`nixpacks.toml` pinned before).
+
+**Second incident and fix.** An earlier version of `railpack.json` additionally overrode the
+install step (`"steps": {"install": {"commands": ["npm ci --omit=dev"]}}`) to install production
+dependencies only, matching the old Nixpacks config - this broke the build a different way: `npm
+error code EUSAGE` / "The npm ci command can only install with an existing package-lock.json",
+even though `package-lock.json` is committed at the repo root. Root cause (confirmed by reading
+Railpack's own source, not by guessing): a `steps.<name>.commands` array *without* a leading
+`"..."` entry **replaces** the provider's entire auto-generated command list for that step, not
+just the parts you meant to change
+([`core/generate/context.go`](https://github.com/railwayapp/railpack/blob/main/core/generate/context.go)'s
+step-merge loop calls
+[`plan.Spread`](https://github.com/railwayapp/railpack/blob/main/core/plan/spread.go), which
+returns the user's list verbatim whenever it doesn't start with `"..."`). That silently dropped
+the Node provider's own commands that copy `package.json`/`package-lock.json` into the build
+context before installing
+([`core/providers/node/package_manager.go`](https://github.com/railwayapp/railpack/blob/main/core/providers/node/package_manager.go)'s
+`installDependencies()`) - so the overridden `npm ci --omit=dev` ran in a directory with no
+lockfile at all. The fix is to not override `steps.install` and let the Node provider's own,
+standard install step run (it already detects `package-lock.json` and installs correctly;
+`npm install`, not `npm ci`, is its own default even with a lockfile present, specifically to avoid
+failing a build over a slightly-stale lockfile - devDependencies end up installed too, which is a
+size trade-off, not a functional problem). If production-only installs are wanted later, the
+documented way is the `RAILPACK_PRUNE_DEPS=true`/`RAILPACK_NODE_NPM_INSTALL` environment variables
+(set in the Railway dashboard, not in `railpack.json`) - never a bare `steps.install.commands`
+override, and never without the `"..."` marker if one is added.
+
+`tests/test_railway_build_config.py` has the regression tests for both incidents: the provider
+pin, that `railpack.json` doesn't override `steps.install` (or does so only with `"..."` first),
+and that every config file agrees on `npm start`/`/api/health`.
 
 Confirm in the Railway dashboard under **Settings → Build** that Builder shows **Railpack** (it
 already did when this was diagnosed) and that **Custom Start Command** is empty - `railpack.json`'s
