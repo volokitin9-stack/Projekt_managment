@@ -3242,8 +3242,16 @@
     Promise.all([apiFetch("/api/telegram/status"), apiFetch("/api/telegram/log?limit=30"+(integrationsLogFilter?"&channel="+integrationsLogFilter:""))])
       .then(function(r){
         var st = r[0], log = r[1].entries || [];
-        var p = st.personal, en = st.engineering;
-        var html = '<div class="eng-panel"><h3>Личный Telegram-бот</h3><table class="eng-table" style="max-width:640px;">' +
+        var p = st.personal, en = st.engineering, wh = st.webhook || {};
+        var html = '<div class="eng-panel"><h3>Webhook Telegram</h3><table class="eng-table" style="max-width:640px;">' +
+          integrationsRow("Статус", integrationsPill(wh.connected)) +
+          integrationsRow("Адрес", wh.url ? '<span style="font-size:11.5px;">'+escapeHtml(wh.url)+'</span>' : "—") +
+          integrationsRow("Последняя проверка", wh.last_checked_at ? fmtTs(wh.last_checked_at) : "—") +
+          integrationsRow("Необработанных обновлений у Telegram", wh.telegram_pending_update_count != null ? wh.telegram_pending_update_count : "—") +
+          (wh.last_error ? integrationsRow("Ошибка", '<span class="eng-status err">'+escapeHtml(wh.last_error)+'</span>') : "") +
+          (wh.telegram_last_error_message ? integrationsRow("Ошибка доставки у Telegram", '<span class="eng-status err">'+escapeHtml(wh.telegram_last_error_message)+'</span>'+(wh.telegram_last_error_date?' ('+fmtTs(wh.telegram_last_error_date*1000)+')':'')) : "") +
+          '</table><div class="eng-form-row" style="margin-top:8px;"><button type="button" class="eng-mini-btn" data-action="connect-webhook">Подключить webhook</button></div></div>';
+        html += '<div class="eng-panel"><h3>Личный Telegram-бот</h3><table class="eng-table" style="max-width:640px;">' +
           integrationsRow("Статус", integrationsPill(p.connected)) +
           integrationsRow("Разрешённые пользователи", (p.allowed_users||[]).length ? escapeHtml(p.allowed_users.join(", ")) : '<span style="color:var(--ink-faint);">любой в разрешённом чате</span>') +
           integrationsRow("Последняя команда", p.last_command_at ? fmtTs(p.last_command_at) : "—") +
@@ -3286,12 +3294,30 @@
         body.innerHTML = html;
       }).catch(function(err){ body.innerHTML = '<div class="eng-empty">Не удалось загрузить статус: '+escapeHtml(err.message)+'</div>'; });
   }
+  function connectTelegramWebhook(btn){
+    // renderIntegrationsView() below fully replaces this button's panel with a fresh one
+    // reflecting the real outcome, so there is nothing to restore on this (about to be
+    // discarded) element beyond disabling it for the duration of the request.
+    btn.disabled = true; btn.textContent = "Подключение…";
+    apiFetch("/api/whoami").then(function(who){
+      var headers = (who && who.csrf_token) ? { "X-CSRF-Token": who.csrf_token } : {};
+      return apiFetch("/api/telegram/webhook/connect", { method: "POST", headers: headers });
+    }).then(function(){
+      renderIntegrationsView();
+    }).catch(function(err){
+      renderIntegrationsView();
+      window.alert("Не удалось подключить webhook: " + err.message);
+    });
+  }
   document.getElementById("integrationsView").addEventListener("click", function(e){
     var btn = e.target.closest ? e.target.closest("[data-action]") : null;
     if(!btn) return;
     if(btn.getAttribute("data-action") === "integ-log-filter"){
       integrationsLogFilter = btn.getAttribute("data-ch") || null;
       renderIntegrationsView();
+    }
+    if(btn.getAttribute("data-action") === "connect-webhook"){
+      connectTelegramWebhook(btn);
     }
   });
 

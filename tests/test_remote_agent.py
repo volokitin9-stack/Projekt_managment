@@ -418,7 +418,8 @@ def test_dashboard_auth_protects_when_configured(tmp_path):
         assert r2.status_code == 200
 
         who = sess.get(s.url + "/api/whoami", timeout=10).json()
-        assert who == {"auth_required": True, "authenticated": True, "username": "admin"}
+        assert who["auth_required"] is True and who["authenticated"] is True and who["username"] == "admin"
+        assert who["csrf_token"] and isinstance(who["csrf_token"], str)  # see test_telegram_webhook_connect.py
 
         sess.post(s.url + "/api/logout", timeout=10)
         r3 = sess.get(s.url + "/api/projects", timeout=10)

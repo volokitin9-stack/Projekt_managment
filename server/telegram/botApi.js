@@ -54,6 +54,22 @@ function sendMessage(chatId, text, extra = {}) {
   return call("sendMessage", Object.assign({ chat_id: chatId, text }, extra));
 }
 
+/** Registers the webhook URL with Telegram. Used by the "Интеграции → Telegram" dashboard's
+ *  "Подключить webhook" button (server/routes/telegramAdmin.js) - never called automatically, and
+ *  never logs/returns secretToken. */
+function setWebhook(url, secretToken, { allowedUpdates, dropPendingUpdates = false } = {}) {
+  const body = { url, drop_pending_updates: dropPendingUpdates };
+  if (secretToken) body.secret_token = secretToken;
+  if (allowedUpdates) body.allowed_updates = allowedUpdates;
+  return call("setWebhook", body);
+}
+
+/** Telegram's own report of the currently registered webhook - no secrets in the response (the
+ *  Bot API never echoes secret_token back). */
+function getWebhookInfo() {
+  return call("getWebhookInfo", {});
+}
+
 /** Downloads a file by file_id and returns {buffer, mimeType, originalname, size} - the shape
  *  projectsModel.attachProjectFile() expects (the same one multer gives the multipart routes). */
 async function downloadFile(fileId, { mimeType, originalname } = {}) {
@@ -65,4 +81,4 @@ async function downloadFile(fileId, { mimeType, originalname } = {}) {
   return { buffer, mimeType: mimeType || "image/jpeg", originalname: originalname || info.file_path.split("/").pop(), size: buffer.length };
 }
 
-module.exports = { configured, sendMessage, downloadFile, call };
+module.exports = { configured, sendMessage, setWebhook, getWebhookInfo, downloadFile, call };

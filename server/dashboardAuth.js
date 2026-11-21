@@ -73,6 +73,31 @@ function clearSessionCookie(res) {
   res.setHeader("Set-Cookie", `${COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
 }
 
+/** A CSRF token bound to the current session cookie (HMAC - not guessable without it), or null if
+ *  there is no valid session. The frontend reads this once (GET /api/whoami) and must echo it back
+ *  as X-CSRF-Token on state-changing requests that reach outside this app (e.g. Telegram's
+ *  setWebhook) - defense in depth alongside the session cookie's own SameSite=Lax. */
+function csrfToken(req) {
+  if (!configured()) return null;
+  const cookies = parseCookies(req.get("cookie"));
+  const token = cookies[COOKIE_NAME];
+  if (!verify(token)) return null;
+  return crypto.createHmac("sha256", secret()).update(`csrf:${token}`).digest("base64url");
+}
+
+/** Express middleware: requires a matching X-CSRF-Token header (in addition to whatever session
+ *  check runs before it). No-op when dashboard auth is unconfigured, same as
+ *  requireDashboardSession - there is no session to bind a token to. */
+function requireCsrfToken(req, res, next) {
+  if (!configured()) return next();
+  const expected = csrfToken(req);
+  const got = req.get("X-CSRF-Token");
+  if (!expected || !got || got.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(got), Buffer.from(expected))) {
+    return res.status(403).json({ error: "Missing or invalid CSRF token" });
+  }
+  next();
+}
+
 /** Express middleware: 401s API calls, redirects page loads to a login prompt, when dashboard auth
  *  is configured and the request has no valid session. A no-op when DASHBOARD_USERNAME/PASSWORD are
  *  unset - see "configured()" above. */
@@ -110,7 +135,13 @@ function whoAmI(req, res) {
   if (!configured()) return res.json({ auth_required: false });
   const cookies = parseCookies(req.get("cookie"));
   const session = verify(cookies[COOKIE_NAME]);
-  res.json({ auth_required: true, authenticated: !!session, username: session ? session.u : null });
+  res.json({
+    auth_required: true, authenticated: !!session, username: session ? session.u : null,
+    csrf_token: session ? csrfToken(req) : null
+  });
 }
 
-module.exports = { configured, requireDashboardSession, login, logout, whoAmI, _verify: verify, _sign: sign };
+module.exports = {
+  configured, requireDashboardSession, requireCsrfToken, csrfToken, login, logout, whoAmI,
+  _verify: verify, _sign: sign
+};

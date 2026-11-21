@@ -36,7 +36,7 @@ const COLLECTIONS = ["stages", "docs", "projects", "project_activities", "projec
   "agent_events", "review_queue", "sync_runs", "plan_imports", "plan_source_versions", "plan_source_events",
   "plan_source_runs", "agent_jobs", "telegram_updates", "telegram_log"];
 // Single-object sections (added without a format change: missing = empty).
-const OBJECTS = ["plan_source", "agent_status", "telegram_digest"];
+const OBJECTS = ["plan_source", "agent_status", "telegram_digest", "telegram_webhook"];
 
 const DEFAULT_STAGES = [
   { key: "scanning", label: "Сканирование", sort_order: 1 },

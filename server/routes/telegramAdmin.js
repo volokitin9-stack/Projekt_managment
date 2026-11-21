@@ -12,11 +12,43 @@ const aiClient = require("../telegram/aiClient");
 const botApi = require("../telegram/botApi");
 const reviewQueue = require("../reviewQueueModel");
 const dailyDigest = require("../telegram/dailyDigest");
+const dashboardAuth = require("../dashboardAuth");
 
 const router = express.Router();
 
+// Критическое требование: setWebhook's target is a fixed, reviewed value - not a new env var and
+// not anything a request body can influence (ТЗ §3-4, "Доработка Telegram webhook"). Changing the
+// deployed domain means changing this constant, the same deliberate step as changing any other
+// hardcoded URL in this codebase.
+const WEBHOOK_URL = "https://projektmanagment-production.up.railway.app/api/telegram/webhook";
+
 function allowedUsers(csv) {
   return String(csv || "").split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+function webhookState() {
+  return store.read((s) => Object.assign({}, s.telegram_webhook));
+}
+
+function setWebhookState(fields) {
+  store.tx((s) => { s.telegram_webhook = Object.assign({}, s.telegram_webhook, fields); });
+}
+
+/** The webhook status shown on "Интеграции → Telegram" - never includes a secret, only the last
+ *  outcome of a registration attempt (ok/error, Telegram's own getWebhookInfo fields, when it was
+ *  last checked). */
+function webhookStatus() {
+  const st = webhookState();
+  return {
+    url: WEBHOOK_URL,
+    connected: st.ok === true && st.telegram_url === WEBHOOK_URL,
+    last_checked_at: st.last_checked_at || null,
+    last_ok: st.ok != null ? st.ok : null,
+    last_error: st.error || null,
+    telegram_pending_update_count: st.telegram_pending_update_count != null ? st.telegram_pending_update_count : null,
+    telegram_last_error_message: st.telegram_last_error_message || null,
+    telegram_last_error_date: st.telegram_last_error_date || null
+  };
 }
 
 router.get("/status", (req, res) => {
@@ -50,7 +82,8 @@ router.get("/status", (req, res) => {
       ambiguous_projects_pending: ambiguousProjects,
       processing_errors: engineering.errors
     },
-    daily_digest: dailyDigest.status()
+    daily_digest: dailyDigest.status(),
+    webhook: webhookStatus()
   });
 });
 
@@ -58,6 +91,50 @@ router.get("/log", (req, res) => {
   const channel = req.query.channel === "personal" || req.query.channel === "engineering" ? req.query.channel : null;
   const limit = Math.min(Number(req.query.limit) || 50, 500);
   res.json({ entries: telegramLog.recent(channel, limit) });
+});
+
+// "Подключить webhook" button on "Интеграции → Telegram" - registers WEBHOOK_URL with Telegram's
+// setWebhook, then verifies it via getWebhookInfo. Session-gated like every other route in this
+// file (the global middleware in server/index.js - this path isn't the exempted
+// "/api/telegram/webhook" literal), plus an explicit CSRF check since this one reaches outside the
+// app (defense in depth alongside the session cookie's own SameSite=Lax). Only ever uses
+// TELEGRAM_BOT_TOKEN/TELEGRAM_WEBHOOK_SECRET - no new env var, no request-supplied URL or secret.
+// Never logs or returns either value; Telegram's own getWebhookInfo response never includes one.
+router.post("/webhook/connect", dashboardAuth.requireCsrfToken, async (req, res) => {
+  const last_checked_at = new Date().toISOString();
+  if (!botApi.configured()) {
+    setWebhookState({ ok: false, error: "TELEGRAM_BOT_TOKEN is not configured", last_checked_at });
+    return res.status(501).json(webhookStatus());
+  }
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (!secret) {
+    setWebhookState({ ok: false, error: "TELEGRAM_WEBHOOK_SECRET is not configured", last_checked_at });
+    return res.status(501).json(webhookStatus());
+  }
+  try {
+    await botApi.setWebhook(WEBHOOK_URL, secret, { allowedUpdates: ["message"], dropPendingUpdates: false });
+  } catch (e) {
+    setWebhookState({ ok: false, error: e.message, last_checked_at });
+    telegramLog.record({ channel: "personal", outcome: "error", error: e.message, detail: "setWebhook failed" });
+    return res.status(502).json(webhookStatus());
+  }
+  let info;
+  try {
+    info = await botApi.getWebhookInfo();
+  } catch (e) {
+    setWebhookState({ ok: false, error: `setWebhook succeeded but getWebhookInfo failed: ${e.message}`, last_checked_at });
+    telegramLog.record({ channel: "personal", outcome: "error", error: e.message, detail: "getWebhookInfo failed after setWebhook" });
+    return res.status(502).json(webhookStatus());
+  }
+  setWebhookState({
+    ok: true, error: null, last_checked_at,
+    telegram_url: info.url || null,
+    telegram_pending_update_count: info.pending_update_count != null ? info.pending_update_count : null,
+    telegram_last_error_message: info.last_error_message || null,
+    telegram_last_error_date: info.last_error_date || null
+  });
+  telegramLog.record({ channel: "personal", outcome: "updated", detail: `webhook registered: ${WEBHOOK_URL}` });
+  res.json(webhookStatus());
 });
 
 // Test hooks: only with TELEGRAM_DIGEST_TEST_HOOKS=1 (automated tests); absent in normal operation.

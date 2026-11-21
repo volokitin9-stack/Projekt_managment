@@ -186,22 +186,46 @@ a group/supergroup) once a message from that chat has been logged, or via `getUp
 
 ## Setting up the webhook
 
+**From the dashboard (no shell access needed - Railway's own Console has neither `node` nor
+`curl`):** open "Интеграции → Telegram" and click **«Подключить webhook»**. This calls
+`POST /api/telegram/webhook/connect` (`server/routes/telegramAdmin.js`), which:
+1. Calls Telegram's `setWebhook` with a fixed, hardcoded URL
+   (`https://projektmanagment-production.up.railway.app/api/telegram/webhook` -
+   `TELEGRAM_BOT_TOKEN`/`TELEGRAM_WEBHOOK_SECRET` only, no new env var, nothing from the request
+   body), `allowed_updates: ["message"]`, `drop_pending_updates: false`.
+2. Verifies the result with `getWebhookInfo` - a plain "ok" from `setWebhook` alone is not treated
+   as success.
+3. Stores the outcome (`telegram_webhook` in `server/store.js`) and shows it right there: connected
+   yes/no, the registered URL, Telegram's own `pending_update_count`/`last_error_message`/
+   `last_error_date`, and when it was last checked. Never the bot token or the webhook secret,
+   in the UI or in `telegramLog`'s audit trail.
+
+Gated the same way as every other dashboard mutation: session-protected (`dashboardAuth`'s global
+middleware - this path is not the one exemption, `/api/telegram/webhook` itself), plus an explicit
+CSRF token (`GET /api/whoami`'s `csrf_token`, sent back as `X-CSRF-Token`) since this one action
+reaches outside the app. With no `DASHBOARD_USERNAME`/`PASSWORD` configured, the button works
+unauthenticated, exactly like the rest of the dashboard in that mode.
+
+**From a shell that has `curl`** (a local machine, not Railway's Console), the equivalent manual
+call still works and is unaffected by any of the above:
+
 ```bash
 curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
   -d "url=https://<your-railway-domain>/api/telegram/webhook" \
   -d "secret_token=<same value as TELEGRAM_WEBHOOK_SECRET>"
 ```
 
-Verify: `curl "https://api.telegram.org/bot<token>/getWebhookInfo"` should show your URL with
-`pending_update_count: 0` and no `last_error_message`.
+Verify either way: `curl "https://api.telegram.org/bot<token>/getWebhookInfo"` should show your URL
+with `pending_update_count: 0` and no `last_error_message` - the same thing the dashboard button
+already shows you.
 
 ## "Интеграции → Telegram" page
 
 `GET /api/telegram/status` (dashboard-session-protected, same as every other dashboard read) backs
-the two status blocks (personal bot / construction chat) in the dashboard's "Интеграции" tab:
-connection state, last command/message, counts, errors — never the token/secret/API key themselves
-(only whether each is configured). `GET /api/telegram/log?channel=personal|engineering&limit=N`
-backs the processing-log viewer.
+the status blocks in the dashboard's "Интеграции" tab - webhook connection state (see above),
+personal bot / construction chat, the daily digest - connection state, last command/message,
+counts, errors — never the token/secret/API key themselves (only whether each is configured).
+`GET /api/telegram/log?channel=personal|engineering&limit=N` backs the processing-log viewer.
 
 ## Stage 3 — testing before cutover (ТЗ §11)
 
@@ -285,7 +309,8 @@ backup; do that before, not instead of, this step).
 3. **Disable the two Claude scheduled triggers** (`Штурман: опрос Telegram`, `Штурман: утренняя
    сводка`) — do this only now, not earlier; they are what keeps the old behaviour available as a
    fallback through Stage 3.
-4. Point `setWebhook` at the production domain with the real secret (same command as above).
+4. Click **«Подключить webhook»** on "Интеграции → Telegram" (or run the `curl` command above) -
+   either way, confirm the status it shows is `connected: true` with no `last_error_message`.
 5. Send one message on each channel from the real `@II_Volokitinbot`/chats and confirm in
    `/api/telegram/log` and the dashboard.
 6. Watch `/api/telegram/status` and the server log for the first real day of traffic before
