@@ -56,10 +56,16 @@ OpenAI или любые другие внешние LLM API — ни через
 **A. Онлайн (после доработки Railway, см. `docs/KO_ANALYST.md`):** только GET-запросы
 к `${SHTURMAN_BASE_URL}/api/agent/ko/...` с заголовком `Authorization: Bearer $KO_ANALYST_API_KEY`:
 - `GET /api/agent/ko/messages?after=<cursor>&limit=200` — сообщения чата КО по возрастанию `seq`;
-- `GET /api/agent/ko/files/<file_id>` — байты фото (сохраняй в `.ko-analyst/files/`);
+- `GET /api/agent/ko/files/<file_id>` — байты фото (сохраняй в `.ko-analyst/files/`); `file_id` —
+  из `messages[].photos[].file_id`, только со `status: "stored"`;
 - `GET /api/agent/ko/projects` — проекты с этапами, артикулами, ответственными, активностями;
 - `GET /api/agent/ko/proposals?status=open` — уже поданные предложения (для дедупликации).
-Единственная запись: `POST /api/agent/ko/proposals` (пакет предложений, идемпотентно по `dedupe_key`).
+Единственная запись: `POST /api/agent/ko/proposals` с телом `{"proposals":[...]}` (до 100 штук).
+Сервер сам считает `dedupe_key`, подставляет автора/дату/ссылку из архива и отклоняет (400) весь
+пакет, если хоть одно `evidence` ссылается на сообщение не из архива КО или цитата `quote`
+не встречается в тексте сообщения дословно (регистр и пробелы не важны). Ответ по каждому:
+`created | updated | duplicate | already_resolved` — `already_resolved` значит, что человек уже
+применил или отклонил это предложение; не подавай его снова.
 Ключ берётся только из окружения, в команду его не подставляй литералом: `-H "Authorization: Bearer $KO_ANALYST_API_KEY"`.
 
 **B. Офлайн (работает уже сейчас):** локальный снимок в `.ko-analyst/inbox/`:
@@ -138,6 +144,10 @@ OpenAI или любые другие внешние LLM API — ни через
 Правила:
 - `evidence` обязателен: минимум одно исходное сообщение с `message_id` и точной цитатой.
   Ссылку строит `node tools/ko_analyst/ledger.js link <chat_id> <message_id>`.
+- `change.field` фиксирован типом: `stage_change` → `status`, `assignee_change` →
+  `assigned_engineer`, `deadline_change` → `planned_deadline`; другие поля предлагать нельзя.
+  Для `new_task`: `change.title`, необязательно `change.responsible`, `change.due` (YYYY-MM-DD).
+- `quote` — дословный фрагмент текста/подписи сообщения; для фото без подписи — пустая строка.
 - `requires_approval` всегда `true` для `stage_change`, `assignee_change`, `deadline_change`,
   `new_task`, `photo_link`. Ты никогда не применяешь изменения сам.
 - Одно предложение = один факт по одному проекту. Не дублируй уже открытое предложение с тем же

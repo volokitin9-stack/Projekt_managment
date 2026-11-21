@@ -1,6 +1,6 @@
 # Агент `shturman-ko-analyst` — анализ чата КО средствами Claude Code
 
-Статус: **этап 1 — агент создан, обмен с Railway спроектирован, но не реализован и не развёрнут.**
+Статус: **этап 2 — интеграция с «Штурманом» реализована и покрыта тестами, на Railway не развёрнута.**
 Автоматические запуски не настроены.
 
 ## Принцип
@@ -59,7 +59,7 @@ Telegram (чат КО) ──webhook──► Railway «Штурман»  ──
    Messages API, если задан `ANTHROPIC_API_KEY`. Чтобы не использовать платный API и не получать
    двойные предложения, в канале КО этот вызов нужно отключать флагом (см. п. «д»).
 
-## Что нужно добавить для обмена с Railway (проект, не реализовано)
+## Реализация обмена с Railway (этап 2)
 
 ### а) Архив сообщений КО — коллекция `ko_messages`
 
@@ -131,6 +131,37 @@ Telegram (чат КО) ──webhook──► Railway «Штурман»  ──
   `Authorization` сам; ключ не попадает в промпт, переменные окружения и логи). В команде агента
   достаточно фиктивного `$KO_ANALYST_API_KEY`.
 - `api.telegram.org` в эту среду не добавлять.
+
+### Где что лежит в коде
+
+| Пункт | Файлы |
+|---|---|
+| а) архив | `server/ko/archive.js`; вызов в начале `server/telegram/engineeringChannel.js#handle`; коллекции `ko_messages`, `ko_files`, объект `ko_archive` в `server/store.js` |
+| б) ключ | `server/auth.js#requireKoAnalystAuth` |
+| в) API агента | `server/routes/koAgent.js` (`/api/agent/ko/*`, смонтирован до `/api/agent`) |
+| г) подтверждение | `server/ko/proposals.js` (submit/apply/reject), `server/routes/koDashboard.js` (`/api/ko/*`), вкладка «Предложения агента КО» в `public/index.html` |
+| д) флаг | `engineeringChannel.aiEnabled()` |
+| общие правила | `server/ko/rules.js` (их же использует `tools/ko_analyst/ledger.js`) |
+
+Не менялись: `server/routes/telegramWebhook.js` (маршрут, секрет, `allowed_updates`), регистрация
+webhook, `plan_agent/`, `server/planSource/*`, `server/agentJobs.js`, существующие данные.
+
+### Как «Применить» повторяет проверки Канбана
+
+| Тип | Что вызывается | Те же проверки, что у |
+|---|---|---|
+| `stage_change` | `projectsModel.moveStage(source:"manual", expectedVersion)` + проверка, что этап не изменился с момента предложения | `POST /api/projects/:id/stage` |
+| `assignee_change`, `deadline_change` | `validateProjectInput(allowed: MANUAL_EDITABLE)` + `safeUpdate(source:"manual", expectedVersion)` | `PATCH /api/projects/:id` |
+| `work_done`, `problem` | добавление комментария через `safeUpdate` | `POST /api/projects/:id/comments` |
+| `photo_link` | `storage.validateFile` + `attachProjectFile` (дедупликация по чату/сообщению) | загрузка фото |
+| `new_task` | `docStore("tasks").create` во «Входящие» | `POST /api/tasks` |
+| `project_match`, `needs_clarification` | ничего не меняет, только «Принять к сведению» | — |
+
+Поле изменения фиксировано типом (`rules.FIELD_BY_KIND`), агент не может назвать другое поле.
+Применить может только человек: сессия дашборда + CSRF; ключ агента на `/api/ko/*` не принимается.
+Операция синхронная — двойной клик не применит дважды; применённое/отклонённое предложение закрыто
+навсегда. В историю проекта пишется переход/изменение от имени человека (`source: manual`) и запись
+`ko_proposal_applied` со ссылками на сообщения.
 
 ## Идемпотентность — три уровня
 

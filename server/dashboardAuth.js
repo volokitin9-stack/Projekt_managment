@@ -126,6 +126,13 @@ function login(req, res) {
   res.json({ ok: true });
 }
 
+/** Username of the current dashboard session (null without one / when auth is unconfigured). */
+function sessionUser(req) {
+  if (!configured()) return null;
+  const session = verify(parseCookies(req.get("cookie"))[COOKIE_NAME]);
+  return session ? session.u : null;
+}
+
 function logout(req, res) {
   clearSessionCookie(res);
   res.json({ ok: true });
@@ -142,6 +149,6 @@ function whoAmI(req, res) {
 }
 
 module.exports = {
-  configured, requireDashboardSession, requireCsrfToken, csrfToken, login, logout, whoAmI,
+  configured, requireDashboardSession, requireCsrfToken, csrfToken, sessionUser, login, logout, whoAmI,
   _verify: verify, _sign: sign
 };

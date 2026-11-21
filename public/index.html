@@ -807,6 +807,7 @@
     <button type="button" class="eng-subtab" data-subview="additional">Доп. работы<span class="n" id="engCntAdditional"></span></button>
     <button type="button" class="eng-subtab" data-subview="backlog">Банк задач<span class="n" id="engCntBacklog"></span></button>
     <button type="button" class="eng-subtab" data-subview="review">На проверке<span class="n" id="engCntReview"></span></button>
+    <button type="button" class="eng-subtab" data-subview="ko">Предложения агента КО<span class="n" id="engCntKo"></span></button>
     <button type="button" class="eng-subtab" data-subview="import">Импорт плана</button>
   </nav>
 
@@ -863,6 +864,7 @@
   <div id="engAdditionalView" class="eng-list-wrap" style="display:none;"></div>
   <div id="engBacklogView" class="eng-list-wrap" style="display:none;"></div>
   <div id="engReviewView" class="eng-list-wrap" style="display:none;"></div>
+  <div id="engKoView" class="eng-list-wrap" style="display:none;"></div>
   <div id="engImportView" class="eng-list-wrap" style="display:none;"></div>
 
 </div>
@@ -1484,6 +1486,7 @@
   var engCompletedProjects = []; // main engineering projects with a confirmed completion date
   var engAllRecords = [];    // every record incl. additional work and backlog
   var engReview = [];
+  var engKo = [];
   var engStagesLoaded = false;
   var engSubview = "board";
   var engUnconfirmedCollapsed = false;
@@ -1566,12 +1569,15 @@
     loadEngUpdateStatus();
     var ready = engStagesLoaded ? Promise.resolve() : loadStages().then(function(){ engStagesLoaded = true; });
     return ready.then(function(){
-      return Promise.all([apiFetch("/api/projects"), apiFetch("/api/review-queue").catch(function(){ return []; })]);
+      return Promise.all([apiFetch("/api/projects"), apiFetch("/api/review-queue").catch(function(){ return []; }),
+        apiFetch("/api/ko/proposals").catch(function(){ return { proposals: [] }; })]);
     }).then(function(res){
       engAllRecords = (res[0] || []).map(engNormalize);
       engProjects = engAllRecords.filter(function(p){ return p.record_category === "main_project" && !p.is_completed; });
       engCompletedProjects = engAllRecords.filter(function(p){ return p.record_category === "main_project" && p.is_completed; });
-      engReview = res[1] || [];
+      // agent proposals have their own screen with "Применить / Отклонить" (never the generic "Разобрано")
+      engReview = (res[1] || []).filter(function(r){ return r.kind !== "ko_proposal"; });
+      engKo = (res[2] && res[2].proposals) || [];
       renderEngBoard();
       renderEngSubviewLists();
       if(openDetailEngId && document.getElementById("detailPanel").classList.contains("open")) refreshEngDetail();
@@ -1787,6 +1793,7 @@
     document.getElementById("engCntAdditional").textContent = engAllRecords.filter(function(p){ return p.record_category === "additional_work"; }).length;
     document.getElementById("engCntBacklog").textContent = engAllRecords.filter(function(p){ return p.record_category === "backlog"; }).length;
     document.getElementById("engCntReview").textContent = engReview.filter(function(r){ return r.kind !== "image" && r.kind !== "telegram_photo"; }).length;
+    document.getElementById("engCntKo").textContent = engKo.length || "";
 
     var un = document.getElementById("engUnconfirmed");
     if(unconfirmed.length){
@@ -2228,6 +2235,67 @@
       "Нераспределённых фото нет. Снимки из Telegram, которые агент не смог уверенно сопоставить с проектом, появятся здесь для ручного подтверждения.");
   }
 
+  // ---- shturman-ko-analyst proposals (server/ko/proposals.js): nothing changes until a person applies ----
+  var KO_KIND = { stage_change:"Смена этапа", assignee_change:"Смена ответственного", deadline_change:"Смена срока",
+    work_done:"Выполненная работа", problem:"Проблема", new_task:"Новая задача", photo_link:"Фото к проекту",
+    project_match:"Сопоставление проекта", needs_clarification:"Требует уточнения" };
+  var KO_CONF = { high:"высокая", medium:"средняя", low:"низкая" };
+  function koProjectLabel(pl){
+    var p = pl.resolved_project_id ? engAllRecords.filter(function(x){ return x.id === pl.resolved_project_id; })[0] : null;
+    if(p) return p.project_name || [p.manufacturer, p.vehicle_model, p.product_type].filter(Boolean).join(" ");
+    var r = pl.project_ref || {};
+    return [r.manufacturer, r.vehicle_model, r.product_type, r.article_number].filter(Boolean).join(" ") || "—";
+  }
+  function koChangeLabel(pl){
+    var c = pl.change || {};
+    if(pl.kind === "stage_change") return (ENG_STAGE_LABELS[c.from]||c.from||"—")+" → "+(ENG_STAGE_LABELS[c.to]||c.to);
+    if(pl.kind === "assignee_change" || pl.kind === "deadline_change") return (c.from||"—")+" → "+c.to;
+    if(pl.kind === "new_task") return c.title + (c.responsible ? " · "+c.responsible : "") + (c.due ? " · до "+c.due : "");
+    return "";
+  }
+  function engKoHtml(){
+    if(!engKo.length) return '<div class="eng-empty">Предложений агента нет. Агент shturman-ko-analyst только предлагает изменения — проекты меняются лишь после «Применить».</div>';
+    var rows = engKo.map(function(r){
+      var pl = r.payload || {};
+      var ev = (pl.evidence || []).map(function(e){
+        var link = /^https:\/\/t\.me\//.test(e.link||"") ? ' <a href="'+escapeHtml(e.link)+'" target="_blank" rel="noopener noreferrer" style="color:var(--accent-ink);">сообщение</a>' : '';
+        return '<div style="font-size:11.5px;margin-top:3px;"><b>'+escapeHtml(e.author||"?")+'</b> '+escapeHtml((e.date||"").slice(0,16).replace("T"," "))+': «'+escapeHtml(e.quote||"")+'»'+link+'</div>';
+      }).join("");
+      var ph = (pl.photos || []).map(function(f){
+        return '<img src="/api/ko/files/'+encodeURIComponent(f.file_id)+'" alt="" loading="lazy" style="width:64px;height:64px;object-fit:cover;border-radius:4px;margin:3px 3px 0 0;" title="'+escapeHtml(f.observation||"")+'">';
+      }).join("");
+      var unresolved = !pl.resolved_project_id && ["new_task","needs_clarification"].indexOf(pl.kind) === -1;
+      var applyLabel = (pl.kind === "project_match" || pl.kind === "needs_clarification") ? "Принять к сведению" : "Применить";
+      return '<tr><td>'+escapeHtml(KO_KIND[pl.kind]||pl.kind)+'<div style="font-size:11px;color:var(--ink-faint);">уверенность: '+escapeHtml(KO_CONF[pl.confidence]||pl.confidence||"—")+'</div></td>' +
+        '<td>'+escapeHtml(koProjectLabel(pl))+(unresolved ? '<div style="font-size:11px;color:var(--danger,#b42318);">'+escapeHtml(pl.resolution_note||"проект не определён")+'</div>' : '')+'</td>' +
+        '<td style="max-width:420px;"><div>'+escapeHtml(pl.summary||"")+'</div>'+(koChangeLabel(pl)?'<div style="font-weight:600;margin-top:3px;">'+escapeHtml(koChangeLabel(pl))+'</div>':'') +
+        '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:3px;">'+escapeHtml(pl.rationale||"")+'</div>'+ev+(ph?'<div>'+ph+'</div>':'')+'</td>' +
+        '<td><button type="button" class="eng-mini-btn" data-action="ko-apply" data-id="'+escapeHtml(r.id)+'"'+(unresolved?' disabled title="Проект не определён однозначно"':'')+'>'+applyLabel+'</button> ' +
+        '<button type="button" class="eng-mini-btn" data-action="ko-reject" data-id="'+escapeHtml(r.id)+'">Отклонить</button></td></tr>';
+    }).join("");
+    return '<div class="eng-panel"><h3>Предложения агента КО</h3><div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Выводы агента по сообщениям и фото чата КО. Каждое изменение применяется теми же проверками, что и ручное редактирование, и записывается в историю проекта со ссылками на сообщения.</div>' +
+      '<table class="eng-table"><tr><th>Тип</th><th>Проект</th><th>Суть, обоснование, источники</th><th></th></tr>'+rows+'</table></div>';
+  }
+  function koAction(id, action){
+    var item = engKo.filter(function(r){ return r.id === id; })[0];
+    if(!item) return;
+    var pl = item.payload || {}, body = {};
+    if(action === "apply"){
+      var p = engAllRecords.filter(function(x){ return x.id === pl.resolved_project_id; })[0];
+      if(p) body.version = p.version;
+      var what = (KO_KIND[pl.kind]||pl.kind) + (koChangeLabel(pl) ? ": "+koChangeLabel(pl) : "") + "\nПроект: " + koProjectLabel(pl);
+      if(!window.confirm("Применить предложение агента?\n\n"+what)) return;
+    } else {
+      var reason = window.prompt("Отклонить предложение. Причина (необязательно):", "");
+      if(reason === null) return;
+      body.reason = reason;
+    }
+    apiFetch("/api/whoami").then(function(who){
+      var headers = (who && who.csrf_token) ? { "X-CSRF-Token": who.csrf_token } : {};
+      return apiFetch("/api/ko/proposals/"+encodeURIComponent(id)+"/"+action, { method:"POST", headers: headers, body: body });
+    }).then(loadEngProjects).catch(function(err){ showSyncNote((action === "apply" ? "Не применено: " : "Не отклонено: ")+err.message); loadEngProjects(); });
+  }
+
   // ---- completed projects: a lifecycle status independent of the Kanban stage (section 10) ----
   var engCompletedSearch = "";
   var engCompletedSort = { key:"actual_completion_date", dir:-1 };
@@ -2405,6 +2473,7 @@
     if(engSubview === "additional") a.innerHTML = engRecordsTable("additional_work");
     if(engSubview === "backlog") b.innerHTML = engRecordsTable("backlog");
     if(engSubview === "review") rv.innerHTML = engReviewHtml();
+    if(engSubview === "ko") document.getElementById("engKoView").innerHTML = engKoHtml();
     if(engSubview === "photos") ph.innerHTML = engPhotosQueueHtml();
     if(engSubview === "completed" && !(document.activeElement && cp.contains(document.activeElement))) cp.innerHTML = engCompletedTableHtml();
     if(engSubview === "import" && !(document.activeElement && im.contains(document.activeElement))) im.innerHTML = engImportHtml();
@@ -2420,6 +2489,7 @@
     document.getElementById("engAdditionalView").style.display = v === "additional" ? "" : "none";
     document.getElementById("engBacklogView").style.display = v === "backlog" ? "" : "none";
     document.getElementById("engReviewView").style.display = v === "review" ? "" : "none";
+    document.getElementById("engKoView").style.display = v === "ko" ? "" : "none";
     document.getElementById("engImportView").style.display = v === "import" ? "" : "none";
     if(v === "import") loadImports();
     renderEngSubviewLists();
@@ -2445,6 +2515,11 @@
       return;
     }
     if(act === "toggle-unconfirmed"){ engUnconfirmedCollapsed = !engUnconfirmedCollapsed; renderEngBoard(); return; }
+    if(act === "ko-apply" || act === "ko-reject"){
+      e.stopPropagation();
+      koAction(btn.getAttribute("data-id"), act === "ko-apply" ? "apply" : "reject");
+      return;
+    }
     if(act === "eng-resolve-review"){
       apiFetch("/api/review-queue/"+encodeURIComponent(btn.getAttribute("data-id"))+"/resolve", { method:"POST", body:{ resolution:"resolved" } })
         .then(loadEngProjects).catch(function(err){ showSyncNote(err.message); });

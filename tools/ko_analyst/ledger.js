@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 "use strict";
 
-// Local, deterministic helper for the `shturman-ko-analyst` subagent. No network, no dependencies.
+// Local, deterministic helper (validation + dedupe keys shared with the server: server/ko/rules.js) for the `shturman-ko-analyst` subagent. No network, no dependencies.
 // The model does the reading/understanding; this script does the parts that must be exact:
 // validation of proposals, stable dedupe keys, idempotent merge, cursor, Telegram message links.
 //
@@ -22,14 +22,10 @@
 
 const fs = require("fs");
 const path = require("path");
-const crypto = require("crypto");
 
-const KINDS = ["stage_change", "assignee_change", "deadline_change", "work_done", "problem", "new_task",
-  "photo_link", "project_match", "needs_clarification"];
-const GATED = ["stage_change", "assignee_change", "deadline_change", "new_task", "photo_link", "project_match"];
-const STATE_KINDS = ["stage_change", "assignee_change", "deadline_change"];
-const STAGES = ["scanning", "development", "prototype", "measurement", "documentation"];
-const CONFIDENCE = ["high", "medium", "low"];
+const rules = require("../../server/ko/rules");
+
+const { GATED, link, dedupeKey, validate, evidenceKey, photoKey } = rules;
 
 function dir() {
   return path.resolve(process.env.KO_ANALYST_DIR || ".ko-analyst");
@@ -42,77 +38,6 @@ function writeJson(file, value) {
   const tmp = `${file}.tmp-${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
   fs.renameSync(tmp, file);
-}
-
-function norm(v) {
-  if (v == null) return "";
-  return String(v).toLowerCase().replace(/ё/g, "е").replace(/[\s.\-_/]+/g, " ").trim();
-}
-function normArticle(v) {
-  return v == null ? "" : String(v).toLowerCase().replace(/[^0-9a-zа-я]/g, "");
-}
-
-/** Public link for a supergroup message (chat_id -100XXXXXXXXXX). Other chats have no t.me link. */
-function link(chatId, messageId) {
-  const c = String(chatId);
-  if (/^-100\d+$/.test(c)) return `https://t.me/c/${c.slice(4)}/${Number(messageId)}`;
-  return `tg-message:${c}:${Number(messageId)}`;
-}
-
-function projectIdentity(ref = {}) {
-  if (ref.project_id) return `id:${ref.project_id}`;
-  if (ref.external_project_id) return `ext:${norm(ref.external_project_id)}`;
-  if (ref.article_number) return `art:${normArticle(ref.article_number)}`;
-  return `mmp:${[ref.manufacturer, ref.vehicle_model, ref.product_type].map(norm).join("|")}`;
-}
-function evidenceKey(e) {
-  return `${String(e.chat_id)}:${Number(e.message_id)}`;
-}
-
-function dedupeKey(p) {
-  const proj = projectIdentity(p.project_ref);
-  let basis;
-  if (STATE_KINDS.includes(p.kind)) {
-    basis = [p.kind, proj, norm((p.change || {}).field), norm((p.change || {}).to)];
-  } else if (p.kind === "new_task") {
-    basis = [p.kind, proj, norm((p.change || {}).title || p.summary)];
-  } else if (p.kind === "photo_link") {
-    const ph = (p.photos || []).map((x) => x.file_id || `${x.chat_id || ""}:${x.message_id}`).sort();
-    basis = [p.kind, proj, ph.join(",")];
-  } else {
-    basis = [p.kind, proj, (p.evidence || []).map(evidenceKey).sort().join(",")];
-  }
-  return "ko:v1:" + crypto.createHash("sha256").update(basis.join("␟")).digest("hex").slice(0, 32);
-}
-
-function validate(p, i) {
-  const errs = [];
-  const at = `#${i}`;
-  if (!p || typeof p !== "object") return [`${at}: не объект`];
-  if (!KINDS.includes(p.kind)) errs.push(`${at}: kind должен быть одним из ${KINDS.join(", ")}`);
-  if (!CONFIDENCE.includes(p.confidence)) errs.push(`${at}: confidence = high|medium|low`);
-  if (p.confidence === "low" && p.kind !== "needs_clarification") errs.push(`${at}: low-уверенность допустима только для needs_clarification`);
-  if (!p.summary || typeof p.summary !== "string") errs.push(`${at}: нужен summary`);
-  if (!p.rationale || typeof p.rationale !== "string") errs.push(`${at}: нужно обоснование rationale`);
-  if (!Array.isArray(p.evidence) || !p.evidence.length) errs.push(`${at}: нужен хотя бы один evidence`);
-  (p.evidence || []).forEach((e, j) => {
-    if (!e || e.chat_id == null || !Number.isFinite(Number(e.message_id))) errs.push(`${at}.evidence[${j}]: нужны chat_id и message_id`);
-    else if (!e.quote) errs.push(`${at}.evidence[${j}]: нужна цитата quote`);
-  });
-  if (p.kind !== "needs_clarification") {
-    const r = p.project_ref || {};
-    const hasId = r.project_id || r.external_project_id || r.article_number || (r.manufacturer && r.vehicle_model);
-    if (!hasId) errs.push(`${at}: project_ref должен однозначно указывать проект`);
-  }
-  if (STATE_KINDS.includes(p.kind)) {
-    const c = p.change || {};
-    if (!c.field || c.to == null) errs.push(`${at}: change.field и change.to обязательны`);
-    if (p.kind === "stage_change" && !STAGES.includes(c.to)) errs.push(`${at}: change.to должен быть этапом ${STAGES.join("|")}`);
-    if (p.kind === "stage_change" && c.from && c.from === c.to) errs.push(`${at}: этап не меняется`);
-    if (p.kind === "deadline_change" && !/^\d{4}-\d{2}-\d{2}$/.test(String(c.to))) errs.push(`${at}: срок в формате YYYY-MM-DD`);
-  }
-  if (p.kind === "photo_link" && !(Array.isArray(p.photos) && p.photos.length)) errs.push(`${at}: photo_link без photos`);
-  return errs;
 }
 
 function merge(file) {
@@ -143,8 +68,8 @@ function merge(file) {
     } else {
       const known = new Set(prev.evidence.map(evidenceKey));
       const added = p.evidence.filter((e) => !known.has(evidenceKey(e)));
-      const knownPhotos = new Set((prev.photos || []).map((x) => x.file_id || `${x.chat_id}:${x.message_id}`));
-      const addedPhotos = (p.photos || []).filter((x) => !knownPhotos.has(x.file_id || `${x.chat_id}:${x.message_id}`));
+      const knownPhotos = new Set((prev.photos || []).map(photoKey));
+      const addedPhotos = (p.photos || []).filter((x) => !knownPhotos.has(photoKey(x)));
       if (!added.length && !addedPhotos.length) { stats.duplicate += 1; continue; }
       prev.evidence = prev.evidence.concat(added);
       if (addedPhotos.length) prev.photos = (prev.photos || []).concat(addedPhotos);
@@ -165,7 +90,7 @@ function seen(chatId, messageId) {
   return state.processed[`${String(chatId)}:${Number(messageId)}`] ? "seen" : "new";
 }
 
-module.exports = { link, dedupeKey, validate, merge, seen, projectIdentity };
+module.exports = { link, dedupeKey, validate, merge, seen, projectIdentity: rules.projectIdentity };
 
 if (require.main === module) {
   const [cmd, a, b] = process.argv.slice(2);

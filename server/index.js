@@ -28,6 +28,8 @@ const planSourceRouter = require("./routes/planSource");
 const agentJobsRouter = require("./routes/agentJobs");
 const telegramWebhookRouter = require("./routes/telegramWebhook");
 const telegramAdminRouter = require("./routes/telegramAdmin");
+const koAgentRouter = require("./routes/koAgent");
+const koDashboardRouter = require("./routes/koDashboard");
 const planScheduler = require("./planSource/scheduler");
 const telegramDailyDigest = require("./telegram/dailyDigest");
 const store = require("./store");
@@ -85,6 +87,9 @@ app.use("/api/agent-jobs", agentJobsRouter);
 app.use("/api/telegram", telegramWebhookRouter);
 app.use("/api/telegram", telegramAdminRouter);
 
+// shturman-ko-analyst proposals review (dashboard session + CSRF) - server/routes/koDashboard.js.
+app.use("/api/ko", koDashboardRouter);
+
 // Synchronisation runs recorded by the planning agent (read-only for the dashboard).
 app.get("/api/sync-runs", (req, res) => {
   res.json(agentRouter.listSyncRuns());
@@ -94,6 +99,10 @@ app.get("/api/sync-runs/:id", (req, res) => {
   if (!run) return res.status(404).json({ error: "Not found" });
   res.json(Object.assign({}, run, { report: store.loadRunReport(run.id) }));
 });
+
+// shturman-ko-analyst API (KO_ANALYST_API_KEY only: archive reads + proposals). Must be mounted
+// before the general /api/agent router so these paths never reach AGENT_API_KEY routes.
+app.use("/api/agent/ko", koAgentRouter);
 
 // Agent-facing write API — everything under here requires AGENT_API_KEY auth (see server/auth.js).
 app.use("/api/agent", agentRouter);
