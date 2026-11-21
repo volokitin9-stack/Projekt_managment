@@ -101,12 +101,59 @@ async function reply(chatId, text) {
   } catch (e) { /* best-effort; the outcome is still logged either way */ }
 }
 
+// Критическое требование ("не обрабатывать /start и /help через ИИ"): a handful of commands need
+// no natural-language interpretation at all - no field to extract, nothing ambiguous - so they are
+// recognised and answered here, before aiClient.classify() is ever called, and keep working
+// exactly the same whether the AI is configured, reachable, or completely unavailable (no
+// Anthropic credit, network down, etc.). Everything else in this channel's design is genuinely
+// NL-driven (create/close/update a task by free text) and has no non-AI equivalent - that was the
+// actual audit result for "which commands can run without AI" (ТЗ "Доработка Telegram: /start без
+// ИИ", п.2): only a command with nothing left to interpret qualifies. /tasks (alias /list) is the
+// one task-management command that qualifies, since listing needs no extraction - it reuses the
+// exact same formatting as the AI-driven list_tasks intent (listTasks() below).
+const HELP_TEXT = "Привет! Я бот «Штурман» — помогаю вести личные задачи и подсказываю по инженерным проектам.\n\n" +
+  "Просто напишите, что нужно сделать, например:\n" +
+  "«Проверить крепление защиты картера, срок завтра»\n" +
+  "«Покажи активные задачи»\n" +
+  "«Закрой задачу про крепление»\n\n" +
+  "Эти команды работают без ИИ, даже если интеллектуальная обработка временно недоступна:\n" +
+  "/tasks — список активных задач\n" +
+  "/help — эта справка";
+
+/** The command word of a Telegram "/command" message (lowercase, without "@botname" or arguments),
+ *  or null if `text` isn't a command. */
+function commandName(text) {
+  const m = text.match(/^\/([a-zA-Z_]+)(?:@\S+)?(?:\s|$)/);
+  return m ? m[1].toLowerCase() : null;
+}
+
+async function listTasks(filter, base, chatId) {
+  let list = tasksStore.list();
+  if (filter === "active") list = list.filter((t) => !t.done);
+  else if (filter === "overdue") list = list.filter(overdue);
+  else if (filter === "done") list = list.filter((t) => t.done);
+  telegramLog.record(Object.assign({}, base, { outcome: "listed", detail: `${filter}:${list.length}` }));
+  if (!list.length) { await reply(chatId, "Таких задач нет."); return; }
+  await reply(chatId, list.slice(0, 40).map((t, i) => `${i + 1}. ${taskLine(t)}`).join("\n"));
+}
+
 async function handle(message, ctx) {
   const chatId = ctx.chatId;
   const text = (message.text || "").trim();
   const base = { channel: "personal", chat_id: chatId, user_id: ctx.userId, update_id: ctx.updateId, message_text: text };
   if (!text) {
     telegramLog.record(Object.assign({}, base, { outcome: "ignored", detail: "no text" }));
+    return;
+  }
+
+  const cmd = commandName(text);
+  if (cmd === "start" || cmd === "help") {
+    telegramLog.record(Object.assign({}, base, { outcome: "replied", detail: `/${cmd}` }));
+    await reply(chatId, HELP_TEXT);
+    return;
+  }
+  if (cmd === "tasks" || cmd === "list") {
+    await listTasks("active", base, chatId);
     return;
   }
 
@@ -121,6 +168,11 @@ async function handle(message, ctx) {
       toolName: "personal_action", toolSchema: TOOL_SCHEMA
     });
   } catch (e) {
+    // Критическое требование: never show the user an Anthropic error or any other internal
+    // detail - a plain, friendly "temporarily unavailable" message, whatever the underlying cause
+    // (missing credit, network, malformed response - aiClient.classify()'s e.code, logged below
+    // for the admin, is never echoed to Telegram). The message itself is never lost: queued in the
+    // review queue (telegram_pending) for a person to handle, same as any other unmatched record.
     const { upsert } = require("../reviewQueueModel");
     upsert({ kind: "telegram_pending", payload: base, reason: `ИИ недоступен: ${e.message}`, source: "telegram" });
     telegramLog.record(Object.assign({}, base, { outcome: "queued", detail: e.message }));
@@ -131,8 +183,11 @@ async function handle(message, ctx) {
   try {
     await execute(action, base, chatId);
   } catch (e) {
+    // Same rule as above: whatever this error actually is (a version conflict, a data error -
+    // nothing to do with the AI), the user only ever sees a generic message; the real one is only
+    // in telegramLog, for the dashboard.
     telegramLog.record(Object.assign({}, base, { outcome: "error", error: e.message }));
-    await reply(chatId, `Не получилось выполнить: ${e.message}`);
+    await reply(chatId, "Не получилось выполнить команду. Попробуйте переформулировать или повторить позже.");
   }
 }
 
@@ -163,14 +218,7 @@ async function execute(action, base, chatId) {
   }
 
   if (action.intent === "list_tasks") {
-    const filter = action.filter || "active";
-    let list = tasksStore.list();
-    if (filter === "active") list = list.filter((t) => !t.done);
-    else if (filter === "overdue") list = list.filter(overdue);
-    else if (filter === "done") list = list.filter((t) => t.done);
-    telegramLog.record(Object.assign({}, base, { outcome: "listed", detail: `${filter}:${list.length}` }));
-    if (!list.length) { await reply(chatId, "Таких задач нет."); return; }
-    await reply(chatId, list.slice(0, 40).map((t, i) => `${i + 1}. ${taskLine(t)}`).join("\n"));
+    await listTasks(action.filter || "active", base, chatId);
     return;
   }
 

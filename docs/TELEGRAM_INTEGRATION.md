@@ -164,6 +164,62 @@ stage), that should go through `safeUpdate` with `source: "telegram"`, which alr
 in the same manual-edit-protection and field-history rules as Excel and the dashboard — this is a
 design note for that future work, not something this change needed.
 
+### Degraded mode: the AI is unavailable (no Anthropic credit, network, bad response)
+
+**Incident and fix.** `/start` stopped working after the Anthropic account ran out of credit -
+the webhook log showed `Anthropic API returned HTTP 400: Your credit balance is too low...`. Root
+cause: `/start` went through `aiClient.classify()` like every other message, even though it needs
+no interpretation at all - there is nothing to extract, nothing ambiguous. With the AI down, it hit
+the same generic "AI unavailable" fallback as a real natural-language command.
+
+**What needs the AI and what doesn't (the actual audit, п.2 of this fix's ТЗ).** This channel's
+whole design is natural-language-driven - free text in, a structured action out
+(`personalChannel.js`'s `TOOL_SCHEMA`). Creating, closing or updating a task by description
+genuinely has no deterministic equivalent: there is a title, a responsible person, a due date to
+extract from whatever the user actually typed, and that extraction *is* the AI's job. The one
+exception is listing: "show my active tasks" needs no extraction, only formatting already-known
+data. So the non-AI command set is, and will stay, small and explicit:
+
+- `/start`, `/help` - a short description of the bot and this same list, nothing database-related.
+- `/tasks` (alias `/list`) - active tasks, formatted exactly like the AI-driven `list_tasks` intent
+  (`listTasks()`, shared by both paths - one implementation, not two).
+
+All three are recognised in `personalChannel.js`'s `handle()` *before* `aiClient.classify()` is
+ever called, so they work identically whether the AI is configured, reachable, unreachable, or
+out of credit - requirement 1 of this fix. If a deterministic equivalent for another command ever
+becomes worth adding, the same pattern applies: only add one when there is truly nothing left to
+interpret, never a heuristic guess standing in for the AI.
+
+**Never leaking an AI failure to a Telegram user (requirement 4).** Every path that calls
+`aiClient.classify()` catches its error and replies with one fixed, friendly sentence ("Не удалось
+обработать сообщение прямо сейчас (ИИ временно недоступен). Сохранил его, обработаю позже.") -
+never `e.message` (Anthropic's own wording, an HTTP status, a stack trace), whatever the failure
+actually was (`aiClient.js`'s `error.code`: `not_configured` | `network_error` | `api_error` |
+`bad_response` - all handled identically, so a missing credit, a network blip and a malformed
+response read the same to the end user). The engineering channel never replies at all, so this
+doesn't apply there by construction (see below). `personalChannel.js`'s other catch - around
+*executing* an already-classified action, nothing to do with the AI - was tightened the same way
+(a plain "не получилось выполнить команду", not the underlying error) rather than leaving a second,
+narrower leak.
+
+**Never losing a message (requirement 5).** This was already true before this fix and is
+unchanged: both channels queue the message as `review_queue` kind `"telegram_pending"`
+(`reason: "ИИ недоступен: ..."`) instead of dropping it, and the engineering channel still
+downloads and queues any photo on the same message even when the AI call around it failed. What
+this fix adds is *visibility*: `GET /api/telegram/status`'s `personal`/`engineering` blocks now
+report `ai_unavailable_pending` (how many `telegram_pending` items are open for that channel) and
+`ai_unavailable_last_at`, shown on "Интеграции → Telegram" as soon as either count is nonzero -
+before this fix, these items existed but were invisible outside the generic engineering review
+table. There is still no automatic re-processing once the AI comes back - a person resolves these
+from the review queue, same as any other queued record; that is unchanged scope, not part of this
+fix.
+
+**The engineering chat stays read-only regardless (requirement 6).** None of the above changes
+`engineeringChannel.js`'s behaviour of never calling `sendMessage` - it has no reply path to patch,
+and `botApi.js`'s own hard guard (see above) would refuse any accidental attempt either way. Tested
+explicitly for the AI-unavailable case (`tests/test_telegram.py::test_insufficient_anthropic_credit_in_the_engineering_chat_queues_and_stays_silent`),
+not just assumed from the happy-path tests.
+
 ## Environment variables (see `.env.example` for the full block with defaults)
 
 | Variable | Required for | Notes |

@@ -58,6 +58,14 @@ router.get("/status", (req, res) => {
   const unassignedPhotos = reviewQueue.list({ kind: "telegram_photo" }).length;
   const ambiguousProjects = reviewQueue.list({ kind: "telegram_ambiguous_project" }).length;
   const photosSaved = store.read((s) => s.project_files.filter((f) => f.source === "telegram" && f.kind === "image").length);
+  // Критическое требование: messages that couldn't be processed because the AI was unavailable
+  // (e.g. no Anthropic credit) are never dropped - personalChannel.js/engineeringChannel.js queue
+  // them as review_queue kind "telegram_pending" instead. Surfaced here per channel so this isn't
+  // invisible outside the generic review-queue table.
+  const aiPending = reviewQueue.list({ kind: "telegram_pending" });
+  const aiPendingFor = (channel) => aiPending.filter((r) => (r.payload || {}).channel === channel);
+  const personalAiPending = aiPendingFor("personal");
+  const engineeringAiPending = aiPendingFor("engineering");
   res.json({
     bot_configured: botApi.configured(),
     ai_configured: aiClient.configured(),
@@ -68,7 +76,9 @@ router.get("/status", (req, res) => {
       last_command_at: personal.last_message_at,
       last_action: personal.last ? `${personal.last.outcome}${personal.last.detail ? ": " + personal.last.detail : ""}` : null,
       tasks_created: personal.by_outcome.created || 0,
-      processing_errors: personal.errors
+      processing_errors: personal.errors,
+      ai_unavailable_pending: personalAiPending.length,
+      ai_unavailable_last_at: personalAiPending.length ? personalAiPending[personalAiPending.length - 1].updated_at : null
     },
     engineering: {
       connected: !!(process.env.TELEGRAM_ENGINEERING_CHAT_ID && botApi.configured()),
@@ -80,7 +90,9 @@ router.get("/status", (req, res) => {
       stage_proposals_pending: stageProposals,
       unassigned_photos_pending: unassignedPhotos,
       ambiguous_projects_pending: ambiguousProjects,
-      processing_errors: engineering.errors
+      processing_errors: engineering.errors,
+      ai_unavailable_pending: engineeringAiPending.length,
+      ai_unavailable_last_at: engineeringAiPending.length ? engineeringAiPending[engineeringAiPending.length - 1].updated_at : null
     },
     daily_digest: dailyDigest.status(),
     webhook: webhookStatus()

@@ -23,6 +23,8 @@ ENG_CHAT = "-2000"
 
 def fake_anthropic(rules):
     """rules: list of (substring, tool_input_dict). First match wins; no match -> 500."""
+    calls = []
+
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
@@ -30,6 +32,7 @@ def fake_anthropic(rules):
         def do_POST(self):
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length) or b"{}")
+            calls.append(body)
             prompt = (body.get("messages") or [{}])[0].get("content", "")
             tool_name = (body.get("tools") or [{}])[0].get("name", "action")
             for needle, result in rules:
@@ -48,6 +51,7 @@ def fake_anthropic(rules):
             self.wfile.write(raw)
 
     srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    srv.calls = calls
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
 
@@ -459,3 +463,128 @@ def test_engineering_channel_ai_failure_path_never_sends_anything_either(tmp_pat
             srv.stop()
     finally:
         anthropic_srv.shutdown()
+
+
+# ------------------------------------------------------------------ critical fix: /start, /help,
+# /tasks work without AI; no Anthropic/internal errors ever reach a Telegram user; nothing is lost
+# when the AI is unavailable (e.g. no Anthropic credit)
+
+def fake_anthropic_insufficient_credit():
+    """The exact real-world failure this fix is for: every call gets Anthropic's own HTTP 400
+    "credit balance too low" response, regardless of prompt content."""
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            self.rfile.read(length)
+            raw = json.dumps({"type": "error", "error": {"type": "invalid_request_error",
+                "message": "Your credit balance is too low to access the Anthropic API. Please go to Plans "
+                           "& Billing to upgrade or purchase credits."}}).encode()
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+@pytest.fixture
+def no_credit_anthropic():
+    srv = fake_anthropic_insufficient_credit()
+    yield srv
+    srv.shutdown()
+
+
+def test_start_and_help_never_call_the_ai_even_when_it_is_healthy(tmp_path, anthropic, telegram):
+    """/start and /help need no interpretation at all - critical requirement: they must never go
+    through aiClient.classify(), whether or not the AI happens to be working."""
+    srv = _server(tmp_path, anthropic, telegram)
+    try:
+        r1 = post(srv, update(OWNER_CHAT, OWNER_USER, "/start", update_id=40))
+        assert r1.status_code == 200
+        r2 = post(srv, update(OWNER_CHAT, OWNER_USER, "/help", update_id=41))
+        assert r2.status_code == 200
+        assert len(telegram.sent_messages) == 2
+        for sent in telegram.sent_messages:
+            assert "Штурман" in sent["text"] and "/tasks" in sent["text"]
+        assert anthropic.calls == [], "aiClient.classify() must never be called for /start or /help"
+    finally:
+        srv.stop()
+
+
+def test_start_help_and_tasks_keep_working_with_no_anthropic_credit(tmp_path, no_credit_anthropic, telegram):
+    """The actual bug report: /start did not work because it went through the AI, and the AI had
+    no credit. These three commands must work completely normally in exactly that situation."""
+    srv = _server(tmp_path, no_credit_anthropic, telegram)
+    try:
+        requests.post(srv.url + "/api/tasks", json={"title": "Проверить крепление", "quadrant": "inbox"}, timeout=10)
+
+        post(srv, update(OWNER_CHAT, OWNER_USER, "/start", update_id=50))
+        post(srv, update(OWNER_CHAT, OWNER_USER, "/help", update_id=51))
+        post(srv, update(OWNER_CHAT, OWNER_USER, "/tasks", update_id=52))
+
+        assert len(telegram.sent_messages) == 3
+        assert "Штурман" in telegram.sent_messages[0]["text"]
+        assert "Штурман" in telegram.sent_messages[1]["text"]
+        assert "Проверить крепление" in telegram.sent_messages[2]["text"]
+        # none of these three replies ever triggered an AI call, so the queue stays empty
+        assert review(srv, kind="telegram_pending") == []
+    finally:
+        srv.stop()
+
+
+def test_insufficient_anthropic_credit_on_an_ordinary_command_never_leaks_the_raw_error(
+        tmp_path, no_credit_anthropic, telegram):
+    """A free-text command genuinely needs the AI - with no credit, the user must see a plain,
+    friendly message, never Anthropic's own wording, an HTTP status, or any other internal detail,
+    and the message itself must not be lost."""
+    srv = _server(tmp_path, no_credit_anthropic, telegram)
+    try:
+        r = post(srv, update(OWNER_CHAT, OWNER_USER, "Проверь крепление защиты картера", update_id=60))
+        assert r.status_code == 200
+        assert len(telegram.sent_messages) == 1
+        text = telegram.sent_messages[0]["text"]
+        assert "недоступ" in text.lower()
+        for leak in ("credit", "Anthropic", "400", "billing", "balance"):
+            assert leak.lower() not in text.lower(), f"leaked internal detail: {leak!r} in {text!r}"
+
+        pending = review(srv, kind="telegram_pending")
+        assert len(pending) == 1 and pending[0]["payload"]["message_text"] == "Проверь крепление защиты картера"
+
+        st = status(srv)["personal"]
+        assert st["ai_unavailable_pending"] == 1 and st["ai_unavailable_last_at"]
+    finally:
+        srv.stop()
+
+
+def test_insufficient_anthropic_credit_in_the_engineering_chat_queues_and_stays_silent(
+        tmp_path, no_credit_anthropic, telegram):
+    """Критическое требование: the engineering chat is read-only regardless of AI availability,
+    and a message arriving while the AI has no credit is still never lost."""
+    srv = _server(tmp_path, no_credit_anthropic, telegram)
+    try:
+        r = post(srv, update(ENG_CHAT, "501", "Установили тестовый образец, пока ИИ без баланса", update_id=70))
+        assert r.status_code == 200
+        assert telegram.sent_messages == [], "the engineering chat must never receive anything, AI outage or not"
+
+        pending = review(srv, kind="telegram_pending")
+        assert len(pending) == 1
+
+        st = status(srv)["engineering"]
+        assert st["ai_unavailable_pending"] == 1 and st["ai_unavailable_last_at"]
+    finally:
+        srv.stop()
+
+
+def test_tasks_command_reports_no_active_tasks_without_ai(tmp_path, no_credit_anthropic, telegram):
+    srv = _server(tmp_path, no_credit_anthropic, telegram)
+    try:
+        post(srv, update(OWNER_CHAT, OWNER_USER, "/list", update_id=80))
+        assert telegram.sent_messages[-1]["text"] == "Таких задач нет."
+    finally:
+        srv.stop()
