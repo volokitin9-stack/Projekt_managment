@@ -17,6 +17,16 @@ const { createDocStore } = require("../docStore");
 const aiClient = require("./aiClient");
 const botApi = require("./botApi");
 const telegramLog = require("./log");
+const koArchive = require("../ko/archive");
+
+/** TELEGRAM_ENGINEERING_AI_ENABLED=false turns off the paid AI call for THIS channel only: messages
+ *  and photos are still archived (server/ko/archive.js) and analysed later by the
+ *  shturman-ko-analyst agent through the review queue. Unset = previous behaviour. The personal
+ *  channel is not affected. */
+function aiEnabled() {
+  const v = String(process.env.TELEGRAM_ENGINEERING_AI_ENABLED || "").trim().toLowerCase();
+  return !["false", "0", "no", "off"].includes(v);
+}
 
 const TOOL_SCHEMA = {
   type: "object",
@@ -93,7 +103,20 @@ async function handle(message, ctx) {
   const text = message.text || message.caption || "";
   const photos = message.photo || [];
   const mediaGroupId = message.media_group_id || null;
-  const base = { channel: "engineering", chat_id: chatId, user_id: ctx.userId, update_id: ctx.updateId, message_text: text };
+  const base = { channel: "engineering", chat_id: chatId, user_id: ctx.userId, update_id: ctx.updateId,
+    message_id: message.message_id, message_text: text };
+
+  // Archive first, before any analysis: the КО archive is the shturman-ko-analyst agent's source and
+  // must not depend on the AI being available. Idempotent; never sends anything to the chat.
+  try {
+    await koArchive.archiveMessage(message, ctx);
+  } catch (e) {
+    telegramLog.record(Object.assign({}, base, { outcome: "error", error: `ko archive: ${e.message}` }));
+  }
+  if (!aiEnabled()) {
+    telegramLog.record(Object.assign({}, base, { outcome: "archived", detail: "AI disabled (TELEGRAM_ENGINEERING_AI_ENABLED=false)" }));
+    return;
+  }
 
   if (!text && !photos.length && !message.document) {
     telegramLog.record(Object.assign({}, base, { outcome: "ignored", detail: "no text/photo" }));
@@ -183,4 +206,4 @@ async function handle(message, ctx) {
   }
 }
 
-module.exports = { handle };
+module.exports = { handle, aiEnabled };

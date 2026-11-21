@@ -102,6 +102,46 @@ function requireWindowsAgentAuth(req, res, next) {
   next();
 }
 
+
+// ---- shturman-ko-analyst: a third, narrowly-scoped credential (KO_ANALYST_API_KEY) ----
+//
+// Authorizes ONLY /api/agent/ko/* (server/routes/koAgent.js): reading the КО chat archive, project
+// reference data and the agent's own proposals, plus submitting proposals to the review queue.
+// It is not accepted anywhere else (requireAgentAuth/requireWindowsAgentAuth compare against their
+// own secrets), so a leak cannot change a project, a stage, a task or a file. It must differ from
+// AGENT_API_KEY / WINDOWS_AGENT_API_KEY - otherwise the scoping above would be meaningless and the
+// route refuses to work (fail closed). Separate fixed-window rate limit.
+const crypto = require("crypto");
+const KO_RATE_MAX = Number(process.env.KO_ANALYST_RATE_LIMIT_MAX || 300);
+const KO_RATE_WINDOW_MS = Number(process.env.KO_ANALYST_RATE_LIMIT_WINDOW_MS || 60 * 1000);
+let koWindowStart = Date.now();
+let koWindowCount = 0;
+
+function safeEqual(a, b) {
+  const x = Buffer.from(String(a));
+  const y = Buffer.from(String(b));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
+function requireKoAnalystAuth(req, res, next) {
+  const expected = process.env.KO_ANALYST_API_KEY;
+  if (!expected) {
+    return res.status(501).json({ error: "KO_ANALYST_API_KEY is not configured on the server." });
+  }
+  if (expected.length < 24 || [process.env.AGENT_API_KEY, process.env.WINDOWS_AGENT_API_KEY].some((k) => k && k === expected)) {
+    return res.status(501).json({ error: "KO_ANALYST_API_KEY must be a separate secret of at least 24 characters." });
+  }
+  const match = /^Bearer\s+(.+)$/i.exec((req.get("authorization") || "").trim());
+  if (!match || !safeEqual(match[1], expected)) {
+    return res.status(401).json({ error: "Missing or invalid Authorization: Bearer <KO_ANALYST_API_KEY> header" });
+  }
+  const now = Date.now();
+  if (now - koWindowStart >= KO_RATE_WINDOW_MS) { koWindowStart = now; koWindowCount = 0; }
+  koWindowCount += 1;
+  if (koWindowCount > KO_RATE_MAX) return res.status(429).json({ error: "Rate limit exceeded" });
+  next();
+}
+
 // Test-only: let the test suite reset in-memory guard state between cases without restarting the process.
 function _resetGuardStateForTests() {
   seenNonces.clear();
@@ -109,4 +149,4 @@ function _resetGuardStateForTests() {
   rateWindowCount = 0;
 }
 
-module.exports = { requireAgentAuth, requireWindowsAgentAuth, _resetGuardStateForTests };
+module.exports = { requireAgentAuth, requireWindowsAgentAuth, requireKoAnalystAuth, _resetGuardStateForTests };

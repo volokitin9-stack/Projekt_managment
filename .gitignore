@@ -42,3 +42,6 @@ state/
 # Python virtual environment of the planning agent
 .venv/
 venv/
+
+# shturman-ko-analyst working directory (message snapshots, photos, ledger) - never commit
+.ko-analyst/
