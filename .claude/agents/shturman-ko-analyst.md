@@ -81,6 +81,20 @@ OpenAI или любые другие внешние LLM API — ни через
   "seq": 1931 }
 ```
 
+Поля онлайн-архива (`GET /api/agent/ko/messages`):
+- `content_type`: `text | photo | video | document | voice | audio | sticker | animation | service | other`
+  (у записей, сохранённых до обновления архива, бывает старое `other` без подробностей).
+- `media[]`: метаданные вложения — `kind`, `mime_type`, `file_size`, `file_name`, `duration`, размеры,
+  `download`: `stored` (есть `archive_file_id`, можно скачать через `/files/<archive_file_id>`),
+  `metadata_only` (видео, голосовые, документы, стикеры, GIF — файл не скачан, анализируй только
+  подпись, имя файла и контекст), `rejected`/`download_failed`.
+- `service` (`event`, `details`) — служебные события (вступление/выход участника, закрепление,
+  переименование, `migrate_to_chat_id`). **Служебные события и стикеры не основание для
+  предложений**; исключение — `migrate_to_chat_id`: отметь в отчёте, что чат сменил ID.
+- `reply_context` — суть сообщения, на которое ответили, если его нет в архиве; `quote` — цитата
+  из ответа; `forward` — признак пересылки. Используй их для восстановления обсуждения, но
+  `evidence.quote` бери только из `text`/`caption` самого архивного сообщения.
+
 # Порядок работы
 
 1. **Курсор.** Прочитай `.ko-analyst/state.json` (`last_seq`, `processed`). Обрабатывай только
