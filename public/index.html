@@ -871,6 +871,7 @@
 
 <div id="integrationsView" style="display:none;padding:14px 20px;">
   <div id="integrationsBody">Загрузка…</div>
+  <div id="taskImportPanel"></div>
 </div>
 
 </div><!-- /main-area -->
@@ -3401,6 +3402,82 @@
     }
   });
 
+  // ---- import of personal tasks from an old board export (server/taskImport.js) ----
+  var tiState = { payload:null, fileName:null, report:null, imports:[], msg:"" };
+  function tiCsrf(){
+    return apiFetch("/api/whoami").then(function(w){ return (w && w.csrf_token) ? { "X-CSRF-Token": w.csrf_token } : {}; });
+  }
+  function renderTaskImport(){
+    apiFetch("/api/admin/task-import").then(function(r){ tiState.imports = r.imports || []; drawTaskImport(); })
+      .catch(function(err){ tiState.msg = err.message; drawTaskImport(); });
+  }
+  function drawTaskImport(){
+    var el = document.getElementById("taskImportPanel"); if(!el) return;
+    var r = tiState.report, h = '<div class="eng-panel" style="margin-top:14px;"><h3>Импорт личных задач из экспорта</h3>' +
+      '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Файл shturman_tasks_export_*.json. Сначала проверка (ничего не записывается), затем импорт одной операцией. Существующие задачи не изменяются; повторный импорт не создаёт дублей; любой импорт можно откатить.</div>' +
+      '<input type="file" id="tiFile" accept="application/json,.json"> <button type="button" class="eng-mini-btn" data-ti="analyze">Проверить (dry-run)</button>';
+    if(tiState.msg) h += '<div style="margin-top:8px;font-size:12px;">'+escapeHtml(tiState.msg)+'</div>';
+    if(r){
+      var row = function(k,v){ return '<tr><td>'+escapeHtml(k)+'</td><td>'+v+'</td></tr>'; };
+      h += '<table class="eng-table" style="max-width:760px;margin-top:10px;">' +
+        row("Файл", escapeHtml(r.source.file_name||"—")+' <span style="font-size:11px;color:var(--ink-faint);">sha256 '+escapeHtml(r.source.sha256.slice(0,12))+'…</span>') +
+        row("Задач в файле", r.source.tasks+' (активных '+r.source.active+', выполненных '+r.source.done+')') +
+        row("Подзадач", r.source.subtasks+' (выполнено '+r.source.subtasks_done+')') +
+        row("Новых", r.new.length+' задач, '+r.new_subtasks+' подзадач') +
+        row("Уже есть", r.already_imported.length) +
+        row("Конфликты", r.conflicts.length ? r.conflicts.map(function(c){ return escapeHtml(c.type+": "+(c.id||("#"+c.index))); }).join("<br>") : "нет") +
+        (r.title_matches.length ? row("Совпадают названия", r.title_matches.map(function(m){ return escapeHtml(m.title); }).join("<br>")) : "") +
+        row("Категории", Object.keys(r.quadrant_mapping).map(function(q){ var m = r.quadrant_mapping[q];
+          return escapeHtml(q+" → «"+m.target_label+"»: "+m.count+" (активных "+m.active+", выполненных "+m.done+")"+(m.lossless?"":" — неизвестная категория")); }).join("<br>")) +
+        row("Переносится с потерями", r.lossy_fields.map(function(f){ return escapeHtml(f.field+(f.count!=null?" ("+f.count+")":"")+": "+f.how); }).join("<br>")) +
+        '</table>' + (r.can_apply ? '<button type="button" class="eng-mini-btn" style="margin-top:8px;" data-ti="apply">Импортировать '+r.new.length+' задач</button>' :
+        '<div style="margin-top:8px;font-size:12px;">'+(r.new.length ? "Импорт невозможен: исправьте ошибки в файле." : "Новых задач нет — импортировать нечего.")+'</div>');
+    }
+    if(tiState.imports.length){
+      h += '<table class="eng-table" style="max-width:760px;margin-top:12px;"><tr><th>Импорт</th><th>Задач</th><th>Подзадач</th><th>Откат</th><th></th></tr>' +
+        tiState.imports.map(function(x){
+          return '<tr><td>'+escapeHtml(fmtTs(x.imported_at))+'<div style="font-size:11px;color:var(--ink-faint);">'+escapeHtml(x.source_file||"")+'</div></td><td class="num">'+x.counts.tasks+'</td><td class="num">'+x.counts.subtasks+'</td>' +
+            '<td>'+(x.rolled_back_at ? escapeHtml(fmtTs(x.rolled_back_at))+(x.rollback && x.rollback.kept_modified.length ? '<div style="font-size:11px;">оставлено изменённых: '+x.rollback.kept_modified.length+'</div>' : '') : "—")+'</td>' +
+            '<td><button type="button" class="eng-mini-btn" data-ti="rollback" data-id="'+escapeHtml(x.id)+'">Откатить</button></td></tr>';
+        }).join("") + '</table>';
+    }
+    el.innerHTML = h + '</div>';
+  }
+  document.getElementById("taskImportPanel").addEventListener("click", function(e){
+    var b = e.target.closest("[data-ti]"); if(!b) return;
+    var act = b.getAttribute("data-ti");
+    if(act === "analyze"){
+      var f = document.getElementById("tiFile").files[0];
+      if(!f){ tiState.msg = "Выберите файл экспорта."; drawTaskImport(); return; }
+      f.text().then(function(text){
+        var payload; try{ payload = JSON.parse(text); }catch(err){ throw new Error("Файл не является корректным JSON"); }
+        tiState.payload = payload; tiState.fileName = f.name;
+        return apiFetch("/api/admin/task-import/analyze", { method:"POST", body:{ "export": payload, file_name: f.name } });
+      }).then(function(rep){ tiState.report = rep; tiState.msg = ""; drawTaskImport(); })
+        .catch(function(err){ tiState.report = null; tiState.msg = err.message; drawTaskImport(); });
+      return;
+    }
+    if(act === "apply" && tiState.report){
+      if(!window.confirm("Импортировать "+tiState.report.new.length+" задач ("+tiState.report.new_subtasks+" подзадач)? Существующие задачи не изменятся.")) return;
+      tiCsrf().then(function(hd){ return apiFetch("/api/admin/task-import/apply", { method:"POST", headers:hd,
+        body:{ "export": tiState.payload, file_name: tiState.fileName, plan_hash: tiState.report.plan_hash } }); })
+        .then(function(res){ tiState.msg = "Импортировано задач: "+res.imported+", подзадач: "+res.subtasks+"."; tiState.report = null; renderTaskImport(); loadAll && loadAll(); })
+        .catch(function(err){ tiState.msg = "Импорт не выполнен: "+err.message; drawTaskImport(); });
+      return;
+    }
+    if(act === "rollback"){
+      var id = b.getAttribute("data-id");
+      tiCsrf().then(function(hd){
+        return apiFetch("/api/admin/task-import/"+encodeURIComponent(id)+"/rollback", { method:"POST", headers:hd, body:{ dry_run:true } }).then(function(d){
+          var msg = "Откатить импорт? Будет удалено задач: "+d.would_remove.length+"." + (d.kept_modified.length ? "\nИзменённые после импорта ("+d.kept_modified.length+") останутся." : "");
+          if(!window.confirm(msg)) return null;
+          return apiFetch("/api/admin/task-import/"+encodeURIComponent(id)+"/rollback", { method:"POST", headers:hd, body:{} });
+        });
+      }).then(function(res){ if(res){ tiState.msg = "Откат: удалено задач "+res.removed+"."; renderTaskImport(); loadAll && loadAll(); } })
+        .catch(function(err){ tiState.msg = "Откат не выполнен: "+err.message; drawTaskImport(); });
+    }
+  });
+
   // ---- tabs ----
   function setTab(tab){
     activeTab = tab;
@@ -3416,7 +3493,7 @@
     if(tab === "board") renderTree();
     else if(tab === "global") renderGlobalTree();
     else if(tab === "eng") renderEngBoard();
-    else renderIntegrationsView();
+    else { renderIntegrationsView(); renderTaskImport(); }
   }
   document.getElementById("tabBoardBtn").addEventListener("click", function(){ setTab("board"); });
   document.getElementById("tabGlobalBtn").addEventListener("click", function(){ setTab("global"); });

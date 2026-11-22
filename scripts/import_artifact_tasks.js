@@ -1,127 +1,84 @@
 "use strict";
 
-// One-time import of the personal Kanban board's "tasks" collection, exported from the Claude
-// Artifact ("Экспорт задач в JSON" button) as one JSON file, into this app's own "tasks" doc
-// store (server/docStore.js) - see docs/TELEGRAM_INTEGRATION.md "Stage 4 - data migration".
-// Критическое требование №3 ("Дополнение к ТЗ Telegram-интеграции «Штурмана»"): a pre-import
-// analysis before writing anything, explicit duplicate detection, and a rollback path - all below.
+// Local, one-time import of personal tasks from an old board export (shturman_tasks_export_*.json)
+// into the "tasks" collection. Same logic as the dashboard's admin import (server/taskImport.js) -
+// use the dashboard ("Интеграции → Импорт задач") on Railway, where the server keeps the data
+// directory locked; use this script only locally, WITH THE SERVER STOPPED.
 //
-//   node scripts/import_artifact_tasks.js path/to/shturman_tasks_export.json             # dry run: analysis only
-//   node scripts/import_artifact_tasks.js path/to/shturman_tasks_export.json --write      # import
-//   node scripts/import_artifact_tasks.js --rollback path/to/import-manifest-*.json       # dry run: what would be removed
-//   node scripts/import_artifact_tasks.js --rollback path/to/import-manifest-*.json --write # remove exactly those records
+//   node scripts/import_artifact_tasks.js <export.json>                          # dry run: analysis only
+//   node scripts/import_artifact_tasks.js <export.json> --write                  # analysis + import
+//   node scripts/import_artifact_tasks.js --rollback <import-manifest.json>      # dry run of the rollback
+//   node scripts/import_artifact_tasks.js --rollback <import-manifest.json> --write [--force]
 //
-// * Stop the server first (the data directory is used by one process at a time - same rule as
-//   scripts/import-sqlite.js).
-// * Idempotent by id: a record whose id already exists in this target is skipped, never
-//   overwritten - safe to re-run (e.g. after exporting again with newly-added tasks) without
-//   ever duplicating or clobbering anything already imported or created directly here.
-// * Only ever adds new task documents. Never deletes, never touches any other collection -
-//   except --rollback, which only ever deletes exactly the ids its own matching manifest recorded.
-// * The export file is only read, never modified.
-// * Every --write import writes a manifest (import-manifest-<timestamp>.json, next to the export
-//   file) recording exactly which ids it created - the only input --rollback accepts, so a
-//   rollback can never remove a record this script did not itself create in that run (not a
-//   record imported by an earlier run, and never a record created directly on the board since).
+// The export is only read. An import is one atomic write; it never overwrites or changes an existing
+// task. Every --write import writes import-manifest-<timestamp>.json next to the export (and the
+// same record is kept in the data file), and --rollback removes only the tasks that import created
+// and that were not edited since (--force removes edited ones too).
 
 require("../server/env");   // .env from the project folder, backslashes kept literally
 const fs = require("fs");
 const path = require("path");
 
+const taskImport = require("../server/taskImport");
 const { createDocStore } = require("../server/docStore");
-const store = createDocStore("tasks");
 
 const args = process.argv.slice(2);
 const write = args.includes("--write");
+const force = args.includes("--force");
 const rollbackIdx = args.indexOf("--rollback");
-
-if (rollbackIdx !== -1) {
-  runRollback(args[rollbackIdx + 1]);
-} else {
-  runImport(args.find((a) => a !== "--write"));
-}
 
 function fail(msg) {
   console.error(msg);
   process.exit(2);
 }
 
+function printReport(r, src) {
+  const byQ = Object.entries(r.quadrant_mapping).map(([q, m]) => `${q}=${m.count}`).join(", ");
+  console.log(`Source: ${src} (${r.source.tasks} record(s): ${byQ}; ${r.source.done} done, ${r.source.active} active; ` +
+    `${r.source.subtasks} subtask(s), ${r.source.subtasks_done} done).`);
+  console.log(`Target: ${r.target.existing_tasks} existing task(s) already in this board's "tasks" collection before this run.`);
+  console.log(`${r.new.length} new, ${r.already_imported.length} duplicate (already present by id) - duplicates are never ` +
+    `overwritten. New subtasks: ${r.new_subtasks}.`);
+  if (r.already_imported.length) console.log(`Duplicate ids: ${r.already_imported.map((x) => x.id).join(", ")}`);
+  console.log("Category mapping:");
+  Object.entries(r.quadrant_mapping).forEach(([q, m]) => console.log(`  ${q} -> ${m.target} «${m.target_label}»: ${m.count} ` +
+    `(active ${m.active}, done ${m.done})${m.lossless ? "" : " - UNKNOWN category"}`));
+  console.log(`Conflicts: ${r.conflicts.length ? "" : "none"}`);
+  r.conflicts.forEach((c) => console.log(`  ${c.type}: ${c.id || "#" + c.index}${c.existing_title ? ` (existing: ${c.existing_title})` : ""}`));
+  if (r.title_matches.length) console.log(`Same title as an existing task (imported anyway, check manually): ${r.title_matches.map((m) => m.source_id).join(", ")}`);
+  r.warnings.forEach((w) => console.log(`  warning ${w.type}: ${w.id}${w.value !== undefined ? ` = ${JSON.stringify(w.value)}` : ""}`));
+  console.log("Fields not carried over losslessly:");
+  r.lossy_fields.forEach((f) => console.log(`  ${f.field}${f.count != null ? ` (${f.count})` : ""}: ${f.how}`));
+}
+
 function runImport(src) {
   if (!src || !fs.existsSync(src)) {
     fail("usage: node scripts/import_artifact_tasks.js <shturman_tasks_export.json> [--write]\n" +
-      "       node scripts/import_artifact_tasks.js --rollback <import-manifest.json> [--write]");
+      "       node scripts/import_artifact_tasks.js --rollback <import-manifest.json> [--write] [--force]");
   }
-
   let payload;
   try {
     payload = JSON.parse(fs.readFileSync(src, "utf-8"));
   } catch (e) {
     fail(`${src} is not valid JSON: ${e.message}`);
   }
-  const tasks = Array.isArray(payload.tasks) ? payload.tasks : null;
-  if (!tasks) fail(`${src} has no "tasks" array - is this a shturman_tasks_export.json file?`);
-
-  // ---- pre-import analysis (always runs, write or not): what exists, what would change ----
-  const existingCount = store.list().length;
-  const byQuadrant = {};
-  let doneCount = 0;
-  tasks.forEach((t) => {
-    if (!t) return;
-    byQuadrant[t.quadrant || "inbox"] = (byQuadrant[t.quadrant || "inbox"] || 0) + 1;
-    if (t.done) doneCount += 1;
-  });
-  console.log(`Source: ${src} (${tasks.length} record(s): ${Object.entries(byQuadrant)
-    .map(([q, n]) => `${q}=${n}`).join(", ")}; ${doneCount} done, ${tasks.length - doneCount} active).`);
-  console.log(`Target: ${existingCount} existing task(s) already in this board's "tasks" collection before this run.`);
-
-  const toCreate = [];
-  const toSkip = [];
-  tasks.forEach((t) => {
-    if (!t || !t.id) return;
-    (store.get(t.id) ? toSkip : toCreate).push(t);
-  });
-  const noIdCount = tasks.filter((t) => !t || !t.id).length;
-  if (noIdCount) console.warn(`${noIdCount} record(s) have no id and will be skipped - this should not happen in a real export file.`);
-  console.log(`${toCreate.length} new, ${toSkip.length} duplicate (already present by id) - duplicates are never overwritten.`);
-  if (toSkip.length) console.log(`Duplicate ids: ${toSkip.map((t) => t.id).join(", ")}`);
-
+  const fileName = path.basename(src);
+  const r = taskImport.analyze(payload, { fileName });
+  if (r.error) fail(`${src}: ${r.error} (no "tasks" array?)`);
+  printReport(r, src);
   if (!write) {
-    console.log(`Would import ${toCreate.length} new task(s); skipped ${toSkip.length} already-existing id(s).`);
+    console.log(`Would import ${r.new.length} new task(s); skipped ${r.already_imported.length} already-existing id(s).`);
     console.log("Dry run only - nothing was written. Re-run with --write to apply.");
     return;
   }
-
-  const createdIds = [];
-  toCreate.forEach((t) => {
-    const data = {
-      id: t.id,
-      title: t.title != null ? t.title : "",
-      quadrant: t.quadrant || "inbox",
-      done: !!t.done,
-      direction: t.direction !== undefined ? t.direction : null,
-      responsible: t.responsible !== undefined ? t.responsible : null,
-      from: t.from !== undefined ? t.from : null,
-      due: t.due !== undefined ? t.due : null,
-      subtasks: t.subtasks || [],
-      telegramNotified: !!t.telegramNotified,
-      calendarSynced: !!t.calendarSynced
-    };
-    if (t.source !== undefined) data.source = t.source;
-    // created_at/updated_at from the export are preserved as the true history dates, not overwritten
-    // with "now" - the doc store's own createdAt/updatedAt (set on create()) would otherwise lose them.
-    if (t.created_at) data.importedCreatedAt = t.created_at;
-    if (t.updated_at) data.importedUpdatedAt = t.updated_at;
-    store.create(data);
-    createdIds.push(t.id);
-  });
-
-  console.log(`Imported ${createdIds.length} new task(s); skipped ${toSkip.length} already-existing id(s).`);
-
-  if (createdIds.length) {
-    const manifest = {
-      imported_at: new Date().toISOString(), source_file: path.resolve(src),
-      data_dir: require("../server/store").DATA_DIR, created_ids: createdIds
-    };
+  const res = taskImport.apply(payload, { planHash: r.plan_hash, actor: "cli", fileName });
+  if (res.status >= 400) fail(`Import refused: ${res.body.error}`);
+  const imported = res.body.imported || 0;
+  console.log(`Imported ${imported} new task(s); skipped ${r.already_imported.length} already-existing id(s).`);
+  if (imported) {
+    const rec = taskImport.list().find((x) => x.id === res.body.import_id);
+    const manifest = { import_id: rec.id, imported_at: rec.imported_at, source_file: path.resolve(src),
+      source_sha256: rec.source_sha256, data_dir: require("../server/store").DATA_DIR, created_ids: rec.created.map((c) => c.id) };
     const manifestPath = path.join(path.dirname(path.resolve(src)), `import-manifest-${Date.now()}.json`);
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
     console.log(`Rollback manifest written: ${manifestPath}`);
@@ -131,7 +88,7 @@ function runImport(src) {
 
 function runRollback(manifestPath) {
   if (!manifestPath || !fs.existsSync(manifestPath)) {
-    fail("usage: node scripts/import_artifact_tasks.js --rollback <import-manifest.json> [--write]");
+    fail("usage: node scripts/import_artifact_tasks.js --rollback <import-manifest.json> [--write] [--force]");
   }
   let manifest;
   try {
@@ -141,18 +98,27 @@ function runRollback(manifestPath) {
   }
   const ids = Array.isArray(manifest.created_ids) ? manifest.created_ids : null;
   if (!ids) fail(`${manifestPath} has no "created_ids" array - is this an import-manifest file written by this script?`);
-
   console.log(`Manifest: import from ${manifest.source_file || "(unknown)"} at ${manifest.imported_at || "(unknown)"}, ${ids.length} record(s).`);
-  const present = ids.filter((id) => store.get(id));
-  const alreadyGone = ids.length - present.length;
-  if (alreadyGone) console.log(`${alreadyGone} id(s) from the manifest are already gone (removed earlier, or never written) - left alone.`);
-  console.log(`${write ? "Removing" : "Would remove"} ${present.length} task(s) still present: ${present.join(", ") || "(none)"}.`);
 
+  let r;
+  if (manifest.import_id && taskImport.list().some((x) => x.id === manifest.import_id)) {
+    r = taskImport.rollback(manifest.import_id, { dryRun: !write, force, actor: "cli" }).body;
+  } else {
+    // manifest of the previous version of this script (no import record): exactly its ids, nothing else
+    const store = createDocStore("tasks");
+    const present = ids.filter((id) => store.get(id));
+    r = { would_remove: present, already_gone: ids.filter((id) => !present.includes(id)), kept_modified: [] };
+    if (write) { present.forEach((id) => store.delete(id)); r.removed = present.length; }
+  }
+  if (r.already_gone.length) console.log(`${r.already_gone.length} id(s) from the manifest are already gone (removed earlier, or never written) - left alone.`);
+  if (r.kept_modified.length) console.log(`Kept ${r.kept_modified.length} task(s) edited after the import (use --force to remove): ${r.kept_modified.map((k) => k.id).join(", ")}`);
   if (!write) {
+    console.log(`Would remove ${r.would_remove.length} task(s) still present: ${r.would_remove.join(", ") || "(none)"}.`);
     console.log("Dry run only - nothing was removed. Re-run with --write to apply.");
     return;
   }
-  let removed = 0;
-  present.forEach((id) => { if (store.delete(id)) removed += 1; });
-  console.log(`Removed ${removed} task(s). This never touches any record outside this manifest's own created_ids.`);
+  console.log(`Removed ${r.removed} task(s). This never touches any record outside this import's own tasks.`);
 }
+
+if (rollbackIdx !== -1) runRollback(args[rollbackIdx + 1]);
+else runImport(args.find((a) => !a.startsWith("--")));
