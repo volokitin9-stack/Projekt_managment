@@ -51,29 +51,166 @@ function displayName(from) {
   return n || from.username || null;
 }
 
-/** Image attachments of a message: the largest size of a photo, or an image sent as a document. */
-function attachmentsOf(message) {
-  const out = [];
+// ---- message classification -------------------------------------------------------------------
+//
+// Every archived message gets a `content_type` (its kind) and, for media, a `media` list with the
+// Telegram metadata (file_id, file_unique_id, MIME, size, file name, duration, ...). Only images are
+// downloaded (a photo, or an image sent as a document - the existing photo pipeline into
+// KO_FILES_DIR). Video, voice, audio, other documents, stickers and animations are kept as metadata
+// only (`download: "metadata_only"`), so they can be fetched later by a separate, explicit step.
+// Records archived before this change keep their original fields (content_type text|photo|other);
+// nothing already stored is rewritten.
+
+const KINDS = ["text", "photo", "video", "document", "voice", "audio", "sticker", "animation", "service", "other"];
+const SERVICE_EVENTS = ["new_chat_members", "left_chat_member", "new_chat_title", "new_chat_photo", "delete_chat_photo",
+  "group_chat_created", "supergroup_chat_created", "channel_chat_created", "migrate_to_chat_id", "migrate_from_chat_id",
+  "pinned_message", "message_auto_delete_timer_changed", "video_chat_scheduled", "video_chat_started", "video_chat_ended",
+  "video_chat_participants_invited", "forum_topic_created", "forum_topic_edited", "forum_topic_closed",
+  "forum_topic_reopened", "general_forum_topic_hidden", "general_forum_topic_unhidden", "write_access_allowed",
+  "users_shared", "chat_shared", "boost_added", "chat_background_set", "proximity_alert_triggered"];
+const OTHER_TYPES = ["poll", "location", "venue", "contact", "dice", "game", "story", "invoice", "giveaway", "paid_media"];
+const EXCERPT = 500;
+
+function num(v) {
+  return v == null || v === "" || Number.isNaN(Number(v)) ? null : Number(v);
+}
+
+/** Telegram metadata of one file-bearing object. Keeps file_id (needed for a later download) - it
+ *  is stored server-side only and never returned by the API (see mediaToApi). */
+function fileMeta(kind, o, extra = {}) {
+  return Object.assign({
+    kind,
+    file_id: o.file_id || null,
+    file_unique_id: o.file_unique_id || o.file_id || null,
+    mime_type: o.mime_type || null,
+    file_size: num(o.file_size),
+    file_name: o.file_name || null,
+    duration: num(o.duration),
+    width: num(o.width),
+    height: num(o.height)
+  }, extra);
+}
+
+function serviceOf(message) {
+  const event = SERVICE_EVENTS.find((k) => message[k] !== undefined);
+  if (!event) return null;
+  const v = message[event];
+  const member = (u) => (u ? { id: u.id != null ? String(u.id) : null, is_bot: !!u.is_bot } : null);
+  let details = {};
+  if (event === "new_chat_members") details = { members: (Array.isArray(v) ? v : []).map(member) };
+  else if (event === "left_chat_member") details = { member: member(v) };
+  else if (event === "new_chat_title") details = { title: String(v).slice(0, 200) };
+  else if (event === "migrate_to_chat_id" || event === "migrate_from_chat_id") details = { chat_id: String(v) };
+  else if (event === "pinned_message") details = { message_id: num((v || {}).message_id) };
+  else if (event === "message_auto_delete_timer_changed") details = { seconds: num((v || {}).message_auto_delete_time) };
+  return { event, details };
+}
+
+/** {kind, media[], service, other_type}. Order matters: Telegram sends `animation` together with
+ *  `document` for GIFs, and a photo/document may carry a caption. */
+function classify(message) {
+  const media = [];
+  let kind;
   const sizes = Array.isArray(message.photo) ? message.photo : [];
   if (sizes.length) {
     const p = sizes[sizes.length - 1];   // Telegram lists sizes smallest -> largest
-    out.push({ telegram_file_id: p.file_id, file_unique_id: p.file_unique_id || p.file_id, declared_mime: "image/jpeg",
-      declared_size: p.file_size || null, width: p.width || null, height: p.height || null, kind: "photo" });
+    kind = "photo";
+    media.push(fileMeta("photo", p, { mime_type: "image/jpeg", download: "image" }));
+  } else if (message.animation) {
+    kind = "animation";
+    media.push(fileMeta("animation", message.animation, { download: "metadata_only" }));
+  } else if (message.video) {
+    kind = "video";
+    media.push(fileMeta("video", message.video, { download: "metadata_only" }));
+  } else if (message.video_note) {
+    kind = "video";
+    const v = message.video_note;
+    media.push(fileMeta("video_note", v, { mime_type: v.mime_type || "video/mp4", width: num(v.length), height: num(v.length),
+      download: "metadata_only" }));
+  } else if (message.voice) {
+    kind = "voice";
+    media.push(fileMeta("voice", message.voice, { download: "metadata_only" }));
+  } else if (message.audio) {
+    kind = "audio";
+    const a = message.audio;
+    media.push(fileMeta("audio", a, { performer: a.performer || null, title: a.title || null, download: "metadata_only" }));
+  } else if (message.sticker) {
+    kind = "sticker";
+    const st = message.sticker;
+    media.push(fileMeta("sticker", st, {
+      mime_type: st.is_video ? "video/webm" : st.is_animated ? "application/x-tgsticker" : "image/webp",
+      emoji: st.emoji || null, set_name: st.set_name || null, sticker_type: st.type || null,
+      is_animated: !!st.is_animated, is_video: !!st.is_video, download: "metadata_only" }));
+  } else if (message.document) {
+    kind = "document";
+    const d = message.document;
+    // An image sent "as a file" is a photo for the КО (uncompressed) - same pipeline as before.
+    media.push(fileMeta("document", d, { download: ALLOWED[d.mime_type] ? "image" : "metadata_only" }));
   }
-  const d = message.document;
-  if (d && d.file_id) {
-    out.push({ telegram_file_id: d.file_id, file_unique_id: d.file_unique_id || d.file_id, declared_mime: d.mime_type || null,
-      declared_size: d.file_size || null, width: null, height: null, kind: "document", file_name: d.file_name || null });
+  const service = media.length ? null : serviceOf(message);
+  let otherType = null;
+  if (!kind) {
+    if (typeof message.text === "string") kind = "text";
+    else if (service) kind = "service";
+    else {
+      kind = "other";
+      otherType = OTHER_TYPES.find((k) => message[k] !== undefined) || null;
+    }
+  }
+  return { kind, media, service, otherType };
+}
+
+/** Minimal context of the message being replied to, kept only when that message is not archived
+ *  itself (e.g. it predates the bot joining) - so a reply is still understandable. */
+function replyContext(parent) {
+  if (!parent) return null;
+  const c = classify(parent);
+  const body = typeof parent.text === "string" ? parent.text : typeof parent.caption === "string" ? parent.caption : null;
+  const f = parent.from || {};
+  return { message_id: num(parent.message_id), date: parent.date ? new Date(Number(parent.date) * 1000).toISOString() : null,
+    from: { id: f.id != null ? String(f.id) : null, name: displayName(f), is_bot: !!f.is_bot },
+    kind: c.kind, text_excerpt: body ? body.slice(0, EXCERPT) : null,
+    media: c.media.map((x) => ({ kind: x.kind, mime_type: x.mime_type, file_name: x.file_name })) };
+}
+
+function forwardOf(message) {
+  const o = message.forward_origin;
+  if (o) return { type: o.type || null, date: o.date ? new Date(Number(o.date) * 1000).toISOString() : null };
+  if (message.forward_date || message.forward_from || message.forward_from_chat) {
+    return { type: message.forward_from_chat ? "chat" : "user",
+      date: message.forward_date ? new Date(Number(message.forward_date) * 1000).toISOString() : null };
+  }
+  return null;
+}
+
+/** API view of a media item: no Telegram file_id; download state resolved from ko_files. */
+function mediaToApi(x, filesByUnique) {
+  const out = { kind: x.kind, file_unique_id: x.file_unique_id, has_file_id: !!x.file_id, mime_type: x.mime_type,
+    file_size: x.file_size, file_name: x.file_name, duration: x.duration, width: x.width, height: x.height };
+  ["performer", "title", "emoji", "set_name", "sticker_type", "is_animated", "is_video"].forEach((k) => {
+    if (x[k] !== undefined) out[k] = x[k];
+  });
+  if (x.download === "image") {
+    const f = filesByUnique.get(x.file_unique_id);
+    out.download = f ? f.status : "pending";
+    out.archive_file_id = f && f.status === "stored" ? f.id : null;
+  } else {
+    out.download = "metadata_only";
+    out.archive_file_id = null;
   }
   return out;
 }
 
-function toMessageApi(m, filesById) {
+function toMessageApi(m, filesById, filesByUnique) {
   return {
     seq: m.seq, chat_id: m.chat_id, message_id: m.message_id, date: m.date, from: m.from,
     text: m.text, caption: m.caption, reply_to_message_id: m.reply_to_message_id, thread_root_id: m.thread_root_id,
     message_thread_id: m.message_thread_id, media_group_id: m.media_group_id, forwarded: m.forwarded,
     content_type: m.content_type, archived_at: m.archived_at,
+    // fields added with message-type archiving; null/[] on records archived before it
+    service: m.service || null, other_type: m.other_type || null, forward: m.forward || null,
+    reply_context: m.reply_context || null, quote: m.quote || null, external_reply: m.external_reply || null,
+    media: (m.media || []).map((x) => mediaToApi(x, filesByUnique)),
     photos: (m.files || []).map((fid) => {
       const f = filesById.get(fid);
       return f ? { file_id: f.id, status: f.status, mime_type: f.mime_type, size: f.size, width: f.width, height: f.height,
@@ -91,14 +228,20 @@ function recordMessage(message, ctx = {}) {
     if (existing) return { created: false, record: existing };
     const replyTo = message.reply_to_message ? Number(message.reply_to_message.message_id) : null;
     let root = null;
+    let parentArchived = false;
     if (replyTo) {
       const parent = s.ko_messages.find((m) => m.chat_id === chatId && m.message_id === replyTo);
+      parentArchived = !!parent;
       root = parent ? (parent.thread_root_id || parent.message_id) : replyTo;
     }
     const seq = (Number(s.ko_archive.last_seq) || 0) + 1;
     s.ko_archive.last_seq = seq;
     const from = message.from || {};
-    const att = attachmentsOf(message);
+    const c = classify(message);
+    // the existing image pipeline: what gets downloaded into KO_FILES_DIR
+    const pending = c.media.filter((x) => x.download === "image").map((x) => ({
+      telegram_file_id: x.file_id, file_unique_id: x.file_unique_id, declared_mime: x.mime_type,
+      declared_size: x.file_size, width: x.width, height: x.height, kind: x.kind, file_name: x.file_name }));
     const record = {
       seq, chat_id: chatId, message_id: messageId,
       date: message.date ? new Date(Number(message.date) * 1000).toISOString() : null,
@@ -106,12 +249,16 @@ function recordMessage(message, ctx = {}) {
       text: typeof message.text === "string" ? message.text : null,
       caption: typeof message.caption === "string" ? message.caption : null,
       reply_to_message_id: replyTo, thread_root_id: root,
+      reply_context: replyTo && !parentArchived ? replyContext(message.reply_to_message) : null,
+      quote: message.quote && typeof message.quote.text === "string" ? message.quote.text.slice(0, EXCERPT) : null,
+      external_reply: message.external_reply ? { message_id: num(message.external_reply.message_id),
+        chat_id: message.external_reply.chat ? String(message.external_reply.chat.id) : null } : null,
       message_thread_id: message.message_thread_id != null ? Number(message.message_thread_id) : null,
       media_group_id: message.media_group_id ? String(message.media_group_id) : null,
-      forwarded: !!(message.forward_origin || message.forward_from || message.forward_from_chat || message.forward_date),
-      content_type: message.text ? "text" : att.length ? "photo" : "other",
+      forwarded: !!forwardOf(message), forward: forwardOf(message),
+      content_type: c.kind, service: c.service, other_type: c.otherType, media: c.media,
       update_id: ctx.updateId != null ? Number(ctx.updateId) : null,
-      archived_at: nowIso(), files: [], pending_files: att
+      archived_at: nowIso(), files: [], pending_files: pending
     };
     s.ko_messages.push(record);
     return { created: true, record };
@@ -209,8 +356,10 @@ function listMessages({ after = 0, limit = 200 } = {}) {
   const a = Number(after) || 0;
   return store.read((s) => {
     const idx = filesIndex(s);
+    const byUnique = new Map(s.ko_files.filter((f) => f.status === "stored").map((f) => [f.file_unique_id, f]));
+    s.ko_files.filter((f) => f.status !== "stored").forEach((f) => { if (!byUnique.has(f.file_unique_id)) byUnique.set(f.file_unique_id, f); });
     const all = s.ko_messages.filter((m) => m.seq > a).sort((x, y) => x.seq - y.seq);
-    const page = all.slice(0, lim).map((m) => toMessageApi(m, idx));
+    const page = all.slice(0, lim).map((m) => toMessageApi(m, idx, byUnique));
     return { messages: page, next_after: page.length ? page[page.length - 1].seq : a, has_more: all.length > lim,
       last_seq: Number(s.ko_archive.last_seq) || 0 };
   });
@@ -239,8 +388,33 @@ function readFile(id) {
   return { meta, buffer: fs.readFileSync(abs) };
 }
 
+/** The analyst's processing cursor (seq of the last message whose analysis was fully submitted).
+ *  Kept server-side because each scheduled cloud run starts in a fresh container. Monotonic: it can
+ *  only move forward and never past the archive. */
+function getCursor() {
+  return store.read((s) => ({ cursor: Number(s.ko_archive.analyst_cursor) || 0, last_seq: Number(s.ko_archive.last_seq) || 0,
+    updated_at: s.ko_archive.analyst_cursor_at || null, run_id: s.ko_archive.analyst_run_id || null }));
+}
+
+function setCursor(value, runId) {
+  const v = Number(value);
+  if (!Number.isInteger(v) || v < 0) return { error: 400, message: '"cursor" must be a non-negative integer' };
+  return store.tx((s) => {
+    const cur = Number(s.ko_archive.analyst_cursor) || 0;
+    const last = Number(s.ko_archive.last_seq) || 0;
+    if (v > last) return { error: 409, message: `cursor ${v} is beyond the archive (last_seq ${last})` };
+    if (v < cur) return { error: 409, message: `cursor can only move forward (current ${cur})` };
+    s.ko_archive.analyst_cursor = v;
+    s.ko_archive.analyst_cursor_at = new Date().toISOString();
+    s.ko_archive.analyst_run_id = runId ? String(runId).slice(0, 100) : null;
+    return { cursor: v, previous: cur, last_seq: last };
+  });
+}
+
 function stats() {
   return store.read((s) => ({
+    by_type: s.ko_messages.reduce((a, m) => { a[m.content_type] = (a[m.content_type] || 0) + 1; return a; }, {}),
+    media_metadata_only: s.ko_messages.reduce((n, m) => n + (m.media || []).filter((x) => x.download === "metadata_only").length, 0),
     messages: s.ko_messages.length,
     last_seq: Number(s.ko_archive.last_seq) || 0,
     files_stored: s.ko_files.filter((f) => f.status === "stored").length,
@@ -249,5 +423,6 @@ function stats() {
   }));
 }
 
-module.exports = { archiveMessage, listMessages, getMessage, getFileMeta, filePath, readFile, stats, sniff,
+module.exports = { archiveMessage, listMessages, classify, KINDS, getCursor, setCursor, getMessage, getFileMeta, filePath,
+  readFile, stats, sniff,
   KO_FILES_DIR, MAX_FILE_BYTES, ALLOWED_MIME: Object.keys(ALLOWED) };

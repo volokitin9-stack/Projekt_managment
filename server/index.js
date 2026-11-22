@@ -30,6 +30,7 @@ const telegramWebhookRouter = require("./routes/telegramWebhook");
 const telegramAdminRouter = require("./routes/telegramAdmin");
 const koAgentRouter = require("./routes/koAgent");
 const koDashboardRouter = require("./routes/koDashboard");
+const taskImportRouter = require("./routes/taskImport");
 const planScheduler = require("./planSource/scheduler");
 const telegramDailyDigest = require("./telegram/dailyDigest");
 const store = require("./store");
@@ -89,6 +90,9 @@ app.use("/api/telegram", telegramAdminRouter);
 
 // shturman-ko-analyst proposals review (dashboard session + CSRF) - server/routes/koDashboard.js.
 app.use("/api/ko", koDashboardRouter);
+
+// Import of personal tasks from an old board export (dashboard session + CSRF) - server/routes/taskImport.js.
+app.use("/api/admin/task-import", taskImportRouter);
 
 // Synchronisation runs recorded by the planning agent (read-only for the dashboard).
 app.get("/api/sync-runs", (req, res) => {

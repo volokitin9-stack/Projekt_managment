@@ -248,7 +248,9 @@ def test_file_type_and_size_limits_and_files_are_not_public(env):
     m = {x["message_id"]: x for x in messages(srv)["messages"]}
     assert m[300]["photos"][0]["status"] == "rejected" and "JPEG" in m[300]["photos"][0]["error"]
     assert m[301]["photos"][0]["status"] == "rejected" and "лимита" in m[301]["photos"][0]["error"]
-    assert m[302]["photos"][0]["status"] == "rejected"
+    # a non-image document is not downloaded at all: metadata only, no ko_files entry
+    assert m[302]["photos"] == [] and m[302]["content_type"] == "document"
+    assert m[302]["media"][0]["download"] == "metadata_only" and m[302]["media"][0]["mime_type"] == "application/pdf"
     ok = m[303]["photos"][0]
     assert ok["status"] == "stored" and ok["mime_type"] == "image/png"
     assert not [c for c in srv.tg.calls if c[0] == "getFile" and c[1]["file_id"] in ("big", "doc1")], "pre-checked, never downloaded"
@@ -476,3 +478,161 @@ def test_reject_is_final_and_unresolved_project_cannot_be_applied(env):
     assert again.json()["counts"] == {"already_resolved": 1}, "a rejected proposal is not reopened"
     assert s.post(srv.url + f"/api/ko/proposals/{items['stage_change']['id']}/apply", json={"version": p["version"]}, timeout=10).status_code == 409
     assert project(srv, s, p["id"])["status"] == p["status"]
+
+
+# ------------------------------------------------------------------ message types (archive v2)
+
+def _media_msg(message_id, **fields):
+    u = msg(message_id)
+    u["message"].update(fields)
+    return u
+
+
+TYPE_CASES = [
+    # (label, extra message fields, expected content_type, expected media kind or None, downloaded?)
+    ("text", {"text": "Замер по Jolion сделали"}, "text", None, False),
+    ("photo", {"photo": [{"file_id": "p1-s", "file_unique_id": "u-p1-s", "width": 90, "height": 90, "file_size": 10},
+                         {"file_id": "p1", "file_unique_id": "u-p1", "width": 800, "height": 600, "file_size": 68}],
+               "caption": "вид снизу"}, "photo", "photo", True),
+    ("video", {"video": {"file_id": "v1", "file_unique_id": "u-v1", "duration": 12, "width": 1280, "height": 720,
+                         "mime_type": "video/mp4", "file_size": 5000000, "file_name": "stand.mp4"}, "caption": "испытание"},
+     "video", "video", False),
+    ("video_note", {"video_note": {"file_id": "vn1", "file_unique_id": "u-vn1", "length": 240, "duration": 9, "file_size": 900000}},
+     "video", "video_note", False),
+    ("document", {"document": {"file_id": "d1", "file_unique_id": "u-d1", "file_name": "КД_333.0544.1.pdf",
+                               "mime_type": "application/pdf", "file_size": 250000}, "caption": "КД"}, "document", "document", False),
+    ("voice", {"voice": {"file_id": "vo1", "file_unique_id": "u-vo1", "duration": 31, "mime_type": "audio/ogg", "file_size": 60000}},
+     "voice", "voice", False),
+    ("audio", {"audio": {"file_id": "a1", "file_unique_id": "u-a1", "duration": 120, "mime_type": "audio/mpeg",
+                         "file_size": 2000000, "file_name": "запись.mp3", "performer": "x", "title": "y"}}, "audio", "audio", False),
+    ("sticker", {"sticker": {"file_id": "s1", "file_unique_id": "u-s1", "width": 512, "height": 512, "is_animated": False,
+                             "is_video": False, "type": "regular", "emoji": "👍", "set_name": "pack", "file_size": 20000}},
+     "sticker", "sticker", False),
+    ("animation", {"animation": {"file_id": "g1", "file_unique_id": "u-g1", "duration": 3, "width": 320, "height": 240,
+                                 "mime_type": "video/mp4", "file_size": 300000, "file_name": "a.gif.mp4"},
+                   "document": {"file_id": "g1", "file_unique_id": "u-g1", "mime_type": "video/mp4", "file_name": "a.gif.mp4"}},
+     "animation", "animation", False),
+    ("service", {"new_chat_members": [{"id": 4242, "is_bot": True, "first_name": "bot"}]}, "service", None, False),
+    ("other", {"poll": {"id": "1", "question": "?", "options": []}}, "other", None, False),
+]
+
+
+@pytest.mark.parametrize("label,fields,ctype,media_kind,downloaded", TYPE_CASES, ids=[c[0] for c in TYPE_CASES])
+def test_each_message_type_is_archived_with_metadata(env, label, fields, ctype, media_kind, downloaded):
+    srv = env()
+    upd = _media_msg(1000, **fields)
+    hook(srv, upd)
+    hook(srv, upd)                                         # redelivery of the same update
+    hook(srv, dict(upd, update_id=upd["update_id"] + 1))   # same message, new update_id
+    page = messages(srv)
+    assert len(page["messages"]) == 1, "no duplicates"
+    m = page["messages"][0]
+    assert m["content_type"] == ctype
+    assert m["message_id"] == 1000 and m["date"] and m["from"]["id"] == "555"
+    assert m["caption"] == fields.get("caption")
+    if media_kind:
+        x = m["media"][0]
+        src = fields["photo"][-1] if media_kind == "photo" else fields[media_kind]
+        assert x["kind"] == media_kind and x["file_unique_id"] == src["file_unique_id"] and x["has_file_id"] is True
+        assert "file_id" not in x, "the Telegram file_id is never exposed by the API"
+        for k in ("file_size", "file_name", "duration", "mime_type"):
+            if k in src:
+                assert x[k] == src[k], k
+        assert x["download"] == ("stored" if downloaded else "metadata_only")
+    else:
+        assert m["media"] == []
+    getfile = [c for c in srv.tg.calls if c[0] == "getFile"]
+    assert len(getfile) == (1 if downloaded else 0), "only images are downloaded"
+    if label == "service":
+        assert m["service"] == {"event": "new_chat_members", "details": {"members": [{"id": "4242", "is_bot": True}]}}
+    if label == "other":
+        assert m["other_type"] == "poll"
+    if label == "sticker":
+        assert m["media"][0]["emoji"] == "👍" and m["media"][0]["mime_type"] == "image/webp"
+    assert srv.ai.calls == [] and no_outbound_to_ko(srv) == []
+    assert [c for c in srv.tg.calls if c[0] != "getFile"] == [], "no Telegram method other than getFile is ever called"
+
+
+def test_media_files_are_not_downloaded_and_photos_still_are(env):
+    srv = env()
+    hook(srv, _media_msg(1100, **TYPE_CASES[2][1]))   # video
+    hook(srv, _media_msg(1101, **TYPE_CASES[5][1]))   # voice
+    hook(srv, _media_msg(1102, **TYPE_CASES[4][1]))   # pdf
+    hook(srv, _media_msg(1103, **TYPE_CASES[1][1]))   # photo
+    files = sorted(p.suffix for p in (srv.data_dir / "ko-files").rglob("*") if p.is_file())
+    assert files == [".jpg"], files
+    st = session(srv).get(srv.url + "/api/telegram/status", timeout=10).json()["engineering"]["ko_archive"]
+    assert st["by_type"] == {"video": 1, "voice": 1, "document": 1, "photo": 1} and st["media_metadata_only"] == 3
+
+
+def test_reply_context_quote_media_group_and_service_details(env):
+    srv = env()
+    # reply to a message the bot never saw (sent before it joined): its context is kept
+    parent = {"message_id": 5, "date": 1795000000, "from": {"id": 9, "first_name": "Старший"},
+              "text": "Нужно переделать крепление защиты на Tiggo 4", "chat": {"id": int(ENG_CHAT)}}
+    hook(srv, _media_msg(1200, text="Сделаю к пятнице", reply_to_message=parent,
+                         quote={"text": "переделать крепление", "position": 6}))
+    m = messages(srv)["messages"][0]
+    assert m["reply_to_message_id"] == 5 and m["thread_root_id"] == 5
+    rc = m["reply_context"]
+    assert rc["message_id"] == 5 and rc["kind"] == "text" and rc["text_excerpt"].startswith("Нужно переделать")
+    assert m["quote"] == "переделать крепление"
+    # reply to an archived message: no duplicated context, chain root resolved from the archive
+    hook(srv, _media_msg(1201, text="ок", reply_to_message={"message_id": 1200, "chat": {"id": int(ENG_CHAT)}}))
+    m2 = messages(srv, after=1)["messages"][0]
+    assert m2["reply_context"] is None and m2["thread_root_id"] == 5
+    # album: two photos with one media_group_id
+    hook(srv, _media_msg(1202, media_group_id="alb1", caption="альбом", **{"photo": TYPE_CASES[1][1]["photo"]}))
+    hook(srv, _media_msg(1203, media_group_id="alb1", photo=[{"file_id": "p2", "file_unique_id": "u-p2", "width": 10, "height": 10, "file_size": 72}]))
+    album = [x for x in messages(srv)["messages"] if x["media_group_id"] == "alb1"]
+    assert [x["message_id"] for x in album] == [1202, 1203]
+    # service events carry their details; migration exposes the new chat id
+    hook(srv, _media_msg(1204, migrate_to_chat_id=-1009999999999))
+    hook(srv, _media_msg(1205, pinned_message={"message_id": 1200, "date": 1795000000, "chat": {"id": int(ENG_CHAT)}}))
+    hook(srv, _media_msg(1206, forward_origin={"type": "user", "date": 1794000000, "sender_user": {"id": 1}}, text="переслано"))
+    by = {x["message_id"]: x for x in messages(srv)["messages"]}
+    assert by[1204]["service"] == {"event": "migrate_to_chat_id", "details": {"chat_id": "-1009999999999"}}
+    assert by[1205]["service"] == {"event": "pinned_message", "details": {"message_id": 1200}}
+    assert by[1206]["forwarded"] is True and by[1206]["forward"]["type"] == "user" and "sender_user" not in by[1206]["forward"]
+    assert no_outbound_to_ko(srv) == [] and srv.ai.calls == []
+
+
+def test_records_archived_before_the_upgrade_are_served_unchanged(env, tmp_path):
+    """A message archived by the previous version (content_type other, no media/service fields)
+    is returned as-is: nothing is rewritten, new fields are just empty."""
+    srv = env()
+    hook(srv, msg(1300, "до обновления"))
+    srv.stop()
+    data = json.loads(srv.data_file.read_text())
+    rec = data["ko_messages"][0]
+    for k in ("media", "service", "other_type", "forward", "reply_context", "quote", "external_reply"):
+        rec.pop(k, None)
+    rec["content_type"] = "other"
+    srv.data_file.write_text(json.dumps(data))
+    srv.start()
+    m = messages(srv)["messages"][0]
+    assert m["content_type"] == "other" and m["media"] == [] and m["service"] is None and m["text"] == "до обновления"
+    raw = json.loads(srv.data_file.read_text())["ko_messages"][0]
+    assert "media" not in raw, "reading never rewrites an old record"
+
+
+# ------------------------------------------------------------------ processing cursor (daily run)
+
+def test_cursor_is_server_side_monotonic_and_scoped(env):
+    srv = env()
+    assert ko(srv, "/cursor").json() == {"cursor": 0, "last_seq": 0, "updated_at": None, "run_id": None}
+    hook(srv, msg(1500, "первое"))
+    hook(srv, msg(1501, "второе"))
+    assert ko(srv, "/cursor", method="PUT", json={"cursor": 3}).status_code == 409, "never beyond the archive"
+    assert ko(srv, "/cursor", method="PUT", json={"cursor": -1}).status_code == 400
+    assert ko(srv, "/cursor", method="PUT", json={"cursor": "x"}).status_code == 400
+    r = ko(srv, "/cursor", method="PUT", json={"cursor": 2, "run_id": "daily-2026-11-23"})
+    assert r.status_code == 200 and r.json() == {"cursor": 2, "previous": 0, "last_seq": 2}
+    assert ko(srv, "/cursor", method="PUT", json={"cursor": 1}).status_code == 409, "never backwards"
+    assert ko(srv, "/cursor", method="PUT", json={"cursor": 2}).status_code == 200, "idempotent re-save"
+    c = ko(srv, "/cursor").json()
+    assert c["cursor"] == 2 and c["run_id"] is None and c["updated_at"]
+    assert messages(srv, after=c["cursor"])["messages"] == [], "the next run starts after the cursor"
+    assert ko(srv, "/cursor", key=None).status_code == 401
+    assert ko(srv, "/cursor", key=AGENT_KEY, method="PUT", json={"cursor": 2}).status_code == 401
+    assert requests.get(srv.url + "/api/ko/proposals", timeout=10).status_code == 401

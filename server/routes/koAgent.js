@@ -57,6 +57,15 @@ router.post("/proposals", (req, res) => {
   res.status(r.status).json(r.body);
 });
 
+// Processing cursor of the daily analysis (see docs/KO_ANALYST.md "Ежедневный запуск").
+router.get("/cursor", (req, res) => res.json(archive.getCursor()));
+router.put("/cursor", (req, res) => {
+  const b = req.body || {};
+  const r = archive.setCursor(b.cursor, b.run_id);
+  if (r.error) return res.status(r.error).json({ error: r.message });
+  res.json(r);
+});
+
 router.use((req, res) => res.status(404).json({ error: "Not found" }));
 
 module.exports = router;
