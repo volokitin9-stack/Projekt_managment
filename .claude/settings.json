@@ -1,0 +1,7 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash|Write", "hooks": [ { "type": "command", "command": "node .claude/hooks/probe-log.js" } ] }
+    ]
+  }
+}
