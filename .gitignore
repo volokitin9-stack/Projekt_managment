@@ -8,3 +8,6 @@ uploads/*
 !uploads/.gitkeep
 *.log
 .DS_Store
+
+# shturman-ko-analyst working directory (message snapshots, photos) - never commit
+.ko-analyst/
