@@ -17,7 +17,8 @@ hooks:
     - matcher: "Bash|Write"
       hooks:
         - type: command
-          command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/ko-analyst-guard.js"'
+          # fail-closed: if the guard cannot be found or crashes, the tool call is blocked (exit 2)
+          command: 'node "$(git rev-parse --show-toplevel 2>/dev/null || echo "${CLAUDE_PROJECT_DIR:-.}")/.claude/hooks/ko-analyst-guard.js" || exit 2'
 ---
 
 # Роль
