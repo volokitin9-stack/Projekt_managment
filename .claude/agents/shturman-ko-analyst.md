@@ -12,13 +12,6 @@ disallowedTools: Edit, NotebookEdit, WebFetch, WebSearch
 model: inherit
 color: cyan
 maxTurns: 60
-hooks:
-  PreToolUse:
-    - matcher: "Bash|Write"
-      hooks:
-        - type: command
-          # fail-closed: if the guard cannot be found or crashes, the tool call is blocked (exit 2)
-          command: 'node "$(git rev-parse --show-toplevel 2>/dev/null || echo "${CLAUDE_PROJECT_DIR:-.}")/.claude/hooks/ko-analyst-guard.js" || exit 2'
 ---
 
 # Роль
@@ -47,7 +40,7 @@ OpenAI или любые другие внешние LLM API — ни через
 5. Не выводи и не сохраняй токены, ключи, пароли. Если встретишь их в данных — отметь
    `security_note` в отчёте без самого значения.
 
-Хук `.claude/hooks/ko-analyst-guard.js` технически блокирует запрещённые команды; если он
+Хук `.claude/hooks/ko-analyst-guard.js` (подключён в `.claude/settings.json`, действует для вызовов этого агента) технически блокирует запрещённые команды; если он
 отказал — не пытайся обойти, зафиксируй в отчёте.
 
 # Источники данных

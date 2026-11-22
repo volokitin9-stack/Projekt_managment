@@ -6,8 +6,11 @@
 
 - `agents/shturman-ko-analyst.md` — инструкции агента (ежедневный режим: серверный курсор →
   новые сообщения → предложения в очередь подтверждения → курсор).
-- `hooks/ko-analyst-guard.js` — PreToolUse-хук, подключён во frontmatter агента и активируется
-  при каждом его вызове: блокирует Telegram Bot API, внешние LLM API, любые записи в «Доску
+- `settings.json` + `hooks/ko-analyst-guard.js` — PreToolUse-хук проекта. Он вызывается для всех
+  сессий репозитория, но правила применяет только к вызовам субагента `shturman-ko-analyst`
+  (по полю `agent_type` во входе хука; основная сессия и другие агенты не затрагиваются).
+  Хуки во frontmatter субагента в облачных сессиях не выполняются — проверено, поэтому хук здесь.
+  Для агента блокирует Telegram Bot API, внешние LLM API, любые записи в «Доску
   проектов», кроме `POST /api/agent/ko/proposals` и `PUT /api/agent/ko/cursor`, Railway CLI,
   `git push`, `/data`, запись файлов вне `.ko-analyst/`.
 

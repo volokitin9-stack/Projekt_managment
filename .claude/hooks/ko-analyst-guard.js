@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 "use strict";
 
-// PreToolUse guard for the `shturman-ko-analyst` subagent (.claude/agents/shturman-ko-analyst.md).
+// PreToolUse guard for the `shturman-ko-analyst` subagent (.claude/agents/shturman-ko-analyst.md),
+// registered in .claude/settings.json and active only for that subagent's tool calls.
 // Technical enforcement of the agent's hard rules, so they do not depend on the model obeying its
 // prompt (or on a chat message that tries to talk it out of them):
 //   * the КО Telegram chat is read-only: no call to the Telegram Bot API at all;
@@ -61,7 +62,18 @@ function checkWrite(filePath, projectDir) {
   return null;
 }
 
+const AGENT = "shturman-ko-analyst";
+
+/** Registered project-wide in .claude/settings.json (frontmatter hooks of subagents were found not
+ *  to run in Claude Code cloud sessions), so it sees every tool call of every session in this repo.
+ *  It enforces the rules only for calls made by the shturman-ko-analyst subagent - Claude Code puts
+ *  `agent_type` into the hook input for subagent calls and omits it for the main session. */
+function appliesTo(input) {
+  return !!input && input.agent_type === AGENT;
+}
+
 function check(input, projectDir) {
+  if (!appliesTo(input)) return null;
   const tool = input && input.tool_name;
   const ti = (input && input.tool_input) || {};
   if (tool === "Bash") return checkBash(ti.command);
@@ -69,7 +81,7 @@ function check(input, projectDir) {
   return null;
 }
 
-module.exports = { check, checkBash, checkWrite };
+module.exports = { check, checkBash, checkWrite, appliesTo, AGENT };
 
 if (require.main === module) {
   let raw = "";
