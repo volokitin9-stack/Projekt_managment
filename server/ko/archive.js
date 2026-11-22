@@ -239,6 +239,29 @@ function readFile(id) {
   return { meta, buffer: fs.readFileSync(abs) };
 }
 
+/** The analyst's processing cursor (seq of the last message whose analysis was fully submitted).
+ *  Kept server-side because each scheduled cloud run starts in a fresh container. Monotonic: it can
+ *  only move forward and never past the archive. */
+function getCursor() {
+  return store.read((s) => ({ cursor: Number(s.ko_archive.analyst_cursor) || 0, last_seq: Number(s.ko_archive.last_seq) || 0,
+    updated_at: s.ko_archive.analyst_cursor_at || null, run_id: s.ko_archive.analyst_run_id || null }));
+}
+
+function setCursor(value, runId) {
+  const v = Number(value);
+  if (!Number.isInteger(v) || v < 0) return { error: 400, message: '"cursor" must be a non-negative integer' };
+  return store.tx((s) => {
+    const cur = Number(s.ko_archive.analyst_cursor) || 0;
+    const last = Number(s.ko_archive.last_seq) || 0;
+    if (v > last) return { error: 409, message: `cursor ${v} is beyond the archive (last_seq ${last})` };
+    if (v < cur) return { error: 409, message: `cursor can only move forward (current ${cur})` };
+    s.ko_archive.analyst_cursor = v;
+    s.ko_archive.analyst_cursor_at = new Date().toISOString();
+    s.ko_archive.analyst_run_id = runId ? String(runId).slice(0, 100) : null;
+    return { cursor: v, previous: cur, last_seq: last };
+  });
+}
+
 function stats() {
   return store.read((s) => ({
     messages: s.ko_messages.length,
@@ -249,5 +272,5 @@ function stats() {
   }));
 }
 
-module.exports = { archiveMessage, listMessages, getMessage, getFileMeta, filePath, readFile, stats, sniff,
+module.exports = { archiveMessage, listMessages, getCursor, setCursor, getMessage, getFileMeta, filePath, readFile, stats, sniff,
   KO_FILES_DIR, MAX_FILE_BYTES, ALLOWED_MIME: Object.keys(ALLOWED) };

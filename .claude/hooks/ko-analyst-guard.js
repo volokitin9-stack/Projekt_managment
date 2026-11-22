@@ -6,7 +6,8 @@
 // prompt (or on a chat message that tries to talk it out of them):
 //   * the КО Telegram chat is read-only: no call to the Telegram Bot API at all;
 //   * no paid/external LLM API (Anthropic API, Yandex AI Studio, OpenAI, ...);
-//   * no writes to Штурман except the proposals queue (POST /api/agent/ko/proposals);
+//   * no writes to Доска проектов except the proposals queue (POST /api/agent/ko/proposals) and the
+//     processing cursor (PUT /api/agent/ko/cursor);
 //   * no deploy / Railway CLI / git push / Volume /data / shturman.json access;
 //   * files may be written only inside .ko-analyst/.
 // Contract (Claude Code hooks): JSON on stdin; exit 0 = allow, exit 2 = block (stderr shown to the
@@ -31,9 +32,9 @@ const DENY_BASH = [
 
 const HTTP_CLIENT = /\b(curl|wget|http|httpie|Invoke-WebRequest|fetch\()/i;
 const MUTATING = /(-X\s*['"]?(POST|PUT|PATCH|DELETE)\b|--request\s+['"]?(POST|PUT|PATCH|DELETE)\b|\s(-d|--data[\w-]*|-F|--form[\w-]*|-T|--upload-file|--json)(\s|=)|method\s*:\s*['"](POST|PUT|PATCH|DELETE))/i;
-const ALLOWED_WRITE_PATH = /\/api\/agent\/ko\/proposals(\?|['"\s]|$)/;
+const ALLOWED_WRITE_PATH = /\/api\/agent\/ko\/(proposals|cursor)(\?|['"\s]|$)/;
 const AGENT_PATH = /\/api\/(agent|agent-jobs|plan-source|plan-imports|telegram|projects|tasks|globals|review-queue)\b/;
-const ALLOWED_READ_PATH = /\/api\/agent\/ko\/(messages|files|projects|proposals)\b/;
+const ALLOWED_READ_PATH = /\/api\/agent\/ko\/(messages|files|projects|proposals|cursor)\b/;
 
 function checkBash(command) {
   const cmd = String(command || "");
@@ -41,7 +42,7 @@ function checkBash(command) {
   if (HTTP_CLIENT.test(cmd)) {
     const urls = cmd.match(/https?:\/\/[^\s'"]+/g) || [];
     if (MUTATING.test(cmd) && !(urls.length && urls.every((u) => ALLOWED_WRITE_PATH.test(u)))) {
-      return "Запись разрешена только в очередь предложений POST /api/agent/ko/proposals";
+      return "Запись разрешена только в очередь предложений (POST /api/agent/ko/proposals) и курсор (PUT /api/agent/ko/cursor)";
     }
     for (const u of urls) {
       if (AGENT_PATH.test(u) && !ALLOWED_READ_PATH.test(u)) {

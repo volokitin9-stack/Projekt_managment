@@ -476,3 +476,25 @@ def test_reject_is_final_and_unresolved_project_cannot_be_applied(env):
     assert again.json()["counts"] == {"already_resolved": 1}, "a rejected proposal is not reopened"
     assert s.post(srv.url + f"/api/ko/proposals/{items['stage_change']['id']}/apply", json={"version": p["version"]}, timeout=10).status_code == 409
     assert project(srv, s, p["id"])["status"] == p["status"]
+
+
+# ------------------------------------------------------------------ processing cursor (daily run)
+
+def test_cursor_is_server_side_monotonic_and_scoped(env):
+    srv = env()
+    assert ko(srv, "/cursor").json() == {"cursor": 0, "last_seq": 0, "updated_at": None, "run_id": None}
+    hook(srv, msg(1500, "первое"))
+    hook(srv, msg(1501, "второе"))
+    assert ko(srv, "/cursor", method="PUT", json={"cursor": 3}).status_code == 409, "never beyond the archive"
+    assert ko(srv, "/cursor", method="PUT", json={"cursor": -1}).status_code == 400
+    assert ko(srv, "/cursor", method="PUT", json={"cursor": "x"}).status_code == 400
+    r = ko(srv, "/cursor", method="PUT", json={"cursor": 2, "run_id": "daily-2026-11-23"})
+    assert r.status_code == 200 and r.json() == {"cursor": 2, "previous": 0, "last_seq": 2}
+    assert ko(srv, "/cursor", method="PUT", json={"cursor": 1}).status_code == 409, "never backwards"
+    assert ko(srv, "/cursor", method="PUT", json={"cursor": 2}).status_code == 200, "idempotent re-save"
+    c = ko(srv, "/cursor").json()
+    assert c["cursor"] == 2 and c["run_id"] is None and c["updated_at"]
+    assert messages(srv, after=c["cursor"])["messages"] == [], "the next run starts after the cursor"
+    assert ko(srv, "/cursor", key=None).status_code == 401
+    assert ko(srv, "/cursor", key=AGENT_KEY, method="PUT", json={"cursor": 2}).status_code == 401
+    assert requests.get(srv.url + "/api/ko/proposals", timeout=10).status_code == 401

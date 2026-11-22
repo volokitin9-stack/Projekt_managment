@@ -15,6 +15,14 @@ const projectsModel = require("../projectsModel");
 const aiClient = require("./aiClient");
 const botApi = require("./botApi");
 const telegramLog = require("./log");
+const personalBot = require("./personalBot");
+
+/** The personal bot works without any AI by default (menu + step-by-step dialogs, personalBot.js).
+ *  TELEGRAM_PERSONAL_AI_ENABLED=true re-enables the older optional mode where free text that the
+ *  menu bot does not claim is interpreted by the AI (aiClient.js, paid API) - off unless set. */
+function aiEnabled() {
+  return ["true", "1", "yes", "on"].includes(String(process.env.TELEGRAM_PERSONAL_AI_ENABLED || "").trim().toLowerCase());
+}
 
 const tasksStore = createDocStore("tasks");
 
@@ -43,7 +51,7 @@ const TOOL_SCHEMA = {
   required: ["intent", "entity", "confidence"]
 };
 
-const SYSTEM = "Ты классифицируешь сообщения личного Telegram-бота системы «Штурман» (управление личными " +
+const SYSTEM = "Ты классифицируешь сообщения личного Telegram-бота системы «Доска проектов» (управление личными " +
   "задачами и инженерными проектами). Извлекай только то, что явно сказано в сообщении - никогда не " +
   "придумывай сотрудников, сроки, артикулы или факты о проекте. Если неясно, какая именно задача или проект " +
   "имеется в виду, или команда может навредить данным при ошибке - ставь confidence:\"low\" и формулируй " +
@@ -111,7 +119,7 @@ async function reply(chatId, text) {
 // ИИ", п.2): only a command with nothing left to interpret qualifies. /tasks (alias /list) is the
 // one task-management command that qualifies, since listing needs no extraction - it reuses the
 // exact same formatting as the AI-driven list_tasks intent (listTasks() below).
-const HELP_TEXT = "Привет! Я бот «Штурман» — помогаю вести личные задачи и подсказываю по инженерным проектам.\n\n" +
+const HELP_TEXT = "Привет! Я бот «Доска проектов» — помогаю вести личные задачи и подсказываю по инженерным проектам.\n\n" +
   "Просто напишите, что нужно сделать, например:\n" +
   "«Проверить крепление защиты картера, срок завтра»\n" +
   "«Покажи активные задачи»\n" +
@@ -138,6 +146,7 @@ async function listTasks(filter, base, chatId) {
 }
 
 async function handle(message, ctx) {
+  if (!aiEnabled() || personalBot.claims(message, ctx.chatId)) return personalBot.handle(message, ctx);
   const chatId = ctx.chatId;
   const text = (message.text || "").trim();
   const base = { channel: "personal", chat_id: chatId, user_id: ctx.userId, update_id: ctx.updateId, message_text: text };
@@ -303,4 +312,4 @@ async function execute(action, base, chatId) {
   telegramLog.record(Object.assign({}, base, { outcome: "ignored", detail: `unhandled intent ${action.intent}` }));
 }
 
-module.exports = { handle };
+module.exports = { handle, aiEnabled };
