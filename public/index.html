@@ -1,9 +1,9 @@
 <!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
-<title>Штурман</title>
+<title>Доска проектов</title>
 <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAIAAADdvvtQAAAB0ElEQVR42u3arQ3CQBiA4f6QILGoBteEIZDMgIQdkEUgGaKG4BgAhWOI1jQ1JOBA1qFxDYUmJM8zwN3ly5s7c2GxTAL4VGQECAgBISAEBAJCQAgIAYGAEBACQkAgIASEgBAQCAgBISAEhIBAQAgIASEgEBACQkAICASEgBAQAgIBISAEhIAQEAgIASEgBAQCQkAICAGBgBAQAkJA8G7Qwx5pXgVR3GWFx3l/P2y+frBhMp1sTx0XueXr5+X49bONZovxatdxkTqbN9fSDYQnDAGBgBAQAkJAICAEhIAQEAICASEgBISAQEAICAEhIBAQAkJACAgEhIAQEAJCQCAgBISAEBAICAEhIAQEAkJACAgBgYAQEAJCQCAgBISAEBACAgEhIASEgEBACAgBISAQEAJCQAgIBISAEBACQkAgIATEfwmLZfLrPdK8CqLYrPtXZ/PmWrqB8IQhIBAQAkJACAgEhIAQEAJCQCAgBISAEBC00seHMtxAICAEhIAQEAgIASEgBISAQEAICAEhIBAQAkJACAgEhIAQEAICASEgBISAEJARICAEhIAQEAgIASEgBAQCQkAICAGBgBAQAkJAICAEhIAQEAICASEgBISAoJUXEG0dgk6oqtgAAAAASUVORK5CYII=">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Штурман">
+<meta name="apple-mobile-web-app-title" content="Доска проектов">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0D1722">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -701,8 +701,8 @@
 <div class="sidebar-scrim" id="sidebarScrim"></div>
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-brand">
-    <span class="mark">Ш</span>
-    <span class="name">ШТУРМАН</span>
+    <span class="mark">Д</span>
+    <span class="name">ДОСКА ПРОЕКТОВ</span>
   </div>
   <nav class="sidebar-nav">
     <button type="button" class="tab-btn active" id="tabBoardBtn" data-tab="board" title="Доска"><span class="icon" id="navIconBoard"></span><span class="label">Доска</span></button>
@@ -722,7 +722,7 @@
   <header class="app-header">
     <button type="button" class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Меню"><span class="icon" id="navIconMenu"></span></button>
     <div class="brand">
-      <span class="name">ШТУРМАН</span>
+      <span class="name">ДОСКА ПРОЕКТОВ</span>
       <span class="sub">дерево задач</span>
     </div>
     <div class="header-clock">
@@ -1399,6 +1399,8 @@
     var ageDays = daysSince(t.createdAt);
     var rows = "";
     if(ageDays !== null) rows += '<div class="meta-row"><span class="k">В работе</span><span class="v">'+ageDays+' дн.</span></div>';
+    // priority / description can be set from the personal Telegram bot
+    if(t.priority) rows += '<div class="meta-row"><span class="k">Приоритет</span><span class="v">'+escapeHtml(({high:"высокий",normal:"обычный",low:"низкий"})[t.priority]||t.priority)+'</span></div>';
     if(t.direction) rows += '<div class="meta-row"><span class="k">Направление</span><span class="v">'+escapeHtml(t.direction)+'</span></div>';
     if(t.responsible) rows += '<div class="meta-row"><span class="k">Ответственный</span><span class="v">'+escapeHtml(t.responsible)+'</span></div>';
     if(t.from) rows += '<div class="meta-row"><span class="k">От кого</span><span class="v">'+escapeHtml(t.from)+'</span></div>';
@@ -1420,6 +1422,7 @@
         '<select id="td-quadrant" data-action="quadrant" data-id="'+t.id+'">'+quadrantOptions+'</select>' +
       '</div>' +
       '<div class="task-meta">'+rows+'</div>' +
+      (t.description ? '<div class="global-desc" style="margin-top:10px;white-space:pre-wrap;">'+escapeHtml(t.description)+'</div>' : '') +
       renderSubtasksHtml("tasks", t.id, t.subtasks) +
       '<button type="button" class="btn danger" style="margin-top:16px;width:100%;" data-action="delete" data-collection="tasks" data-id="'+t.id+'">'+iconSvg('trash-2',15)+' Удалить задачу</button>'
     );

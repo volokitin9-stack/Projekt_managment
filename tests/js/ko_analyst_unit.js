@@ -25,6 +25,8 @@ const blocked = [
   `curl -X PATCH ${B}/proposals/1 https://shturman.example/api/agent/projects/1 -d '{}'`,
   `curl https://shturman.example/api/agent/projects`,
   `curl https://shturman.example/api/telegram/log`,
+  `curl -X PUT https://shturman.example/api/agent/ko/cursor/x https://shturman.example/api/agent/projects -d '{}'`,
+  `curl -X DELETE ${B}/cursor`.replace("-X DELETE", "-X DELETE -d x") + " https://shturman.example/api/agent/projects",
   `curl -X POST https://shturman.example/api/telegram/webhook/connect`,
   `railway up`,
   `railway variables --set A=1`,
@@ -41,6 +43,8 @@ const allowed = [
   `curl -s -H "Authorization: Bearer $KO_ANALYST_API_KEY" ${B}/files/abc -o .ko-analyst/files/abc.jpg`,
   `curl -s -X POST -H "Authorization: Bearer $KO_ANALYST_API_KEY" -H "Content-Type: application/json" --data @.ko-analyst/out/proposals.new.json ${B}/proposals`,
   `node tools/ko_analyst/ledger.js merge .ko-analyst/out/proposals.json`,
+  `curl -s ${B}/cursor`,
+  `curl -s -X PUT -H "Content-Type: application/json" -d '{"cursor":12}' ${B}/cursor`,
   `jq '.messages | length' .ko-analyst/inbox/messages.json`,
   `ls .ko-analyst/inbox/photos`
 ];

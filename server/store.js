@@ -38,7 +38,9 @@ const COLLECTIONS = ["stages", "docs", "projects", "project_activities", "projec
   // КО chat archive for the shturman-ko-analyst agent (server/ko/archive.js) - append-only
   "ko_messages", "ko_files"];
 // Single-object sections (added without a format change: missing = empty).
-const OBJECTS = ["plan_source", "agent_status", "telegram_digest", "telegram_webhook", "ko_archive"];
+const OBJECTS = ["plan_source", "agent_status", "telegram_digest", "telegram_webhook", "ko_archive",
+  // per-chat dialog state of the personal menu bot (server/telegram/personalBot.js)
+  "telegram_dialogs"];
 
 const DEFAULT_STAGES = [
   { key: "scanning", label: "Сканирование", sort_order: 1 },
