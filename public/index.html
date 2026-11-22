@@ -3318,7 +3318,9 @@
       .then(function(r){
         var st = r[0], log = r[1].entries || [];
         var p = st.personal, en = st.engineering, wh = st.webhook || {};
-        var html = '<div class="eng-panel"><h3>Webhook Telegram</h3><table class="eng-table" style="max-width:640px;">' +
+        var html = (st.config_warnings||[]).length ? '<div class="eng-panel"><h3>Предупреждения конфигурации</h3>' +
+          st.config_warnings.map(function(w){ return '<div class="eng-status err" style="display:block;margin:4px 0;">'+escapeHtml(w)+'</div>'; }).join("") + '</div>' : '';
+        html += '<div class="eng-panel"><h3>Webhook Telegram</h3><table class="eng-table" style="max-width:640px;">' +
           integrationsRow("Статус", integrationsPill(wh.connected)) +
           integrationsRow("Адрес", wh.url ? '<span style="font-size:11.5px;">'+escapeHtml(wh.url)+'</span>' : "—") +
           integrationsRow("Последняя проверка", wh.last_checked_at ? fmtTs(wh.last_checked_at) : "—") +

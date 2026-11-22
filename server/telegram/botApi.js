@@ -8,6 +8,8 @@
 // TELEGRAM_API_BASE_URL is overridable (default https://api.telegram.org) for the same reason as
 // server/telegram/aiClient.js's ANTHROPIC_API_BASE_URL - tests point this at a local fake server.
 
+const envIds = require("./envIds");
+
 function baseUrl() {
   return (process.env.TELEGRAM_API_BASE_URL || "https://api.telegram.org").replace(/\/$/, "");
 }
@@ -24,11 +26,13 @@ function configured() {
 // chat is strictly read-only - no sendMessage/sendPhoto/sendDocument/etc may ever reach it, from
 // any code path (handlers, error handling, background jobs, retries). Enforced here, in the one
 // function every outbound Telegram API call goes through, rather than per call site, so it covers
-// every current and future outbound method with no per-method enumeration.
+// every current and future outbound method with no per-method enumeration. Uses the same normalised
+// TELEGRAM_ENGINEERING_CHAT_ID as routing (server/telegram/envIds.js), so a value with stray
+// whitespace or quotes cannot turn the guard off; the outgoing chat_id is normalised the same way.
 function isBannedOutboundChat(body) {
-  const engineeringChatId = process.env.TELEGRAM_ENGINEERING_CHAT_ID;
+  const engineeringChatId = envIds.engineeringChatId();
   if (!engineeringChatId || !body || body.chat_id === undefined || body.chat_id === null) return false;
-  return String(body.chat_id) === String(engineeringChatId);
+  return envIds.normalizeId(body.chat_id) === engineeringChatId;
 }
 
 async function call(method, body) {

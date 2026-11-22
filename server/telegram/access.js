@@ -11,24 +11,26 @@
 // chat_id-restricted) group may post engineering updates - matching how the original chat itself
 // already controls membership.
 
-function ids(csv) {
-  return String(csv || "").split(",").map((s) => s.trim()).filter(Boolean);
-}
+//
+// All four values are read through server/telegram/envIds.js, which trims whitespace and strips one
+// pair of surrounding quotes - see that file for why.
+
+const envIds = require("./envIds");
 
 /** Resolves which channel (if any) an update belongs to, and whether its sender is allowed to act
  *  in it. Never both "personal" and "engineering" - a chat is one or the other. */
 function resolveChannel(message) {
   const chatId = String((message.chat || {}).id || "");
   const userId = String((message.from || {}).id || "");
-  const ownerChatId = String(process.env.TELEGRAM_OWNER_CHAT_ID || "");
-  const ownerUserId = String(process.env.TELEGRAM_OWNER_USER_ID || "");
-  const engineeringChatId = String(process.env.TELEGRAM_ENGINEERING_CHAT_ID || "");
+  const ownerChatId = envIds.ownerChatId();
+  const ownerUserId = envIds.ownerUserId();
+  const engineeringChatId = envIds.engineeringChatId();
 
   if (ownerChatId && chatId === ownerChatId) {
     return { channel: "personal", allowed: !ownerUserId || userId === ownerUserId, chatId, userId };
   }
   if (engineeringChatId && chatId === engineeringChatId) {
-    const allowedList = ids(process.env.TELEGRAM_ENGINEERING_ALLOWED_USER_IDS);
+    const allowedList = envIds.engineeringAllowedUserIds();
     return { channel: "engineering", allowed: !allowedList.length || allowedList.includes(userId), chatId, userId };
   }
   return { channel: null, allowed: false, chatId, userId };

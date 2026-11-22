@@ -22,6 +22,7 @@ const reviewQueue = require("../reviewQueueModel");
 const { createDocStore } = require("../docStore");
 const rules = require("./rules");
 const archive = require("./archive");
+const envIds = require("../telegram/envIds");
 
 const KIND = "ko_proposal";
 const SOURCE = "ko_analyst";
@@ -36,7 +37,7 @@ function nowIso() {
 }
 
 function engineeringChatId() {
-  return String(process.env.TELEGRAM_ENGINEERING_CHAT_ID || "");
+  return envIds.engineeringChatId();
 }
 
 function pick(obj, keys) {

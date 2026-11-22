@@ -29,6 +29,7 @@ const store = require("../store");
 const cal = require("../planSource/workCalendar");
 const botApi = require("./botApi");
 const telegramLog = require("./log");
+const envIds = require("./envIds");
 
 const TIMEZONE = "Europe/Moscow";
 const SCHEDULE_TIME = "07:53";
@@ -96,7 +97,7 @@ function setDigestState(fields) {
 }
 
 function configuredToRun() {
-  return botApi.configured() && !!process.env.TELEGRAM_OWNER_CHAT_ID;
+  return botApi.configured() && !!envIds.ownerChatId();
 }
 
 /** The daily tick: at most one send per local date, weekdays only, missed runs not replayed. */
@@ -117,10 +118,10 @@ async function tick(t = now(), { startup = false } = {}) {
   const tasks = createDocStore("tasks").list();
   const text = buildDigestText(tasks, t);
   try {
-    await botApi.sendMessage(process.env.TELEGRAM_OWNER_CHAT_ID, text);
+    await botApi.sendMessage(envIds.ownerChatId(), text);
     setDigestState({ last_sent_date: dateKey, last_sent_at: new Date().toISOString(),
       last_active_count: tasks.filter((x) => !x.done).length });
-    telegramLog.record({ channel: "personal", chat_id: process.env.TELEGRAM_OWNER_CHAT_ID, outcome: "replied",
+    telegramLog.record({ channel: "personal", chat_id: envIds.ownerChatId(), outcome: "replied",
       detail: `ежедневная сводка за ${dateKey} отправлена` });
     return { action: "sent", date: dateKey };
   } catch (e) {

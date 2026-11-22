@@ -15,6 +15,7 @@ const dailyDigest = require("../telegram/dailyDigest");
 const dashboardAuth = require("../dashboardAuth");
 const engineeringChannel = require("../telegram/engineeringChannel");
 const koArchive = require("../ko/archive");
+const envIds = require("../telegram/envIds");
 
 const router = express.Router();
 
@@ -24,9 +25,6 @@ const router = express.Router();
 // hardcoded URL in this codebase.
 const WEBHOOK_URL = "https://projektmanagment-production.up.railway.app/api/telegram/webhook";
 
-function allowedUsers(csv) {
-  return String(csv || "").split(",").map((s) => s.trim()).filter(Boolean);
-}
 
 function webhookState() {
   return store.read((s) => Object.assign({}, s.telegram_webhook));
@@ -72,9 +70,11 @@ router.get("/status", (req, res) => {
     bot_configured: botApi.configured(),
     ai_configured: aiClient.configured(),
     webhook_secret_configured: !!process.env.TELEGRAM_WEBHOOK_SECRET,
+    // chat/user id env vars whose raw value had stray whitespace or quotes (still used, normalised)
+    config_warnings: envIds.warnings(),
     personal: {
-      connected: !!(process.env.TELEGRAM_OWNER_CHAT_ID && botApi.configured()),
-      allowed_users: allowedUsers(process.env.TELEGRAM_OWNER_USER_ID),
+      connected: !!(envIds.ownerChatId() && botApi.configured()),
+      allowed_users: envIds.envIdList("TELEGRAM_OWNER_USER_ID"),
       last_command_at: personal.last_message_at,
       last_action: personal.last ? `${personal.last.outcome}${personal.last.detail ? ": " + personal.last.detail : ""}` : null,
       tasks_created: personal.by_outcome.created || 0,
@@ -83,8 +83,8 @@ router.get("/status", (req, res) => {
       ai_unavailable_last_at: personalAiPending.length ? personalAiPending[personalAiPending.length - 1].updated_at : null
     },
     engineering: {
-      connected: !!(process.env.TELEGRAM_ENGINEERING_CHAT_ID && botApi.configured()),
-      chat_id: process.env.TELEGRAM_ENGINEERING_CHAT_ID || null,
+      connected: !!(envIds.engineeringChatId() && botApi.configured()),
+      chat_id: envIds.engineeringChatId() || null,
       last_message_at: engineering.last_message_at,
       messages_processed: engineering.processed,
       events_recorded: engineering.by_outcome.updated || 0,

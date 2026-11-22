@@ -427,6 +427,42 @@ def test_botapi_refuses_every_outbound_method_to_the_engineering_chat(telegram):
                                        {"chat_id": ENG_CHAT, "text": "no eng chat id configured"}]
 
 
+@pytest.mark.parametrize("raw_chat_id", [ENG_CHAT + " ", ENG_CHAT + "\n", f'"{ENG_CHAT}"', f"'{ENG_CHAT}'"],
+                         ids=["trailing-space", "trailing-newline", "double-quoted", "single-quoted"])
+@pytest.mark.parametrize("anthropic", [ENGINEERING_RULES], indirect=True)
+def test_misformatted_engineering_chat_id_still_routes_and_stays_read_only(tmp_path, anthropic, telegram, raw_chat_id):
+    """TELEGRAM_ENGINEERING_CHAT_ID pasted into Railway Variables with a trailing space or quotes used
+    to make every КО message land in telegram_log as unknown/rejected and never reach the
+    engineering channel or the ko_messages archive. It must route normally, still never send
+    anything to that chat, and show a config warning on the status page."""
+    srv = _server(tmp_path, anthropic, telegram, TELEGRAM_ENGINEERING_CHAT_ID=raw_chat_id,
+                  TELEGRAM_ENGINEERING_ALLOWED_USER_IDS='"501", 502')
+    try:
+        r = post(srv, update(ENG_CHAT, "501",
+                              "Сегодня установили тестовый образец защиты HAVAL Jolion. Необходимо доработать правый кронштейн."))
+        assert r.status_code == 200
+        assert len(review(srv, kind="telegram_stage_suggestion")) == 1
+        st = status(srv)
+        assert st["engineering"]["chat_id"] == ENG_CHAT
+        assert st["engineering"]["ko_archive"]["messages"] == 1
+        assert st["engineering"]["messages_processed"] >= 1
+        assert any(w.startswith("TELEGRAM_ENGINEERING_CHAT_ID") for w in st["config_warnings"]), st["config_warnings"]
+        assert any(w.startswith("TELEGRAM_ENGINEERING_ALLOWED_USER_IDS") for w in st["config_warnings"])
+        log = requests.get(srv.url + "/api/telegram/log", timeout=10).json()["entries"]
+        assert not any(e.get("outcome") == "rejected" for e in log), log
+        assert telegram.sent_messages == [], "the КО chat is read-only, whatever the env var looks like"
+    finally:
+        srv.stop()
+
+
+def test_status_has_no_config_warnings_for_clean_values(tmp_path, anthropic, telegram):
+    srv = _server(tmp_path, anthropic, telegram)
+    try:
+        assert status(srv)["config_warnings"] == []
+    finally:
+        srv.stop()
+
+
 @pytest.mark.parametrize("anthropic", [ENGINEERING_RULES], indirect=True)
 def test_engineering_channel_never_sends_anything_to_telegram_across_every_scenario(tmp_path, anthropic, telegram):
     """Runs the full engineering-channel scenario matrix (relevant message, irrelevant message,

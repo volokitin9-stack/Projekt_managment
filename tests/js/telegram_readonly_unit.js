@@ -57,6 +57,56 @@ const results = {};
   await botApi.call("getFile", { file_id: "f2" });
   results.no_chat_id_not_mistaken_for_banned = true;
 
+  // a mis-formatted TELEGRAM_ENGINEERING_CHAT_ID (as pasted into Railway Variables: trailing
+  // space/newline, or surrounding quotes) must neither disable the guard nor break routing - both go
+  // through the same normalised value (server/telegram/envIds.js)
+  const access = require("../../server/telegram/access");
+  const envIds = require("../../server/telegram/envIds");
+  for (const raw of [`${ENG_CHAT} `, `${ENG_CHAT}\n`, ` ${ENG_CHAT}`, `"${ENG_CHAT}"`, `'${ENG_CHAT}'`, ` "${ENG_CHAT}" `]) {
+    process.env.TELEGRAM_ENGINEERING_CHAT_ID = raw;
+    await expectRefused(botApi.sendMessage(ENG_CHAT, "must not be sent"));
+    await expectRefused(botApi.call("sendMessage", { chat_id: Number(ENG_CHAT), text: "x" }));
+    await expectRefused(botApi.call("sendPhoto", { chat_id: ENG_CHAT, photo: "x" }));
+    const r = access.resolveChannel({ chat: { id: Number(ENG_CHAT) }, from: { id: 501 } });
+    assert.deepStrictEqual([r.channel, r.allowed], ["engineering", true], `routing broken for ${JSON.stringify(raw)}`);
+    assert.ok(envIds.warnings().some((w) => w.startsWith("TELEGRAM_ENGINEERING_CHAT_ID")), `no warning for ${JSON.stringify(raw)}`);
+  }
+  results.misformatted_eng_chat_id_still_refused_and_routed = true;
+
+  // a clean value produces no warning
+  process.env.TELEGRAM_ENGINEERING_CHAT_ID = ENG_CHAT;
+  assert.deepStrictEqual(envIds.warnings(), []);
+  results.clean_value_no_warning = true;
+
+  // only ONE pair of quotes is stripped, and mismatched quotes are left alone - those values must
+  // not match (and are flagged/left as is), rather than being "fixed" by guesswork
+  assert.strictEqual(envIds.normalizeId(`""${ENG_CHAT}""`), `"${ENG_CHAT}"`);
+  assert.strictEqual(envIds.normalizeId(`"${ENG_CHAT}'`), `"${ENG_CHAT}'`);
+  results.only_one_matching_quote_pair_stripped = true;
+
+  // TELEGRAM_ENGINEERING_ALLOWED_USER_IDS entries are normalised the same way
+  process.env.TELEGRAM_ENGINEERING_ALLOWED_USER_IDS = `"501", '502' , 503 `;
+  for (const uid of [501, 502, 503]) {
+    assert.strictEqual(access.resolveChannel({ chat: { id: Number(ENG_CHAT) }, from: { id: uid } }).allowed, true, `user ${uid}`);
+  }
+  assert.strictEqual(access.resolveChannel({ chat: { id: Number(ENG_CHAT) }, from: { id: 999 } }).allowed, false);
+  assert.ok(envIds.warnings().some((w) => w.startsWith("TELEGRAM_ENGINEERING_ALLOWED_USER_IDS")));
+  process.env.TELEGRAM_ENGINEERING_ALLOWED_USER_IDS = `"501,502"`;
+  assert.deepStrictEqual(envIds.engineeringAllowedUserIds(), ["501", "502"]);
+  process.env.TELEGRAM_ENGINEERING_ALLOWED_USER_IDS = "501, 502";
+  assert.deepStrictEqual(envIds.warnings(), [], "plain spaces after commas were always fine - no warning");
+  delete process.env.TELEGRAM_ENGINEERING_ALLOWED_USER_IDS;
+  results.allowed_user_ids_normalised = true;
+
+  // owner ids too
+  process.env.TELEGRAM_OWNER_CHAT_ID = ` "${OWNER_CHAT}"`;
+  process.env.TELEGRAM_OWNER_USER_ID = `${OWNER_CHAT} `;
+  const o = access.resolveChannel({ chat: { id: Number(OWNER_CHAT) }, from: { id: Number(OWNER_CHAT) } });
+  assert.deepStrictEqual([o.channel, o.allowed], ["personal", true]);
+  delete process.env.TELEGRAM_OWNER_CHAT_ID;
+  delete process.env.TELEGRAM_OWNER_USER_ID;
+  results.owner_ids_normalised = true;
+
   // if TELEGRAM_ENGINEERING_CHAT_ID is unset, there is nothing to compare against - no guard, no crash
   delete process.env.TELEGRAM_ENGINEERING_CHAT_ID;
   const sent2 = await botApi.sendMessage(ENG_CHAT, "no eng chat id configured");
