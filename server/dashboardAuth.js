@@ -1,20 +1,29 @@
 "use strict";
 
-// Minimal session auth for the dashboard itself, for the Railway deployment (spec: "Railway must
-// require authentication for all project data"). The original app had no user accounts by design
-// (see MIGRATION_REPORT.md) - this adds the smallest thing that satisfies "authenticated, not open
-// to the internet" without inventing a multi-role user system nothing in this codebase asked for:
-// one shared operator login (DASHBOARD_USERNAME / DASHBOARD_PASSWORD), a signed, httpOnly session
-// cookie (HMAC-SHA256 over username+expiry with DASHBOARD_SESSION_SECRET), no server-side session
-// store needed. "Administrative permissions" in this single-operator app means "logged in or not" -
-// if real per-user roles are ever needed, that is new product scope, same conclusion the original
-// migration reached for AGENT_API_KEY's single shared secret.
+// Session auth for the dashboard. The original, single-operator design (spec: "Railway must
+// require authentication for all project data") was one shared login, DASHBOARD_USERNAME/
+// DASHBOARD_PASSWORD - that is now the one and only *administrator* identity, unchanged in every
+// respect (same env vars, same credential check, same session cookie format for it). Individual
+// manager accounts (role "ko_viewer", server/usersModel.js, "Пользователи" admin section) are a
+// second, later identity source this same login/session endpoint also accepts - see login()
+// below and docs/USER_ACCOUNTS.md for why the two are kept deliberately separate rather than
+// unifying the admin into a "users" row (critical requirement: "сохранить совместимость с
+// текущей административной авторизацией и действующим паролем администратора").
+//
+// Session cookie: a signed, httpOnly token (HMAC-SHA256, DASHBOARD_SESSION_SECRET), no
+// server-side session store needed for the admin identity (as before). A manager session
+// additionally embeds {uid, tv} (the user's id and token_version at login time); every request
+// re-checks that pair against the live record (usersModel.isSessionLive()), which is what makes
+// disabling, reactivating or resetting a password take effect immediately, on the very next
+// request, from every device - not just on that cookie's natural expiry.
 //
 // Left OFF (no-op) unless DASHBOARD_USERNAME and DASHBOARD_PASSWORD are both set, so the existing
 // local/single-machine deployment (docs/WINDOWS.md) keeps working unauthenticated exactly as today -
-// this is additive, not a breaking change to the current install.
+// this is additive, not a breaking change to the current install. Manager accounts have no effect
+// in that mode either, for the same reason: there is no login wall for them to sit behind.
 
 const crypto = require("crypto");
+const usersModel = require("./usersModel");
 
 const COOKIE_NAME = "shturman_session";
 const SESSION_MS = Number(process.env.DASHBOARD_SESSION_MS || 12 * 60 * 60 * 1000); // 12h
@@ -63,8 +72,15 @@ function parseCookies(header) {
   return out;
 }
 
-function setSessionCookie(res, username) {
-  const token = sign({ u: username, exp: Date.now() + SESSION_MS });
+/** identity: {username, role, uid?, tokenVersion?} - uid/tokenVersion only for a manager session
+ *  (role !== "admin"); their presence is what requireDashboardSession re-validates live. */
+function setSessionCookie(res, identity) {
+  const payload = { u: identity.username, role: identity.role, exp: Date.now() + SESSION_MS };
+  if (identity.uid) {
+    payload.uid = identity.uid;
+    payload.tv = identity.tokenVersion;
+  }
+  const token = sign(payload);
   const secureFlag = process.env.NODE_ENV === "production" || process.env.FORCE_SECURE_COOKIE === "1" ? "; Secure" : "";
   res.setHeader("Set-Cookie", `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_MS / 1000)}${secureFlag}`);
 }
@@ -98,31 +114,80 @@ function requireCsrfToken(req, res, next) {
   next();
 }
 
-/** Express middleware: 401s API calls, redirects page loads to a login prompt, when dashboard auth
- *  is configured and the request has no valid session. A no-op when DASHBOARD_USERNAME/PASSWORD are
- *  unset - see "configured()" above. */
-function requireDashboardSession(req, res, next) {
-  if (!configured()) return next();
-  const cookies = parseCookies(req.get("cookie"));
-  const session = verify(cookies[COOKIE_NAME]);
-  if (session) return next();
+function rejectSession(req, res) {
   if (req.path.startsWith("/api/")) return res.status(401).json({ error: "Not authenticated. POST /api/login first." });
   return res.redirect(302, `/login.html?next=${encodeURIComponent(req.originalUrl)}`);
 }
 
-/** POST /api/login { username, password } -> sets the session cookie. Timing-safe comparison on both
- *  fields; a fixed error message either way so a wrong username does not confirm it exists. */
-function login(req, res) {
+/** Express middleware: 401s API calls, redirects page loads to a login prompt, when dashboard auth
+ *  is configured and the request has no valid, still-live session. A no-op when
+ *  DASHBOARD_USERNAME/PASSWORD are unset - see "configured()" above (every request is then treated
+ *  as full/admin access, exactly as before this file had any notion of roles).
+ *
+ *  Sets req.authRole ("admin" | a manager's role, e.g. "ko_viewer") and req.authUser
+ *  ({username, uid}) for route-level checks (requireAdminRole below, or a router's own finer-
+ *  grained logic such as server/routes/projects.js's read-only-for-non-admin rule). For a manager
+ *  session this also re-validates {uid, tv} against the live user record on *every* request
+ *  (критическое требование: мгновенная блокировка/сброс пароля инвалидирует сессию без
+ *  исключений) - a disabled account's or an old password's session stops working immediately,
+ *  not just once its cookie's own expiry happens to arrive. */
+function requireDashboardSession(req, res, next) {
+  if (!configured()) {
+    req.authRole = "admin";
+    return next();
+  }
+  const cookies = parseCookies(req.get("cookie"));
+  const session = verify(cookies[COOKIE_NAME]);
+  if (!session) return rejectSession(req, res);
+  if (session.uid && !usersModel.isSessionLive(session.uid, session.tv)) return rejectSession(req, res);
+  req.authRole = session.role || "admin";
+  req.authUser = { username: session.u, uid: session.uid || null };
+  next();
+}
+
+/** Express middleware: 403s anything but the administrator (the DASHBOARD_USERNAME/PASSWORD
+ *  identity - never a "users" row; see module header). Must run after requireDashboardSession
+ *  (which sets req.authRole), so routes mount it as a second middleware, not standalone. */
+function requireAdminRole(req, res, next) {
+  if (req.authRole === "admin") return next();
+  return res.status(403).json({ error: "Forbidden: administrator access required" });
+}
+
+/** POST /api/login { username, password } -> sets the session cookie, for either identity:
+ *  - the administrator (DASHBOARD_USERNAME/PASSWORD, timing-safe comparison on both fields,
+ *    unchanged from before individual accounts existed), or
+ *  - a manager account (server/usersModel.js), tried only once the admin credentials don't match.
+ *  A fixed error message either way so a wrong username never confirms which kind it was meant to
+ *  be. Both paths share one rate limiter keyed by the attempted username (critical requirement:
+ *  "ограничить число попыток входа") - checked before either credential check runs, so a locked-
+ *  out username can't be walked past by guessing the admin password correctly mid-lockout. */
+async function login(req, res) {
   if (!configured()) return res.status(501).json({ error: "Dashboard auth is not configured on this server" });
   const { username, password } = req.body || {};
+  const uname = String(username || "");
+  if (!usersModel.loginAllowed(uname)) {
+    return res.status(429).json({ error: "Слишком много неудачных попыток входа. Попробуйте позже." });
+  }
   const expectedUser = Buffer.from(String(process.env.DASHBOARD_USERNAME));
   const expectedPass = Buffer.from(String(process.env.DASHBOARD_PASSWORD));
-  const gotUser = Buffer.from(String(username || ""));
+  const gotUser = Buffer.from(uname);
   const gotPass = Buffer.from(String(password || ""));
   const userOk = gotUser.length === expectedUser.length && crypto.timingSafeEqual(gotUser, expectedUser);
   const passOk = gotPass.length === expectedPass.length && crypto.timingSafeEqual(gotPass, expectedPass);
-  if (!userOk || !passOk) return res.status(401).json({ error: "Invalid username or password" });
-  setSessionCookie(res, username);
+  if (userOk && passOk) {
+    usersModel.recordLoginSuccess(uname);
+    usersModel.recordAudit({ type: "login_success", target_username: uname, detail: "admin" });
+    setSessionCookie(res, { role: "admin", username: uname });
+    return res.json({ ok: true });
+  }
+  const result = await usersModel.verifyLogin(uname, password);
+  if (result.error === "rate_limited") {
+    return res.status(429).json({ error: "Слишком много неудачных попыток входа. Попробуйте позже." });
+  }
+  if (!result.user) return res.status(401).json({ error: "Invalid username or password" });
+  setSessionCookie(res, {
+    role: result.user.role, username: result.user.username, uid: result.user.id, tokenVersion: result.user.token_version
+  });
   res.json({ ok: true });
 }
 
@@ -135,13 +200,15 @@ function whoAmI(req, res) {
   if (!configured()) return res.json({ auth_required: false });
   const cookies = parseCookies(req.get("cookie"));
   const session = verify(cookies[COOKIE_NAME]);
+  const live = session && (!session.uid || usersModel.isSessionLive(session.uid, session.tv));
   res.json({
-    auth_required: true, authenticated: !!session, username: session ? session.u : null,
-    csrf_token: session ? csrfToken(req) : null
+    auth_required: true, authenticated: !!live, username: live ? session.u : null,
+    role: live ? (session.role || "admin") : null,
+    csrf_token: live ? csrfToken(req) : null
   });
 }
 
 module.exports = {
-  configured, requireDashboardSession, requireCsrfToken, csrfToken, login, logout, whoAmI,
+  configured, requireDashboardSession, requireAdminRole, requireCsrfToken, csrfToken, login, logout, whoAmI,
   _verify: verify, _sign: sign
 };

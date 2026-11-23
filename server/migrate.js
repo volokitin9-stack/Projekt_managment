@@ -21,7 +21,7 @@ const path = require("path");
 // Mirrors server/store.js's COLLECTIONS (kept separate - see header comment above).
 const COLLECTIONS = ["stages", "docs", "projects", "project_activities", "project_history", "project_files",
   "agent_events", "review_queue", "sync_runs", "plan_imports", "plan_source_versions", "plan_source_events",
-  "plan_source_runs", "agent_jobs", "telegram_updates", "telegram_log"];
+  "plan_source_runs", "agent_jobs", "telegram_updates", "telegram_log", "users", "users_audit"];
 
 // REQUIRED_COLLECTIONS: present since the original JSON-storage format (server/store.js @ 76fd8f8) -
 // a staged export missing one of these is not a valid Штурман database and must be rejected.
