@@ -13,6 +13,8 @@ const botApi = require("../telegram/botApi");
 const reviewQueue = require("../reviewQueueModel");
 const dailyDigest = require("../telegram/dailyDigest");
 const dashboardAuth = require("../dashboardAuth");
+const engineeringChannel = require("../telegram/engineeringChannel");
+const koArchive = require("../ko/archive");
 
 const router = express.Router();
 
@@ -92,7 +94,10 @@ router.get("/status", (req, res) => {
       ambiguous_projects_pending: ambiguousProjects,
       processing_errors: engineering.errors,
       ai_unavailable_pending: engineeringAiPending.length,
-      ai_unavailable_last_at: engineeringAiPending.length ? engineeringAiPending[engineeringAiPending.length - 1].updated_at : null
+      ai_unavailable_last_at: engineeringAiPending.length ? engineeringAiPending[engineeringAiPending.length - 1].updated_at : null,
+      ai_enabled: engineeringChannel.aiEnabled(),
+      ko_archive: koArchive.stats(),
+      ko_proposals_pending: reviewQueue.list({ kind: "ko_proposal" }).length
     },
     daily_digest: dailyDigest.status(),
     webhook: webhookStatus()

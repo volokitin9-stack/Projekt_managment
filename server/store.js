@@ -34,9 +34,15 @@ const TEMPLATE = path.join(DATA_DIR, "templates", "shturman.empty.json");
 const SCHEMA_VERSION = 1;
 const COLLECTIONS = ["stages", "docs", "projects", "project_activities", "project_history", "project_files",
   "agent_events", "review_queue", "sync_runs", "plan_imports", "plan_source_versions", "plan_source_events",
-  "plan_source_runs", "agent_jobs", "telegram_updates", "telegram_log", "users", "users_audit"];
+  "plan_source_runs", "agent_jobs", "telegram_updates", "telegram_log", "users", "users_audit",
+  // КО chat archive for the shturman-ko-analyst agent (server/ko/archive.js) - append-only
+  "ko_messages", "ko_files",
+  // one record per personal-task import (server/taskImport.js) - what it created, for rollback
+  "task_imports"];
 // Single-object sections (added without a format change: missing = empty).
-const OBJECTS = ["plan_source", "agent_status", "telegram_digest", "telegram_webhook"];
+const OBJECTS = ["plan_source", "agent_status", "telegram_digest", "telegram_webhook", "ko_archive",
+  // per-chat dialog state of the personal menu bot (server/telegram/personalBot.js)
+  "telegram_dialogs"];
 
 const DEFAULT_STAGES = [
   { key: "scanning", label: "Сканирование", sort_order: 1 },

@@ -29,6 +29,9 @@ const agentJobsRouter = require("./routes/agentJobs");
 const telegramWebhookRouter = require("./routes/telegramWebhook");
 const telegramAdminRouter = require("./routes/telegramAdmin");
 const usersRouter = require("./routes/users");
+const koAgentRouter = require("./routes/koAgent");
+const koDashboardRouter = require("./routes/koDashboard");
+const taskImportRouter = require("./routes/taskImport");
 const planScheduler = require("./planSource/scheduler");
 const telegramDailyDigest = require("./telegram/dailyDigest");
 const store = require("./store");
@@ -100,6 +103,15 @@ app.use("/api/telegram", dashboardAuth.requireAdminRole, telegramAdminRouter);
 // "Пользователи" - administrator-only (server/routes/users.js enforces CSRF per mutation itself).
 app.use("/api/users", dashboardAuth.requireAdminRole, usersRouter);
 
+// shturman-ko-analyst proposals review - administrator-only (ko_viewer must not see/apply/reject
+// proposals, same bar as every other administrative screen here); CSRF enforced per mutation by
+// server/routes/koDashboard.js itself.
+app.use("/api/ko", dashboardAuth.requireAdminRole, koDashboardRouter);
+
+// Import of personal tasks from an old board export - administrator-only, same reasoning as /api/ko
+// above; CSRF enforced per mutation by server/routes/taskImport.js itself.
+app.use("/api/admin/task-import", dashboardAuth.requireAdminRole, taskImportRouter);
+
 // Synchronisation runs recorded by the planning agent (read-only for the dashboard, but still an
 // administrative/operational view - administrator-only, same as plan-source/plan-imports above).
 app.get("/api/sync-runs", dashboardAuth.requireAdminRole, (req, res) => {
@@ -110,6 +122,10 @@ app.get("/api/sync-runs/:id", dashboardAuth.requireAdminRole, (req, res) => {
   if (!run) return res.status(404).json({ error: "Not found" });
   res.json(Object.assign({}, run, { report: store.loadRunReport(run.id) }));
 });
+
+// shturman-ko-analyst API (KO_ANALYST_API_KEY only: archive reads + proposals). Must be mounted
+// before the general /api/agent router so these paths never reach AGENT_API_KEY routes.
+app.use("/api/agent/ko", koAgentRouter);
 
 // Agent-facing write API — everything under here requires AGENT_API_KEY auth (see server/auth.js).
 app.use("/api/agent", agentRouter);

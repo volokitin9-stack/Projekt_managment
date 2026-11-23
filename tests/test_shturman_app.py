@@ -37,7 +37,7 @@ def test_both_systems_live_in_one_repository():
 
 def test_dashboard_page_and_api_run(shturman):
     page = requests.get(shturman.url + "/")
-    assert page.status_code == 200 and "<title>Штурман</title>" in page.text
+    assert page.status_code == 200 and "<title>Доска проектов</title>" in page.text
     for label in ("Сканирование", "Импорт плана", "Этап не подтверждён", "Трудозатраты", "История проекта",
                   "Фотографии", "План, ч", "Факт, ч", "На стадии", "Не назначен"):
         assert label in page.text, label

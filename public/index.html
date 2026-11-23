@@ -1,9 +1,9 @@
 <!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
-<title>Штурман</title>
+<title>Доска проектов</title>
 <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAIAAADdvvtQAAAB0ElEQVR42u3arQ3CQBiA4f6QILGoBteEIZDMgIQdkEUgGaKG4BgAhWOI1jQ1JOBA1qFxDYUmJM8zwN3ly5s7c2GxTAL4VGQECAgBISAEBAJCQAgIAYGAEBACQkAgIASEgBAQCAgBISAEhIBAQAgIASEgEBACQkAICASEgBAQAgIBISAEhIAQEAgIASEgBAQCQkAICAGBgBAQAkJA8G7Qwx5pXgVR3GWFx3l/P2y+frBhMp1sTx0XueXr5+X49bONZovxatdxkTqbN9fSDYQnDAGBgBAQAkJAICAEhIAQEAICASEgBISAQEAICAEhIBAQAkJACAgEhIAQEAJCQCAgBISAEBAICAEhIAQEAkJACAgBgYAQEAJCQCAgBISAEBACAgEhIASEgEBACAgBISAQEAJCQAgIBISAEBACQkAgIATEfwmLZfLrPdK8CqLYrPtXZ/PmWrqB8IQhIBAQAkJACAgEhIAQEAJCQCAgBISAEBC00seHMtxAICAEhIAQEAgIASEgBISAQEAICAEhIBAQAkJACAgEhIAQEAICASEgBISAEJARICAEhIAQEAgIASEgBAQCQkAICAGBgBAQAkJAICAEhIAQEAICASEgBISAoJUXEG0dgk6oqtgAAAAASUVORK5CYII=">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Штурман">
+<meta name="apple-mobile-web-app-title" content="Доска проектов">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0D1722">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -701,8 +701,8 @@
 <div class="sidebar-scrim" id="sidebarScrim"></div>
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-brand">
-    <span class="mark">Ш</span>
-    <span class="name">ШТУРМАН</span>
+    <span class="mark">Д</span>
+    <span class="name">ДОСКА ПРОЕКТОВ</span>
   </div>
   <nav class="sidebar-nav">
     <button type="button" class="tab-btn active" id="tabBoardBtn" data-tab="board" title="Доска"><span class="icon" id="navIconBoard"></span><span class="label">Доска</span></button>
@@ -723,7 +723,7 @@
   <header class="app-header">
     <button type="button" class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Меню"><span class="icon" id="navIconMenu"></span></button>
     <div class="brand">
-      <span class="name">ШТУРМАН</span>
+      <span class="name">ДОСКА ПРОЕКТОВ</span>
       <span class="sub">дерево задач</span>
     </div>
     <div class="header-clock">
@@ -808,6 +808,7 @@
     <button type="button" class="eng-subtab" data-subview="additional">Доп. работы<span class="n" id="engCntAdditional"></span></button>
     <button type="button" class="eng-subtab" data-subview="backlog">Банк задач<span class="n" id="engCntBacklog"></span></button>
     <button type="button" class="eng-subtab" data-subview="review">На проверке<span class="n" id="engCntReview"></span></button>
+    <button type="button" class="eng-subtab" data-subview="ko">Предложения агента КО<span class="n" id="engCntKo"></span></button>
     <button type="button" class="eng-subtab" data-subview="import">Импорт плана</button>
   </nav>
 
@@ -864,12 +865,14 @@
   <div id="engAdditionalView" class="eng-list-wrap" style="display:none;"></div>
   <div id="engBacklogView" class="eng-list-wrap" style="display:none;"></div>
   <div id="engReviewView" class="eng-list-wrap" style="display:none;"></div>
+  <div id="engKoView" class="eng-list-wrap" style="display:none;"></div>
   <div id="engImportView" class="eng-list-wrap" style="display:none;"></div>
 
 </div>
 
 <div id="integrationsView" style="display:none;padding:14px 20px;">
   <div id="integrationsBody">Загрузка…</div>
+  <div id="taskImportPanel"></div>
 </div>
 
 <div id="usersView" style="display:none;padding:14px 20px;">
@@ -1443,6 +1446,8 @@
     var ageDays = daysSince(t.createdAt);
     var rows = "";
     if(ageDays !== null) rows += '<div class="meta-row"><span class="k">В работе</span><span class="v">'+ageDays+' дн.</span></div>';
+    // priority / description can be set from the personal Telegram bot
+    if(t.priority) rows += '<div class="meta-row"><span class="k">Приоритет</span><span class="v">'+escapeHtml(({high:"высокий",normal:"обычный",low:"низкий"})[t.priority]||t.priority)+'</span></div>';
     if(t.direction) rows += '<div class="meta-row"><span class="k">Направление</span><span class="v">'+escapeHtml(t.direction)+'</span></div>';
     if(t.responsible) rows += '<div class="meta-row"><span class="k">Ответственный</span><span class="v">'+escapeHtml(t.responsible)+'</span></div>';
     if(t.from) rows += '<div class="meta-row"><span class="k">От кого</span><span class="v">'+escapeHtml(t.from)+'</span></div>';
@@ -1464,6 +1469,7 @@
         '<select id="td-quadrant" data-action="quadrant" data-id="'+t.id+'">'+quadrantOptions+'</select>' +
       '</div>' +
       '<div class="task-meta">'+rows+'</div>' +
+      (t.description ? '<div class="global-desc" style="margin-top:10px;white-space:pre-wrap;">'+escapeHtml(t.description)+'</div>' : '') +
       renderSubtasksHtml("tasks", t.id, t.subtasks) +
       '<button type="button" class="btn danger" style="margin-top:16px;width:100%;" data-action="delete" data-collection="tasks" data-id="'+t.id+'">'+iconSvg('trash-2',15)+' Удалить задачу</button>'
     );
@@ -1530,6 +1536,7 @@
   var engCompletedProjects = []; // main engineering projects with a confirmed completion date
   var engAllRecords = [];    // every record incl. additional work and backlog
   var engReview = [];
+  var engKo = [];
   var engStagesLoaded = false;
   var engSubview = "board";
   var engUnconfirmedCollapsed = false;
@@ -1612,12 +1619,15 @@
     loadEngUpdateStatus();
     var ready = engStagesLoaded ? Promise.resolve() : loadStages().then(function(){ engStagesLoaded = true; });
     return ready.then(function(){
-      return Promise.all([apiFetch("/api/projects"), apiFetch("/api/review-queue").catch(function(){ return []; })]);
+      return Promise.all([apiFetch("/api/projects"), apiFetch("/api/review-queue").catch(function(){ return []; }),
+        apiFetch("/api/ko/proposals").catch(function(){ return { proposals: [] }; })]);
     }).then(function(res){
       engAllRecords = (res[0] || []).map(engNormalize);
       engProjects = engAllRecords.filter(function(p){ return p.record_category === "main_project" && !p.is_completed; });
       engCompletedProjects = engAllRecords.filter(function(p){ return p.record_category === "main_project" && p.is_completed; });
-      engReview = res[1] || [];
+      // agent proposals have their own screen with "Применить / Отклонить" (never the generic "Разобрано")
+      engReview = (res[1] || []).filter(function(r){ return r.kind !== "ko_proposal"; });
+      engKo = (res[2] && res[2].proposals) || [];
       renderEngBoard();
       renderEngSubviewLists();
       if(openDetailEngId && document.getElementById("detailPanel").classList.contains("open")) refreshEngDetail();
@@ -1833,6 +1843,7 @@
     document.getElementById("engCntAdditional").textContent = engAllRecords.filter(function(p){ return p.record_category === "additional_work"; }).length;
     document.getElementById("engCntBacklog").textContent = engAllRecords.filter(function(p){ return p.record_category === "backlog"; }).length;
     document.getElementById("engCntReview").textContent = engReview.filter(function(r){ return r.kind !== "image" && r.kind !== "telegram_photo"; }).length;
+    document.getElementById("engCntKo").textContent = engKo.length || "";
 
     var un = document.getElementById("engUnconfirmed");
     if(unconfirmed.length){
@@ -2288,6 +2299,67 @@
       "Нераспределённых фото нет. Снимки из Telegram, которые агент не смог уверенно сопоставить с проектом, появятся здесь для ручного подтверждения.");
   }
 
+  // ---- shturman-ko-analyst proposals (server/ko/proposals.js): nothing changes until a person applies ----
+  var KO_KIND = { stage_change:"Смена этапа", assignee_change:"Смена ответственного", deadline_change:"Смена срока",
+    work_done:"Выполненная работа", problem:"Проблема", new_task:"Новая задача", photo_link:"Фото к проекту",
+    project_match:"Сопоставление проекта", needs_clarification:"Требует уточнения" };
+  var KO_CONF = { high:"высокая", medium:"средняя", low:"низкая" };
+  function koProjectLabel(pl){
+    var p = pl.resolved_project_id ? engAllRecords.filter(function(x){ return x.id === pl.resolved_project_id; })[0] : null;
+    if(p) return p.project_name || [p.manufacturer, p.vehicle_model, p.product_type].filter(Boolean).join(" ");
+    var r = pl.project_ref || {};
+    return [r.manufacturer, r.vehicle_model, r.product_type, r.article_number].filter(Boolean).join(" ") || "—";
+  }
+  function koChangeLabel(pl){
+    var c = pl.change || {};
+    if(pl.kind === "stage_change") return (ENG_STAGE_LABELS[c.from]||c.from||"—")+" → "+(ENG_STAGE_LABELS[c.to]||c.to);
+    if(pl.kind === "assignee_change" || pl.kind === "deadline_change") return (c.from||"—")+" → "+c.to;
+    if(pl.kind === "new_task") return c.title + (c.responsible ? " · "+c.responsible : "") + (c.due ? " · до "+c.due : "");
+    return "";
+  }
+  function engKoHtml(){
+    if(!engKo.length) return '<div class="eng-empty">Предложений агента нет. Агент shturman-ko-analyst только предлагает изменения — проекты меняются лишь после «Применить».</div>';
+    var rows = engKo.map(function(r){
+      var pl = r.payload || {};
+      var ev = (pl.evidence || []).map(function(e){
+        var link = /^https:\/\/t\.me\//.test(e.link||"") ? ' <a href="'+escapeHtml(e.link)+'" target="_blank" rel="noopener noreferrer" style="color:var(--accent-ink);">сообщение</a>' : '';
+        return '<div style="font-size:11.5px;margin-top:3px;"><b>'+escapeHtml(e.author||"?")+'</b> '+escapeHtml((e.date||"").slice(0,16).replace("T"," "))+': «'+escapeHtml(e.quote||"")+'»'+link+'</div>';
+      }).join("");
+      var ph = (pl.photos || []).map(function(f){
+        return '<img src="/api/ko/files/'+encodeURIComponent(f.file_id)+'" alt="" loading="lazy" style="width:64px;height:64px;object-fit:cover;border-radius:4px;margin:3px 3px 0 0;" title="'+escapeHtml(f.observation||"")+'">';
+      }).join("");
+      var unresolved = !pl.resolved_project_id && ["new_task","needs_clarification"].indexOf(pl.kind) === -1;
+      var applyLabel = (pl.kind === "project_match" || pl.kind === "needs_clarification") ? "Принять к сведению" : "Применить";
+      return '<tr><td>'+escapeHtml(KO_KIND[pl.kind]||pl.kind)+'<div style="font-size:11px;color:var(--ink-faint);">уверенность: '+escapeHtml(KO_CONF[pl.confidence]||pl.confidence||"—")+'</div></td>' +
+        '<td>'+escapeHtml(koProjectLabel(pl))+(unresolved ? '<div style="font-size:11px;color:var(--danger,#b42318);">'+escapeHtml(pl.resolution_note||"проект не определён")+'</div>' : '')+'</td>' +
+        '<td style="max-width:420px;"><div>'+escapeHtml(pl.summary||"")+'</div>'+(koChangeLabel(pl)?'<div style="font-weight:600;margin-top:3px;">'+escapeHtml(koChangeLabel(pl))+'</div>':'') +
+        '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:3px;">'+escapeHtml(pl.rationale||"")+'</div>'+ev+(ph?'<div>'+ph+'</div>':'')+'</td>' +
+        '<td><button type="button" class="eng-mini-btn" data-action="ko-apply" data-id="'+escapeHtml(r.id)+'"'+(unresolved?' disabled title="Проект не определён однозначно"':'')+'>'+applyLabel+'</button> ' +
+        '<button type="button" class="eng-mini-btn" data-action="ko-reject" data-id="'+escapeHtml(r.id)+'">Отклонить</button></td></tr>';
+    }).join("");
+    return '<div class="eng-panel"><h3>Предложения агента КО</h3><div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Выводы агента по сообщениям и фото чата КО. Каждое изменение применяется теми же проверками, что и ручное редактирование, и записывается в историю проекта со ссылками на сообщения.</div>' +
+      '<table class="eng-table"><tr><th>Тип</th><th>Проект</th><th>Суть, обоснование, источники</th><th></th></tr>'+rows+'</table></div>';
+  }
+  function koAction(id, action){
+    var item = engKo.filter(function(r){ return r.id === id; })[0];
+    if(!item) return;
+    var pl = item.payload || {}, body = {};
+    if(action === "apply"){
+      var p = engAllRecords.filter(function(x){ return x.id === pl.resolved_project_id; })[0];
+      if(p) body.version = p.version;
+      var what = (KO_KIND[pl.kind]||pl.kind) + (koChangeLabel(pl) ? ": "+koChangeLabel(pl) : "") + "\nПроект: " + koProjectLabel(pl);
+      if(!window.confirm("Применить предложение агента?\n\n"+what)) return;
+    } else {
+      var reason = window.prompt("Отклонить предложение. Причина (необязательно):", "");
+      if(reason === null) return;
+      body.reason = reason;
+    }
+    apiFetch("/api/whoami").then(function(who){
+      var headers = (who && who.csrf_token) ? { "X-CSRF-Token": who.csrf_token } : {};
+      return apiFetch("/api/ko/proposals/"+encodeURIComponent(id)+"/"+action, { method:"POST", headers: headers, body: body });
+    }).then(loadEngProjects).catch(function(err){ showSyncNote((action === "apply" ? "Не применено: " : "Не отклонено: ")+err.message); loadEngProjects(); });
+  }
+
   // ---- completed projects: a lifecycle status independent of the Kanban stage (section 10) ----
   var engCompletedSearch = "";
   var engCompletedSort = { key:"actual_completion_date", dir:-1 };
@@ -2465,6 +2537,7 @@
     if(engSubview === "additional") a.innerHTML = engRecordsTable("additional_work");
     if(engSubview === "backlog") b.innerHTML = engRecordsTable("backlog");
     if(engSubview === "review") rv.innerHTML = engReviewHtml();
+    if(engSubview === "ko") document.getElementById("engKoView").innerHTML = engKoHtml();
     if(engSubview === "photos") ph.innerHTML = engPhotosQueueHtml();
     if(engSubview === "completed" && !(document.activeElement && cp.contains(document.activeElement))) cp.innerHTML = engCompletedTableHtml();
     if(engSubview === "import" && !(document.activeElement && im.contains(document.activeElement))) im.innerHTML = engImportHtml();
@@ -2480,6 +2553,7 @@
     document.getElementById("engAdditionalView").style.display = v === "additional" ? "" : "none";
     document.getElementById("engBacklogView").style.display = v === "backlog" ? "" : "none";
     document.getElementById("engReviewView").style.display = v === "review" ? "" : "none";
+    document.getElementById("engKoView").style.display = v === "ko" ? "" : "none";
     document.getElementById("engImportView").style.display = v === "import" ? "" : "none";
     if(v === "import") loadImports();
     renderEngSubviewLists();
@@ -2505,6 +2579,11 @@
       return;
     }
     if(act === "toggle-unconfirmed"){ engUnconfirmedCollapsed = !engUnconfirmedCollapsed; renderEngBoard(); return; }
+    if(act === "ko-apply" || act === "ko-reject"){
+      e.stopPropagation();
+      koAction(btn.getAttribute("data-id"), act === "ko-apply" ? "apply" : "reject");
+      return;
+    }
     if(act === "eng-resolve-review"){
       apiFetch("/api/review-queue/"+encodeURIComponent(btn.getAttribute("data-id"))+"/resolve", { method:"POST", body:{ resolution:"resolved" } })
         .then(loadEngProjects).catch(function(err){ showSyncNote(err.message); });
@@ -3474,6 +3553,82 @@
     }
   });
 
+  // ---- import of personal tasks from an old board export (server/taskImport.js) ----
+  var tiState = { payload:null, fileName:null, report:null, imports:[], msg:"" };
+  function tiCsrf(){
+    return apiFetch("/api/whoami").then(function(w){ return (w && w.csrf_token) ? { "X-CSRF-Token": w.csrf_token } : {}; });
+  }
+  function renderTaskImport(){
+    apiFetch("/api/admin/task-import").then(function(r){ tiState.imports = r.imports || []; drawTaskImport(); })
+      .catch(function(err){ tiState.msg = err.message; drawTaskImport(); });
+  }
+  function drawTaskImport(){
+    var el = document.getElementById("taskImportPanel"); if(!el) return;
+    var r = tiState.report, h = '<div class="eng-panel" style="margin-top:14px;"><h3>Импорт личных задач из экспорта</h3>' +
+      '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Файл shturman_tasks_export_*.json. Сначала проверка (ничего не записывается), затем импорт одной операцией. Существующие задачи не изменяются; повторный импорт не создаёт дублей; любой импорт можно откатить.</div>' +
+      '<input type="file" id="tiFile" accept="application/json,.json"> <button type="button" class="eng-mini-btn" data-ti="analyze">Проверить (dry-run)</button>';
+    if(tiState.msg) h += '<div style="margin-top:8px;font-size:12px;">'+escapeHtml(tiState.msg)+'</div>';
+    if(r){
+      var row = function(k,v){ return '<tr><td>'+escapeHtml(k)+'</td><td>'+v+'</td></tr>'; };
+      h += '<table class="eng-table" style="max-width:760px;margin-top:10px;">' +
+        row("Файл", escapeHtml(r.source.file_name||"—")+' <span style="font-size:11px;color:var(--ink-faint);">sha256 '+escapeHtml(r.source.sha256.slice(0,12))+'…</span>') +
+        row("Задач в файле", r.source.tasks+' (активных '+r.source.active+', выполненных '+r.source.done+')') +
+        row("Подзадач", r.source.subtasks+' (выполнено '+r.source.subtasks_done+')') +
+        row("Новых", r.new.length+' задач, '+r.new_subtasks+' подзадач') +
+        row("Уже есть", r.already_imported.length) +
+        row("Конфликты", r.conflicts.length ? r.conflicts.map(function(c){ return escapeHtml(c.type+": "+(c.id||("#"+c.index))); }).join("<br>") : "нет") +
+        (r.title_matches.length ? row("Совпадают названия", r.title_matches.map(function(m){ return escapeHtml(m.title); }).join("<br>")) : "") +
+        row("Категории", Object.keys(r.quadrant_mapping).map(function(q){ var m = r.quadrant_mapping[q];
+          return escapeHtml(q+" → «"+m.target_label+"»: "+m.count+" (активных "+m.active+", выполненных "+m.done+")"+(m.lossless?"":" — неизвестная категория")); }).join("<br>")) +
+        row("Переносится с потерями", r.lossy_fields.map(function(f){ return escapeHtml(f.field+(f.count!=null?" ("+f.count+")":"")+": "+f.how); }).join("<br>")) +
+        '</table>' + (r.can_apply ? '<button type="button" class="eng-mini-btn" style="margin-top:8px;" data-ti="apply">Импортировать '+r.new.length+' задач</button>' :
+        '<div style="margin-top:8px;font-size:12px;">'+(r.new.length ? "Импорт невозможен: исправьте ошибки в файле." : "Новых задач нет — импортировать нечего.")+'</div>');
+    }
+    if(tiState.imports.length){
+      h += '<table class="eng-table" style="max-width:760px;margin-top:12px;"><tr><th>Импорт</th><th>Задач</th><th>Подзадач</th><th>Откат</th><th></th></tr>' +
+        tiState.imports.map(function(x){
+          return '<tr><td>'+escapeHtml(fmtTs(x.imported_at))+'<div style="font-size:11px;color:var(--ink-faint);">'+escapeHtml(x.source_file||"")+'</div></td><td class="num">'+x.counts.tasks+'</td><td class="num">'+x.counts.subtasks+'</td>' +
+            '<td>'+(x.rolled_back_at ? escapeHtml(fmtTs(x.rolled_back_at))+(x.rollback && x.rollback.kept_modified.length ? '<div style="font-size:11px;">оставлено изменённых: '+x.rollback.kept_modified.length+'</div>' : '') : "—")+'</td>' +
+            '<td><button type="button" class="eng-mini-btn" data-ti="rollback" data-id="'+escapeHtml(x.id)+'">Откатить</button></td></tr>';
+        }).join("") + '</table>';
+    }
+    el.innerHTML = h + '</div>';
+  }
+  document.getElementById("taskImportPanel").addEventListener("click", function(e){
+    var b = e.target.closest("[data-ti]"); if(!b) return;
+    var act = b.getAttribute("data-ti");
+    if(act === "analyze"){
+      var f = document.getElementById("tiFile").files[0];
+      if(!f){ tiState.msg = "Выберите файл экспорта."; drawTaskImport(); return; }
+      f.text().then(function(text){
+        var payload; try{ payload = JSON.parse(text); }catch(err){ throw new Error("Файл не является корректным JSON"); }
+        tiState.payload = payload; tiState.fileName = f.name;
+        return apiFetch("/api/admin/task-import/analyze", { method:"POST", body:{ "export": payload, file_name: f.name } });
+      }).then(function(rep){ tiState.report = rep; tiState.msg = ""; drawTaskImport(); })
+        .catch(function(err){ tiState.report = null; tiState.msg = err.message; drawTaskImport(); });
+      return;
+    }
+    if(act === "apply" && tiState.report){
+      if(!window.confirm("Импортировать "+tiState.report.new.length+" задач ("+tiState.report.new_subtasks+" подзадач)? Существующие задачи не изменятся.")) return;
+      tiCsrf().then(function(hd){ return apiFetch("/api/admin/task-import/apply", { method:"POST", headers:hd,
+        body:{ "export": tiState.payload, file_name: tiState.fileName, plan_hash: tiState.report.plan_hash } }); })
+        .then(function(res){ tiState.msg = "Импортировано задач: "+res.imported+", подзадач: "+res.subtasks+"."; tiState.report = null; renderTaskImport(); loadAll && loadAll(); })
+        .catch(function(err){ tiState.msg = "Импорт не выполнен: "+err.message; drawTaskImport(); });
+      return;
+    }
+    if(act === "rollback"){
+      var id = b.getAttribute("data-id");
+      tiCsrf().then(function(hd){
+        return apiFetch("/api/admin/task-import/"+encodeURIComponent(id)+"/rollback", { method:"POST", headers:hd, body:{ dry_run:true } }).then(function(d){
+          var msg = "Откатить импорт? Будет удалено задач: "+d.would_remove.length+"." + (d.kept_modified.length ? "\nИзменённые после импорта ("+d.kept_modified.length+") останутся." : "");
+          if(!window.confirm(msg)) return null;
+          return apiFetch("/api/admin/task-import/"+encodeURIComponent(id)+"/rollback", { method:"POST", headers:hd, body:{} });
+        });
+      }).then(function(res){ if(res){ tiState.msg = "Откат: удалено задач "+res.removed+"."; renderTaskImport(); loadAll && loadAll(); } })
+        .catch(function(err){ tiState.msg = "Откат не выполнен: "+err.message; drawTaskImport(); });
+    }
+  });
+
   // ---- tabs ----
   function setTab(tab){
     // Критическое требование (роль ko_viewer): only "Конструкторский отдел" - every other tab
@@ -3495,7 +3650,7 @@
     else if(tab === "global") renderGlobalTree();
     else if(tab === "eng") renderEngBoard();
     else if(tab === "users") renderUsersView();
-    else renderIntegrationsView();
+    else { renderIntegrationsView(); renderTaskImport(); }
   }
   document.getElementById("tabBoardBtn").addEventListener("click", function(){ setTab("board"); });
   document.getElementById("tabGlobalBtn").addEventListener("click", function(){ setTab("global"); });
@@ -3782,9 +3937,10 @@
     document.getElementById("tabIntegrationsBtn").style.display = hide;
     document.getElementById("tabUsersBtn").style.display = (currentRole === "admin") ? "" : "none";
     // Within "Конструкторский отдел" itself: only the two pure-viewing subtabs stay visible for
-    // a manager - "Нераспределённые фото"/"Доп. работы"/"Банк задач"/"На проверке"/"Импорт плана"
-    // are all admin workflows (approving matches, importing the Excel plan), not board viewing.
-    ["photos", "additional", "backlog", "review", "import"].forEach(function(v){
+    // a manager - "Нераспределённые фото"/"Доп. работы"/"Банк задач"/"На проверке"/"Предложения
+    // агента КО"/"Импорт плана" are all admin workflows (approving matches, applying/rejecting
+    // agent proposals, importing the Excel plan), not board viewing.
+    ["photos", "additional", "backlog", "review", "ko", "import"].forEach(function(v){
       var btn = document.querySelector('.eng-subtab[data-subview="'+v+'"]');
       if(btn) btn.style.display = hide;
     });

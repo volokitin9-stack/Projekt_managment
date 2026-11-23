@@ -138,7 +138,10 @@ def _server(tmp_path, anthropic_srv, telegram_srv, **env):
         "TELEGRAM_ENGINEERING_CHAT_ID": ENG_CHAT,
         "ANTHROPIC_API_KEY": "sk-test", "ANTHROPIC_API_BASE_URL": f"http://127.0.0.1:{anthropic_srv.server_address[1]}",
         "TELEGRAM_API_BASE_URL": f"http://127.0.0.1:{telegram_srv.server_address[1]}",
-        "SEED_DEMO_DATA": "true"
+        "SEED_DEMO_DATA": "true",
+        # these tests cover the optional AI mode of the personal channel; the default (no AI,
+        # menu + dialogs) is covered by tests/test_telegram_personal_bot.py
+        "TELEGRAM_PERSONAL_AI_ENABLED": "true"
     }
     e.update(env)
     return ShturmanServer(tmp_path / "srv", extra_env=e, seed_demo=True).start()
@@ -511,7 +514,7 @@ def test_start_and_help_never_call_the_ai_even_when_it_is_healthy(tmp_path, anth
         assert r2.status_code == 200
         assert len(telegram.sent_messages) == 2
         for sent in telegram.sent_messages:
-            assert "Штурман" in sent["text"] and "/tasks" in sent["text"]
+            assert "Доска проектов" in sent["text"] and "/tasks" in sent["text"]
         assert anthropic.calls == [], "aiClient.classify() must never be called for /start or /help"
     finally:
         srv.stop()
@@ -529,8 +532,8 @@ def test_start_help_and_tasks_keep_working_with_no_anthropic_credit(tmp_path, no
         post(srv, update(OWNER_CHAT, OWNER_USER, "/tasks", update_id=52))
 
         assert len(telegram.sent_messages) == 3
-        assert "Штурман" in telegram.sent_messages[0]["text"]
-        assert "Штурман" in telegram.sent_messages[1]["text"]
+        assert "Доска проектов" in telegram.sent_messages[0]["text"]
+        assert "Доска проектов" in telegram.sent_messages[1]["text"]
         assert "Проверить крепление" in telegram.sent_messages[2]["text"]
         # none of these three replies ever triggered an AI call, so the queue stays empty
         assert review(srv, kind="telegram_pending") == []
@@ -585,6 +588,6 @@ def test_tasks_command_reports_no_active_tasks_without_ai(tmp_path, no_credit_an
     srv = _server(tmp_path, no_credit_anthropic, telegram)
     try:
         post(srv, update(OWNER_CHAT, OWNER_USER, "/list", update_id=80))
-        assert telegram.sent_messages[-1]["text"] == "Таких задач нет."
+        assert telegram.sent_messages[-1]["text"].startswith("Активных задач нет.")
     finally:
         srv.stop()
