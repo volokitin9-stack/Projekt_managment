@@ -28,6 +28,7 @@ const planSourceRouter = require("./routes/planSource");
 const agentJobsRouter = require("./routes/agentJobs");
 const telegramWebhookRouter = require("./routes/telegramWebhook");
 const telegramAdminRouter = require("./routes/telegramAdmin");
+const usersRouter = require("./routes/users");
 const koAgentRouter = require("./routes/koAgent");
 const koDashboardRouter = require("./routes/koDashboard");
 const taskImportRouter = require("./routes/taskImport");
@@ -69,36 +70,54 @@ app.use((req, res, next) => {
   dashboardAuth.requireDashboardSession(req, res, next);
 });
 
-// Dashboard-facing document collections (tasks/globals board data).
-app.use("/api/tasks", buildDocRouter("tasks"));
-app.use("/api/globals", buildDocRouter("globals"));
+// Dashboard-facing document collections (tasks/globals board data) - the administrator's own
+// personal Kanban, not "Конструкторский отдел". Критическое требование (роль ko_viewer):
+// "Доступ к личным задачам администратора" is forbidden, so these are administrator-only.
+app.use("/api/tasks", dashboardAuth.requireAdminRole, buildDocRouter("tasks"));
+app.use("/api/globals", dashboardAuth.requireAdminRole, buildDocRouter("globals"));
 
-// Dashboard-facing read API + config for engineering projects.
+// Dashboard-facing read API + config for engineering projects - "Конструкторский отдел" itself.
+// GET (viewing the board/cards/stages) is allowed for both the administrator and a ko_viewer
+// manager; every mutation on /api/projects is administrator-only, enforced inside
+// server/routes/projects.js itself (adminOnlyForMutations) rather than here, since this router
+// mixes both. /api/stages has no mutations to gate.
 app.use("/api/projects", projectsRouter);
 app.use("/api/stages", stagesRouter);
-app.use("/api/review-queue", reviewQueueRouter);
-app.use("/api/plan-imports", planImportsRouter);
-app.use("/api/plan-source", planSourceRouter);
+// Everything below is an administrative workflow (review queue, plan import/source control,
+// Telegram settings, user management) - критическое требование: "Доступ к интеграциям,
+// Telegram-архиву, настройкам, импорту и управлению пользователями" and "к закрытым
+// административным API" are both forbidden for ko_viewer, so these routers are
+// administrator-only in full, with no per-route carve-out.
+app.use("/api/review-queue", dashboardAuth.requireAdminRole, reviewQueueRouter);
+app.use("/api/plan-imports", dashboardAuth.requireAdminRole, planImportsRouter);
+app.use("/api/plan-source", dashboardAuth.requireAdminRole, planSourceRouter);
 // Windows-agent job queue (Railway deployment only) - its own auth (WINDOWS_AGENT_API_KEY +
 // replay/rate-limit guard), not the dashboard session above. See server/routes/agentJobs.js.
 app.use("/api/agent-jobs", agentJobsRouter);
 
 // Telegram integration (both channels - see server/telegram/). /webhook is public with its own
-// secret (exempted above); /status and /log stay dashboard-session-gated.
+// secret (exempted above); /status, /log and /webhook/connect are administrator-only.
 app.use("/api/telegram", telegramWebhookRouter);
-app.use("/api/telegram", telegramAdminRouter);
+app.use("/api/telegram", dashboardAuth.requireAdminRole, telegramAdminRouter);
 
-// shturman-ko-analyst proposals review (dashboard session + CSRF) - server/routes/koDashboard.js.
-app.use("/api/ko", koDashboardRouter);
+// "Пользователи" - administrator-only (server/routes/users.js enforces CSRF per mutation itself).
+app.use("/api/users", dashboardAuth.requireAdminRole, usersRouter);
 
-// Import of personal tasks from an old board export (dashboard session + CSRF) - server/routes/taskImport.js.
-app.use("/api/admin/task-import", taskImportRouter);
+// shturman-ko-analyst proposals review - administrator-only (ko_viewer must not see/apply/reject
+// proposals, same bar as every other administrative screen here); CSRF enforced per mutation by
+// server/routes/koDashboard.js itself.
+app.use("/api/ko", dashboardAuth.requireAdminRole, koDashboardRouter);
 
-// Synchronisation runs recorded by the planning agent (read-only for the dashboard).
-app.get("/api/sync-runs", (req, res) => {
+// Import of personal tasks from an old board export - administrator-only, same reasoning as /api/ko
+// above; CSRF enforced per mutation by server/routes/taskImport.js itself.
+app.use("/api/admin/task-import", dashboardAuth.requireAdminRole, taskImportRouter);
+
+// Synchronisation runs recorded by the planning agent (read-only for the dashboard, but still an
+// administrative/operational view - administrator-only, same as plan-source/plan-imports above).
+app.get("/api/sync-runs", dashboardAuth.requireAdminRole, (req, res) => {
   res.json(agentRouter.listSyncRuns());
 });
-app.get("/api/sync-runs/:id", (req, res) => {
+app.get("/api/sync-runs/:id", dashboardAuth.requireAdminRole, (req, res) => {
   const run = agentRouter.listSyncRuns().find((r) => r.id === req.params.id);
   if (!run) return res.status(404).json({ error: "Not found" });
   res.json(Object.assign({}, run, { report: store.loadRunReport(run.id) }));
@@ -116,8 +135,15 @@ app.get("/api/health", (req, res) => {
 });
 
 // Uploaded files (see server/storage.js — swap this mount if you move to an
-// external object store; URLs returned by the API would then be absolute).
-app.use("/uploads", express.static(storage.UPLOADS_DIR));
+// external object store; URLs returned by the API would then be absolute). Критическое
+// требование (роль ko_viewer): "Скачивание оригинальных фотографий и документов" forbidden - a
+// manager views photos/files through GET /api/projects/:id/files/:fileId/view instead (inline,
+// server/routes/projects.js), which this mount deliberately does not replace for anyone else (the
+// administrator keeps using these URLs directly, unchanged).
+app.use("/uploads", (req, res, next) => {
+  if (req.authRole === "ko_viewer") return res.status(403).json({ error: "Forbidden" });
+  next();
+}, express.static(storage.UPLOADS_DIR));
 
 // The migrated dashboard itself.
 app.use(express.static(path.join(__dirname, "..", "public")));

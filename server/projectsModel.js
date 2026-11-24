@@ -190,6 +190,10 @@ function fileToApi(row) {
     project_id: row.project_id,
     kind: row.kind,
     url: storage.urlForStorageKey(row.storage_key),
+    // Served inline through a role-checked route (server/routes/projects.js), unlike `url` above
+    // (the raw /uploads static mount, blocked for a ko_viewer manager - see server/index.js).
+    // Every viewer, including the administrator, can use this one URL for rendering either way.
+    view_url: `/api/projects/${row.project_id}/files/${row.id}/view`,
     original_filename: row.original_filename || null,
     mime_type: row.mime_type || null,
     size: row.size || null,

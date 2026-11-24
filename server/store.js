@@ -34,7 +34,7 @@ const TEMPLATE = path.join(DATA_DIR, "templates", "shturman.empty.json");
 const SCHEMA_VERSION = 1;
 const COLLECTIONS = ["stages", "docs", "projects", "project_activities", "project_history", "project_files",
   "agent_events", "review_queue", "sync_runs", "plan_imports", "plan_source_versions", "plan_source_events",
-  "plan_source_runs", "agent_jobs", "telegram_updates", "telegram_log",
+  "plan_source_runs", "agent_jobs", "telegram_updates", "telegram_log", "users", "users_audit",
   // КО chat archive for the shturman-ko-analyst agent (server/ko/archive.js) - append-only
   "ko_messages", "ko_files",
   // one record per personal-task import (server/taskImport.js) - what it created, for rollback

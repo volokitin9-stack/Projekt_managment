@@ -709,6 +709,7 @@
     <button type="button" class="tab-btn" id="tabGlobalBtn" data-tab="global" title="Глобально"><span class="icon" id="navIconGlobal"></span><span class="label">Глобально</span></button>
     <button type="button" class="tab-btn" id="tabEngBtn" data-tab="eng" title="Конструкторский отдел"><span class="icon" id="navIconEng"></span><span class="label">Конструкторский отдел</span></button>
     <button type="button" class="tab-btn" id="tabIntegrationsBtn" data-tab="integrations" title="Интеграции"><span class="icon" id="navIconIntegrations"></span><span class="label">Интеграции</span></button>
+    <button type="button" class="tab-btn" id="tabUsersBtn" data-tab="users" title="Пользователи" style="display:none;"><span class="icon" id="navIconUsers"></span><span class="label">Пользователи</span></button>
   </nav>
   <div class="sidebar-foot">
     <button type="button" class="sidebar-collapse-btn" id="sidebarCollapseBtn" title="Свернуть/развернуть меню"><span class="icon" id="navIconCollapse"></span><span class="label">Свернуть</span></button>
@@ -874,6 +875,13 @@
   <div id="taskImportPanel"></div>
 </div>
 
+<div id="usersView" style="display:none;padding:14px 20px;">
+  <div class="eng-form-row" style="margin-bottom:12px;">
+    <button type="button" class="btn primary" id="usersCreateBtn">Создать пользователя</button>
+  </div>
+  <div id="usersBody">Загрузка…</div>
+</div>
+
 </div><!-- /main-area -->
 </div><!-- /app-shell -->
 
@@ -988,9 +996,42 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="userModalOverlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="userModalTitle">
+    <h2 id="userModalTitle">Новый пользователь</h2>
+    <div class="form-error" id="userFormError"></div>
+    <form id="userForm">
+      <div class="field">
+        <label for="u-full-name">ФИО</label>
+        <input id="u-full-name" name="full_name" type="text" required placeholder="Иванов Иван Иванович">
+      </div>
+      <div class="field">
+        <label for="u-username">Логин</label>
+        <input id="u-username" name="username" type="text" required autocomplete="off" placeholder="ivanov">
+      </div>
+      <div class="field" id="u-password-field">
+        <label for="u-password">Первоначальный пароль</label>
+        <input id="u-password" name="password" type="text" autocomplete="off" placeholder="Оставьте пустым, чтобы сгенерировать автоматически">
+        <span class="help">Роль всегда «ko_viewer» — просмотр раздела «Конструкторский отдел».</span>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="userCancelBtn">Отмена</button>
+        <button type="submit" class="btn primary" id="submitUserBtn">Создать</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 (function(){
   "use strict";
+
+  // ---- current session role (роль ko_viewer: read-only access to "Конструкторский отдел" only)
+  // ---- see server/dashboardAuth.js's whoami. Defaults to "admin" (full access) until the first
+  // ---- /api/whoami response arrives - applyRoleGating() re-applies once it does.
+  var currentRole = "admin";
+  var currentCsrfToken = null;
+  function isViewer(){ return currentRole === "ko_viewer"; }
 
   // ---- Lucide-style icon paths (hand-embedded, stroke-based, 24x24 viewBox) ----
   var LUCIDE = {
@@ -1048,6 +1089,7 @@
   setIcon("navIconGlobal","globe",15);
   setIcon("navIconEng","tool",15);
   setIcon("navIconIntegrations","link",15);
+  setIcon("navIconUsers","users",15);
   setIcon("navIconMenu","menu",16);
   setIcon("navIconCollapse","chevrons-left",14);
 
@@ -1230,6 +1272,10 @@
     if(body !== undefined && body !== null && !isForm){
       headers["Content-Type"] = "application/json";
       body = JSON.stringify(body);
+    }
+    var method = (opts.method || "GET").toUpperCase();
+    if(method !== "GET" && method !== "HEAD" && currentCsrfToken && !headers["X-CSRF-Token"]){
+      headers["X-CSRF-Token"] = currentCsrfToken;
     }
     return fetch(path, { method: opts.method || "GET", headers: headers, body: body }).then(function(res){
       if(res.status === 204) return null;
@@ -1726,10 +1772,10 @@
     var dueStr = formatDue(p.deadline);
     var photo = (p.images || []).filter(function(i){ return i.is_primary; })[0] || (p.images || [])[0];
     var img = photo
-      ? '<div class="eng-card-img has-photo" style="background-image:url(\''+encodeURI(photo.url)+'\')"></div>'
+      ? '<div class="eng-card-img has-photo" style="background-image:url(\''+encodeURI(photo.view_url||photo.url)+'\')"></div>'
       : '';
     return (
-      '<div class="eng-card '+p.prio+'" data-action="open-eng-project" data-id="'+p.id+'" draggable="true">' +
+      '<div class="eng-card '+p.prio+'" data-action="open-eng-project" data-id="'+p.id+'" draggable="'+(isViewer()?'false':'true')+'">' +
         img +
         '<div class="eng-card-body">' +
           '<div class="eng-card-make">'+escapeHtml(p.make)+'</div>' +
@@ -1994,6 +2040,11 @@
         '<div class="meta-row"><span class="k">Источник</span><span class="v'+(src?'':' ghost')+'">'+escapeHtml(src||"вручную")+'</span></div>' +
       '</div>' +
       engAttentionReviewHtml(p) +
+      // Критическое требование (роль ko_viewer): "Создание, редактирование, удаление проектов и
+      // задач" forbidden - no edit form, no stage-confirm control, no add-comment input for a
+      // manager. The server already refuses these mutations regardless (adminOnlyForMutations in
+      // server/routes/projects.js); this just avoids showing a control that would 403.
+      (isViewer() ? '' :
       '<div class="eng-sec"><div class="eng-sec-head"><span>Редактирование</span></div>' +
         '<div class="eng-form-row"><span style="width:110px;">Этап</span><select class="eng-input" id="engEditStage">'+stageOpts+'</select>' +
           '<button type="button" class="btn" data-action="eng-save-stage">Подтвердить этап</button></div>' +
@@ -2004,9 +2055,10 @@
         '<div class="eng-form-row" style="display:block;"><div style="margin-bottom:4px;">Описание</div><textarea class="eng-input" id="engEditDescription">'+escapeHtml(p.description||"")+'</textarea></div>' +
         '<button type="button" class="btn primary" data-action="eng-save-fields">Сохранить</button>' +
         ' <span style="font-size:11px;color:var(--ink-faint);">Ручные изменения сохраняются при следующих импортах плана.</span>' +
-      '</div>' +
+      '</div>') +
       '<div class="eng-sec"><div class="eng-sec-head"><span>Комментарии</span></div>'+comments+
-        '<div class="eng-form-row" style="margin-top:8px;"><input class="eng-input" id="engNewComment" style="flex:1;" placeholder="Инженерный комментарий…"><button type="button" class="btn" data-action="eng-add-comment">Добавить</button></div>' +
+        (isViewer() ? '' :
+        '<div class="eng-form-row" style="margin-top:8px;"><input class="eng-input" id="engNewComment" style="flex:1;" placeholder="Инженерный комментарий…"><button type="button" class="btn" data-action="eng-add-comment">Добавить</button></div>') +
       '</div>'
     );
   }
@@ -2023,7 +2075,9 @@
         (a.project_stage_original?' · '+escapeHtml(a.project_stage_original):'')+(a.cycle>1?' · цикл '+a.cycle:'')+
         (a.removed_from_source?' · нет в новом плане':'')+'</div></td>' +
         '<td'+(a.assignee?'':' class="ghost"')+'>'+escapeHtml(who)+'</td><td class="num">'+fmtH(a.planned_hours)+'</td><td class="num">'+fmtH(a.actual_hours)+'</td>' +
-        '<td><select class="eng-input" style="padding:3px 5px;font-size:11px;" data-action="eng-activity-progress" data-aid="'+a.id+'">'+progOpts(a.progress_status)+'</select>' +
+        '<td>'+(isViewer()
+          ? escapeHtml(a.progress_status ? (ENG_PROGRESS_LABELS[a.progress_status]||a.progress_status) : "—")
+          : '<select class="eng-input" style="padding:3px 5px;font-size:11px;" data-action="eng-activity-progress" data-aid="'+a.id+'">'+progOpts(a.progress_status)+'</select>') +
         ((a.items_ok||a.items_nok)?'<div style="font-size:10px;color:var(--ink-faint);">ОК: '+escapeHtml(a.items_ok||"—")+' · NOK: '+escapeHtml(a.items_nok||"—")+'</div>':'')+
         (a.source_row?'<div style="font-size:10px;color:var(--ink-faint);">'+escapeHtml(a.source_sheet||"")+'!'+a.source_row+'</div>':'')+'</td></tr>';
     }).join("");
@@ -2060,20 +2114,26 @@
 
   function engPhotosSection(p){
     var imgs = p.images || [], files = p.attachments || [];
+    // Критическое требование (роль ko_viewer): view_url (server/routes/projects.js's role-checked
+    // inline-view route) rather than the raw `url` (the /uploads static mount, blocked for a
+    // manager - server/index.js) - the same URL scheme works for both roles, so this isn't
+    // conditional on isViewer() at all.
     var gal = imgs.length ? '<div class="eng-gallery">' + imgs.map(function(i){
-      return '<div class="eng-thumb" data-action="eng-lightbox" data-url="'+escapeHtml(i.url)+'" data-cap="'+escapeHtml(
+      var u = i.view_url || i.url;
+      return '<div class="eng-thumb" data-action="eng-lightbox" data-url="'+escapeHtml(u)+'" data-cap="'+escapeHtml(
         [i.caption, i.technical_comment, i.event_at ? "снято: "+fmtTs(i.event_at) : null, "загружено: "+fmtTs(i.uploaded_at),
          i.source==="telegram" || i.telegram_message_id ? "Telegram"+(i.telegram_chat_id?" · чат "+i.telegram_chat_id:"")+(i.telegram_message_id?" · сообщение "+i.telegram_message_id:"") : (ENG_SOURCE_LABELS[i.source]||i.source)]
-          .filter(Boolean).join(" · "))+'" style="background-image:url(\''+encodeURI(i.url)+'\')" title="'+escapeHtml(i.caption||"")+'"></div>';
+          .filter(Boolean).join(" · "))+'" style="background-image:url(\''+encodeURI(u)+'\')" title="'+escapeHtml(i.caption||"")+'"></div>';
     }).join("") + '</div>' : '<div class="eng-empty">Фотографий пока нет. Фото из Telegram появятся здесь автоматически после подключения агента.</div>';
     var att = files.length ? files.map(function(f){
-      return '<div class="eng-comment"><a href="'+escapeHtml(f.url)+'" target="_blank" rel="noopener" style="color:var(--accent-ink);">'+escapeHtml(f.original_filename||"файл")+'</a>' +
+      return '<div class="eng-comment"><a href="'+escapeHtml(f.view_url||f.url)+'" target="_blank" rel="noopener" style="color:var(--accent-ink);">'+escapeHtml(f.original_filename||"файл")+'</a>' +
         '<div class="meta">'+fmtTs(f.uploaded_at)+(f.caption?' · '+escapeHtml(f.caption):'')+'</div></div>'; }).join("") : '';
-    return gal + (att ? '<div class="eng-sec-head" style="margin-top:12px;"><span>Файлы</span></div>'+att : '') +
+    var uploadForm = isViewer() ? '' :
       '<div class="eng-form-row" style="margin-top:10px;"><input type="file" id="engUploadFile" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" class="eng-input" style="flex:1 1 180px;">' +
       '<input class="eng-input" id="engUploadCaption" placeholder="Описание" style="flex:1 1 140px;">' +
       '<input class="eng-input" id="engUploadComment" placeholder="Технический комментарий" style="flex:1 1 160px;">' +
       '<button type="button" class="btn" data-action="eng-upload">Загрузить</button></div>';
+    return gal + (att ? '<div class="eng-sec-head" style="margin-top:12px;"><span>Файлы</span></div>'+att : '') + uploadForm;
   }
 
   var engDetailCache = null;
@@ -3378,12 +3438,10 @@
   function connectTelegramWebhook(btn){
     // renderIntegrationsView() below fully replaces this button's panel with a fresh one
     // reflecting the real outcome, so there is nothing to restore on this (about to be
-    // discarded) element beyond disabling it for the duration of the request.
+    // discarded) element beyond disabling it for the duration of the request. apiFetch() already
+    // attaches the current session's X-CSRF-Token (currentCsrfToken, set by loadWhoAmI()).
     btn.disabled = true; btn.textContent = "Подключение…";
-    apiFetch("/api/whoami").then(function(who){
-      var headers = (who && who.csrf_token) ? { "X-CSRF-Token": who.csrf_token } : {};
-      return apiFetch("/api/telegram/webhook/connect", { method: "POST", headers: headers });
-    }).then(function(){
+    apiFetch("/api/telegram/webhook/connect", { method: "POST" }).then(function(){
       renderIntegrationsView();
     }).catch(function(err){
       renderIntegrationsView();
@@ -3399,6 +3457,99 @@
     }
     if(btn.getAttribute("data-action") === "connect-webhook"){
       connectTelegramWebhook(btn);
+    }
+  });
+
+  // ---- "Пользователи" (admin-only; server/routes/users.js) ----
+  var usersList = [];
+  var ROLE_LABELS = { admin: "Администратор", ko_viewer: "Менеджер (просмотр КО)" };
+  function fmtLastLogin(iso){ return iso ? fmtTs(iso) : '<span style="color:var(--ink-faint);">никогда</span>'; }
+  function renderUsersView(){
+    var body = document.getElementById("usersBody");
+    apiFetch("/api/users").then(function(list){
+      usersList = list;
+      if(!list.length){ body.innerHTML = '<div class="eng-empty">Пользователей пока нет.</div>'; return; }
+      var rows = list.map(function(u){
+        var statusPill = '<span class="eng-status '+(u.active?'ok':'err')+'">'+(u.active?'активен':'отключён')+'</span>';
+        var toggleBtn = u.active
+          ? '<button type="button" class="eng-mini-btn" data-action="user-disable" data-id="'+u.id+'">Отключить</button>'
+          : '<button type="button" class="eng-mini-btn" data-action="user-activate" data-id="'+u.id+'">Активировать</button>';
+        return '<tr><td>'+escapeHtml(u.full_name)+'</td><td>'+escapeHtml(u.username)+'</td>' +
+          '<td>'+escapeHtml(ROLE_LABELS[u.role]||u.role)+'</td><td>'+statusPill+'</td>' +
+          '<td>'+fmtLastLogin(u.last_login_at)+'</td>' +
+          '<td><button type="button" class="eng-mini-btn" data-action="user-edit" data-id="'+u.id+'">Изменить</button> ' +
+          '<button type="button" class="eng-mini-btn" data-action="user-reset-password" data-id="'+u.id+'">Сбросить пароль</button> ' +
+          toggleBtn + '</td></tr>';
+      }).join("");
+      body.innerHTML = '<div class="eng-panel"><table class="eng-table">' +
+        '<tr><th>ФИО</th><th>Логин</th><th>Роль</th><th>Статус</th><th>Последний вход</th><th>Действия</th></tr>' +
+        rows + '</table></div>';
+    }).catch(function(err){ body.innerHTML = '<div class="eng-empty">Не удалось загрузить список: '+escapeHtml(err.message)+'</div>'; });
+  }
+
+  var userModalMode = "create"; // "create" | "edit"
+  var userModalEditId = null;
+  function openUserModal(mode, user){
+    userModalMode = mode;
+    userModalEditId = user ? user.id : null;
+    document.getElementById("userModalTitle").textContent = mode === "edit" ? "Изменить пользователя" : "Новый пользователь";
+    document.getElementById("submitUserBtn").textContent = mode === "edit" ? "Сохранить" : "Создать";
+    document.getElementById("u-full-name").value = user ? user.full_name : "";
+    document.getElementById("u-username").value = user ? user.username : "";
+    document.getElementById("u-password").value = "";
+    document.getElementById("u-password-field").style.display = mode === "edit" ? "none" : "";
+    document.getElementById("userFormError").textContent = "";
+    document.getElementById("userModalOverlay").classList.add("open");
+    document.getElementById("u-full-name").focus();
+  }
+  function closeUserModal(){ document.getElementById("userModalOverlay").classList.remove("open"); }
+  document.getElementById("usersCreateBtn").addEventListener("click", function(){ openUserModal("create", null); });
+  document.getElementById("userCancelBtn").addEventListener("click", closeUserModal);
+  document.getElementById("userModalOverlay").addEventListener("click", function(e){ if(e.target === this) closeUserModal(); });
+  document.getElementById("userForm").addEventListener("submit", function(e){
+    e.preventDefault();
+    var errEl = document.getElementById("userFormError");
+    errEl.textContent = "";
+    var fullName = document.getElementById("u-full-name").value.trim();
+    var username = document.getElementById("u-username").value.trim();
+    var password = document.getElementById("u-password").value;
+    if(userModalMode === "create"){
+      apiFetch("/api/users", { method:"POST", body:{ full_name: fullName, username: username, password: password || undefined } })
+        .then(function(result){
+          closeUserModal();
+          renderUsersView();
+          if(result.generated_password){
+            window.alert("Пользователь «"+fullName+"» создан.\nЛогин: "+username+"\nПароль: "+result.generated_password+
+              "\n\nСохраните пароль сейчас — повторно он не показывается. Передайте его сотруднику и попросите сменить при первой возможности.");
+          }
+        }).catch(function(err){ errEl.textContent = err.message; });
+    } else {
+      apiFetch("/api/users/"+encodeURIComponent(userModalEditId), { method:"PATCH", body:{ full_name: fullName, username: username } })
+        .then(function(){ closeUserModal(); renderUsersView(); })
+        .catch(function(err){ errEl.textContent = err.message; });
+    }
+  });
+  document.getElementById("usersView").addEventListener("click", function(e){
+    var btn = e.target.closest ? e.target.closest("[data-action]") : null;
+    if(!btn) return;
+    var id = btn.getAttribute("data-id");
+    var action = btn.getAttribute("data-action");
+    var user = usersList.filter(function(u){ return u.id === id; })[0];
+    if(action === "user-edit" && user){
+      openUserModal("edit", user);
+    } else if(action === "user-reset-password"){
+      if(!window.confirm("Сбросить пароль для «"+(user?user.full_name:"")+"»? Текущие сессии этого пользователя сразу завершатся.")) return;
+      apiFetch("/api/users/"+encodeURIComponent(id)+"/reset-password", { method:"POST" }).then(function(result){
+        window.alert("Новый пароль для «"+(user?user.full_name:"")+"»: "+result.generated_password+
+          "\n\nСохраните его сейчас — повторно он не показывается.");
+      }).catch(function(err){ window.alert("Не удалось сбросить пароль: "+err.message); });
+    } else if(action === "user-disable"){
+      if(!window.confirm("Отключить пользователя «"+(user?user.full_name:"")+"»? Доступ будет закрыт немедленно, включая уже открытые сессии.")) return;
+      apiFetch("/api/users/"+encodeURIComponent(id)+"/disable", { method:"POST" }).then(renderUsersView)
+        .catch(function(err){ window.alert("Не удалось отключить пользователя: "+err.message); });
+    } else if(action === "user-activate"){
+      apiFetch("/api/users/"+encodeURIComponent(id)+"/activate", { method:"POST" }).then(renderUsersView)
+        .catch(function(err){ window.alert("Не удалось активировать пользователя: "+err.message); });
     }
   });
 
@@ -3480,25 +3631,32 @@
 
   // ---- tabs ----
   function setTab(tab){
+    // Критическое требование (роль ko_viewer): only "Конструкторский отдел" - every other tab
+    // (including a direct setTab() call from old code/console) is refused for a manager session.
+    if(isViewer() && tab !== "eng") tab = "eng";
     activeTab = tab;
     document.getElementById("boardView").style.display = tab === "board" ? "" : "none";
     document.getElementById("globalView").style.display = tab === "global" ? "" : "none";
     document.getElementById("engView").style.display = tab === "eng" ? "" : "none";
     document.getElementById("integrationsView").style.display = tab === "integrations" ? "" : "none";
+    document.getElementById("usersView").style.display = tab === "users" ? "" : "none";
     document.getElementById("tabBoardBtn").classList.toggle("active", tab === "board");
     document.getElementById("tabGlobalBtn").classList.toggle("active", tab === "global");
     document.getElementById("tabEngBtn").classList.toggle("active", tab === "eng");
     document.getElementById("tabIntegrationsBtn").classList.toggle("active", tab === "integrations");
-    document.getElementById("fabAdd").style.display = (tab === "eng" || tab === "integrations") ? "none" : "flex";
+    document.getElementById("tabUsersBtn").classList.toggle("active", tab === "users");
+    document.getElementById("fabAdd").style.display = (tab === "eng" || tab === "integrations" || tab === "users" || isViewer()) ? "none" : "flex";
     if(tab === "board") renderTree();
     else if(tab === "global") renderGlobalTree();
     else if(tab === "eng") renderEngBoard();
+    else if(tab === "users") renderUsersView();
     else { renderIntegrationsView(); renderTaskImport(); }
   }
   document.getElementById("tabBoardBtn").addEventListener("click", function(){ setTab("board"); });
   document.getElementById("tabGlobalBtn").addEventListener("click", function(){ setTab("global"); });
   document.getElementById("tabEngBtn").addEventListener("click", function(){ setTab("eng"); });
   document.getElementById("tabIntegrationsBtn").addEventListener("click", function(){ setTab("integrations"); });
+  document.getElementById("tabUsersBtn").addEventListener("click", function(){ setTab("users"); });
 
   // ---- event delegation: toggle / delete / status / subtasks / filters (document-wide) ----
   document.addEventListener("change", function(e){
@@ -3749,13 +3907,16 @@
   setSystemStatus(null, "проверка…");
 
   function loadAll(){
-    return Promise.all([
-      apiFetch("/api/tasks"),
-      apiFetch("/api/globals"),
-      loadEngProjects()
-    ]).then(function(results){
+    // Критическое требование (роль ko_viewer): "Доступ к личным задачам администратора" is
+    // forbidden - a manager's session gets a 403 from these two anyway (server/index.js), but
+    // not even attempting them avoids a confusing "Сервер недоступен" (Promise.all fails fast on
+    // the first rejection) for an access restriction that isn't actually an outage.
+    var personal = isViewer() ? Promise.resolve([[], []]) : Promise.all([apiFetch("/api/tasks"), apiFetch("/api/globals")]);
+    return personal.then(function(results){
       tasks = results[0] || [];
       globals = results[1] || [];
+      return loadEngProjects();
+    }).then(function(){
       serverOnline = true;
       setSystemStatus(true, "Система работает");
       renderAll();
@@ -3767,8 +3928,41 @@
     });
   }
 
+  // ---- role (ko_viewer vs. admin) - must be known before the first load, so board/global/users
+  // ---- stay untouched for a manager and the UI lands on "Конструкторский отдел" directly.
+  function applyRoleGating(){
+    var hide = isViewer() ? "none" : "";
+    document.getElementById("tabBoardBtn").style.display = hide;
+    document.getElementById("tabGlobalBtn").style.display = hide;
+    document.getElementById("tabIntegrationsBtn").style.display = hide;
+    document.getElementById("tabUsersBtn").style.display = (currentRole === "admin") ? "" : "none";
+    // Within "Конструкторский отдел" itself: only the two pure-viewing subtabs stay visible for
+    // a manager - "Нераспределённые фото"/"Доп. работы"/"Банк задач"/"На проверке"/"Предложения
+    // агента КО"/"Импорт плана" are all admin workflows (approving matches, applying/rejecting
+    // agent proposals, importing the Excel plan), not board viewing.
+    ["photos", "additional", "backlog", "review", "ko", "import"].forEach(function(v){
+      var btn = document.querySelector('.eng-subtab[data-subview="'+v+'"]');
+      if(btn) btn.style.display = hide;
+    });
+    // "Обновить" (re-check the Excel plan file) is an administrative action, not viewing.
+    var updateBtn = document.getElementById("engUpdateBtn"), updateStatus = document.getElementById("engUpdateStatus");
+    if(updateBtn) updateBtn.style.display = hide;
+    if(updateStatus) updateStatus.style.display = hide;
+    var banner = document.getElementById("engBanner");
+    if(banner && isViewer()) banner.textContent = "Просмотр раздела «Конструкторский отдел» — только для чтения.";
+    if(isViewer() && activeTab !== "eng") setTab("eng");
+    if(isViewer() && engSubview !== "board" && engSubview !== "completed") setEngSubview("board");
+  }
+  function loadWhoAmI(){
+    return apiFetch("/api/whoami").then(function(who){
+      currentRole = (who && who.role) || "admin";
+      currentCsrfToken = (who && who.csrf_token) || null;
+      applyRoleGating();
+    }).catch(function(){ currentRole = "admin"; currentCsrfToken = null; });
+  }
+
   var POLL_INTERVAL_MS = 20000;
-  loadAll();
+  loadWhoAmI().then(loadAll);
   setInterval(loadAll, POLL_INTERVAL_MS);
 
   document.getElementById("refreshBtn").addEventListener("click", function(){

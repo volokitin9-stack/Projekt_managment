@@ -1,17 +1,31 @@
 "use strict";
 
+const fs = require("fs");
+const path = require("path");
 const express = require("express");
 const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
 const storage = require("../storage");
 const projectsModel = require("../projectsModel");
+const store = require("../store");
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: storage.MAX_UPLOAD_BYTES } });
 
-// The dashboard has no user accounts (see README "Authentication"); manual edits
-// are attributed to the actor name the dashboard sends.
-const actorOf = (req) => (req.body && req.body.actor) || req.get("x-dashboard-user") || "dashboard_user";
+// Manual edits are attributed to the logged-in administrator (req.authUser, set by
+// dashboardAuth.requireDashboardSession) when one is configured, falling back to the actor name
+// the dashboard itself sends - unchanged behaviour for the no-accounts-configured local install.
+const actorOf = (req) => (req.authUser && req.authUser.username) || (req.body && req.body.actor) ||
+  req.get("x-dashboard-user") || "dashboard_user";
+
+// Критическое требование (роль ko_viewer): GET (viewing the board/cards) stays open to both the
+// administrator and a manager; every mutation below is administrator-only. One middleware here
+// rather than per-handler, so a future route on this router is covered automatically.
+router.use((req, res, next) => {
+  if (req.method === "GET" || req.method === "HEAD") return next();
+  if (req.authRole && req.authRole !== "admin") return res.status(403).json({ error: "Forbidden: read-only access" });
+  next();
+});
 
 // GET /api/projects — list for the dashboard. Optional filters mirror the board's filter bar.
 router.get("/", (req, res) => {
@@ -35,6 +49,26 @@ router.get("/:id", (req, res) => {
   const project = projectsModel.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: "Not found" });
   res.json(project);
+});
+
+// GET /api/projects/:id/files/:fileId/view — streams a project photo/document inline (not as a
+// download). Критическое требование (роль ko_viewer): "отдавать только необходимое изображение,
+// без доступа к скачиванию оригинального файла" - no Content-Disposition:attachment, no original
+// filename on the response, and this is the one URL that works for a ko_viewer manager at all
+// (the raw /uploads static mount 403s them - see server/index.js). Available to the administrator
+// too, so the dashboard can use one URL scheme for both roles (projectsModel.js's fileToApi()
+// already returns this as `view_url` alongside the raw `url`). This does not, and per the ТЗ's own
+// "технически невозможно" note cannot, stop a browser's own save-as/screenshot - it only removes
+// the direct, guessable original-file link and any download-oriented header.
+router.get("/:id/files/:fileId/view", (req, res) => {
+  const row = store.read((s) => s.project_files.find((f) => f.id === req.params.fileId && f.project_id === req.params.id));
+  if (!row) return res.status(404).json({ error: "Not found" });
+  const absolutePath = path.join(storage.UPLOADS_DIR, row.storage_key);
+  if (!fs.existsSync(absolutePath)) return res.status(404).json({ error: "Not found" });
+  res.setHeader("Content-Type", row.mime_type || "application/octet-stream");
+  res.setHeader("Content-Disposition", "inline");
+  res.setHeader("Cache-Control", "private, max-age=0, no-store");
+  fs.createReadStream(absolutePath).pipe(res);
 });
 
 router.get("/:id/history", (req, res) => {
@@ -94,7 +128,6 @@ router.post("/:id/files", upload.single("file"), (req, res) => {
   const fileId = uuidv4();
   const kind = req.file.mimetype === "application/pdf" ? "attachment" : "image";
   const actor = req.get("x-dashboard-user") || "dashboard_user";
-  const store = require("../store");
   store.tx((st) => {
     st.project_files.push({ id: fileId, project_id: row.id, kind, storage_key: storageKey,
       original_filename: req.file.originalname || null, mime_type: req.file.mimetype, size: req.file.size, is_primary: false,
