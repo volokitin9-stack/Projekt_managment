@@ -1861,6 +1861,18 @@
       un.innerHTML = "";
     }
 
+    // Auto-refresh (POLL_INTERVAL_MS) and every filter/KPI/drag-drop change rebuild this innerHTML
+    // from scratch, which destroys and recreates the scrollable .eng-col-body nodes - without
+    // saving and restoring scrollTop here, that reset a reader's position to the top of the column
+    // mid-browse, on every refresh cycle (and the board's own horizontal scroll with it). Keyed by
+    // stage, not by card list, so it survives the project list inside a column changing too.
+    var engColScroll = {};
+    var engBoardScrollLeft = wrap.scrollLeft;
+    Array.prototype.forEach.call(wrap.querySelectorAll(".eng-col[data-stage]"), function(col){
+      var body = col.querySelector(".eng-col-body");
+      if(body) engColScroll[col.getAttribute("data-stage")] = body.scrollTop;
+    });
+
     wrap.innerHTML = ENG_STAGES.map(function(stage){
       var inStage = engSortProjects(confirmed.filter(function(p){ return p.stage === stage; }));
       var critInStage = inStage.filter(function(p){ return p.priority === "critical"; }).length;
@@ -1884,6 +1896,13 @@
         '</div>'
       );
     }).join("");
+
+    wrap.scrollLeft = engBoardScrollLeft;
+    Array.prototype.forEach.call(wrap.querySelectorAll(".eng-col[data-stage]"), function(col){
+      var body = col.querySelector(".eng-col-body");
+      var top = engColScroll[col.getAttribute("data-stage")];
+      if(body && top) body.scrollTop = top;
+    });
 
     var pager = document.getElementById("engStagePager");
     if(pager){
