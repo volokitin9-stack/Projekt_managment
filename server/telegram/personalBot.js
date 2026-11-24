@@ -20,17 +20,19 @@ const store = require("../store");
 const projectsModel = require("../projectsModel");
 const botApi = require("./botApi");
 const telegramLog = require("./log");
+const dateUtils = require("./dateUtils");
+const assistant = require("./nlu/assistant");
 
 const tasks = createDocStore("tasks");
 const BRAND = "Доска проектов";
-const TZ = process.env.TELEGRAM_BOT_TIMEZONE || "Asia/Yekaterinburg";
+const TZ = dateUtils.TZ;
 const DIALOG_TTL_MS = 2 * 60 * 60 * 1000;
 const MAX_TEXT = 3800;
 
 const B = {
   tasks: "📋 Задачи", create: "➕ Новая задача", projects: "🛠 Проекты", help: "❓ Помощь", menu: "⬅️ Меню",
   cancel: "✖️ Отмена", skip: "Пропустить", clear: "Очистить", back: "⬅️ Назад", me: "Я",
-  confirm: "✅ Создать", yes: "✅ Да, создать", no: "✖️ Нет",
+  confirm: "✅ Создать", yes: "✅ Да, создать", no: "✖️ Нет", yesGeneric: "✅ Да",
   done: "✅ Выполнено", reopen: "↩️ Вернуть в работу", status: "🔁 Статус", edit: "✏️ Изменить",
   search: "🔎 Найти проект"
 };
@@ -62,20 +64,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function localToday() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-}
-
-function addDays(ymd, n) {
-  const d = new Date(`${ymd}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-
-function validYmd(y, m, d) {
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
-}
+const { localToday, addDays, validYmd } = dateUtils;
 
 /** "сегодня|завтра|послезавтра|ДД.ММ[.ГГ[ГГ]]|ГГГГ-ММ-ДД" + optional "ЧЧ:ММ" -> "YYYY-MM-DD[THH:MM]" | null.
  *  Same naive local format the dashboard's datetime-local field stores. */
@@ -124,10 +113,7 @@ function fmtDue(due) {
 }
 
 function isOverdue(t) {
-  if (!t.due || t.done) return false;
-  const due = String(t.due);
-  const today = localToday();
-  return due.length <= 10 ? due < today : new Date(due).getTime() < Date.now();
+  return dateUtils.isOverdueDue(t.due, t.done);
 }
 
 function codeOf(id) {
@@ -424,11 +410,14 @@ async function showProjects(chatId, log) {
   return send(chatId, lines.join("\n"), projectsKb(counts));
 }
 
-async function listProjects(chatId, title, list, log) {
-  setDialog(chatId, { mode: "projects", list: list.slice(0, 40).map((p) => p.id) });
+async function listProjects(chatId, title, list, log, nluContext) {
+  const d = { mode: "projects", list: list.slice(0, 40).map((p) => p.id) };
+  if (nluContext) d.nlu_context = nluContext;
+  setDialog(chatId, d);
   log("listed", `projects:${title}:${list.length}`);
   if (!list.length) return send(chatId, `${title}: ничего не найдено.`, kb([[B.search, B.projects], [B.menu]]));
-  return send(chatId, `${title} (${list.length}${list.length > 40 ? ", первые 40" : ""}):\n${list.slice(0, 40).map(projectLine).join("\n")}`,
+  return send(chatId, `${title} (${list.length}${list.length > 40 ? ", первые 40" : ""}):\n${list.slice(0, 40).map(projectLine).join("\n")}` +
+    (list.length > 1 ? "\n\nМожно прислать номер, чтобы открыть карточку." : ""),
     kb([[B.search, B.projects], [B.menu]]));
 }
 
@@ -533,6 +522,12 @@ async function handle(message, ctx) {
       const key = st[1] === "Без этапа" ? "none" : Object.keys(STAGE_LABELS).find((k) => STAGE_LABELS[k] === st[1]);
       if (key) return listProjects(chatId, st[1], mainProjects().filter((p) => (key === "none" ? !STAGE_LABELS[p.status] : p.status === key)), log);
     }
+    if (/^\d{1,2}$/.test(text)) {
+      const id = (d.list || [])[Number(text) - 1];
+      const p = id ? mainProjects().find((x) => x.id === id) : null;
+      if (p) { log("replied", `project pick:${p.id}`); return send(chatId, projectCard(p), kb([[B.search, B.projects], [B.menu]])); }
+      return send(chatId, "Нет проекта с таким номером в последнем списке.");
+    }
   }
   if (d.mode === "project_search") return listProjects(chatId, `Поиск «${text}»`, searchProjects(text), log);
   if (d.mode === "list" && /^\d{1,2}$/.test(text)) {
@@ -547,12 +542,136 @@ async function handle(message, ctx) {
     return askStep(chatId, { mode: "create", step: "description", draft: { title: d.title } });
   }
 
+  // ---------------------------------------------------------------- NLU-driven mutation flows
+  // Pending confirmation ("Да"/"Нет") or disambiguation ("which task?") of a change proposed by
+  // the natural-language layer below - never applied until the owner explicitly confirms here.
+  if (d.mode === "nlu_confirm") {
+    if (text === B.no || text === B.cancel) { resetDialog(chatId); log("replied", "nlu cancel"); return send(chatId, "Хорошо, не применяю.", MAIN_KB); }
+    if (text !== B.yesGeneric) return send(chatId, "Нажмите «✅ Да» или «✖️ Нет».", kb([[B.yesGeneric, B.no]]));
+    return applyNluConfirm(chatId, d, log);
+  }
+  if (d.mode === "nlu_pick") {
+    if (text === B.cancel) { resetDialog(chatId); log("replied", "nlu pick cancelled"); return send(chatId, "Отменено.", MAIN_KB); }
+    const chosen = assistant.resolveAmbiguousPick(text, d.candidates || []);
+    if (!chosen) return send(chatId, "Не понял выбор. Пришлите номер из списка или уточните название.", kb([[B.cancel]]));
+    return proceedAfterPick(chatId, d, chosen, log);
+  }
+
+  // ---------------------------------------------------------------- natural-language layer
+  // Only reached once no explicit command and no active step-by-step prompt above has claimed
+  // this message (every branch above either returns, or - "task"/"projects" falling through on an
+  // input their own buttons don't expect - leaves nothing for a scripted step to still be waiting
+  // on). Read-only answers are sent directly; any task change still goes through the Да/Нет
+  // confirmation above before anything is written. See server/telegram/nlu/assistant.js.
+  const nlu = assistant.interpret(text, { dialog: d, message });
+  if (nlu) {
+    await renderNluResult(chatId, nlu, log, message);
+    return;
+  }
+
   // Free text that is not a command: never guessed - offer to turn it into a task via the dialog.
   const title = text.slice(0, 300);
   setDialog(chatId, { mode: "offer", title });
   log("replied", "offer create");
   return send(chatId, `Не разобрал команду. Создать задачу «${title}»? Дальше я спрошу описание, срок, приоритет и ответственного.`,
     kb([[B.yes, B.no], [B.menu]]));
+}
+
+// ---------------------------------------------------------------- NLU result rendering
+
+async function renderNluResult(chatId, nlu, log, message) {
+  if (nlu.type === "projects") return listProjects(chatId, nlu.title, nlu.items, log, nlu.contextPatch);
+  if (nlu.type === "tasks") return renderTasksResult(chatId, nlu, log);
+  if (nlu.type === "project_detail") {
+    log("replied", `project:${nlu.project.id}`);
+    return send(chatId, projectCard(nlu.project), kb([[B.search, B.projects], [B.menu]]));
+  }
+  if (nlu.type === "task_create_confirm") return renderTaskCreateConfirm(chatId, nlu.draft, nlu.originMessageId || (message && message.message_id), log);
+  if (nlu.type === "task_move_confirm") return renderTaskMoveConfirm(chatId, nlu.task, nlu.due, log);
+  if (nlu.type === "task_complete_confirm") return renderTaskCompleteConfirm(chatId, nlu.task, log);
+  if (nlu.type === "task_ambiguous") return renderTaskAmbiguous(chatId, nlu, log);
+  if (nlu.type === "task_not_found") {
+    log("replied", `not found ${nlu.mutationKind}`);
+    return send(chatId, `Не нашёл подходящую задачу${nlu.query ? ` «${nlu.query}»` : ""}. Уточните название.`, MAIN_KB);
+  }
+  if (nlu.type === "project_mutation_blocked") {
+    log("replied", "project mutation blocked");
+    return send(chatId, "Изменение инженерных проектов через чат не поддерживается — только просмотр. Вносите изменения на доске.", MAIN_KB);
+  }
+  // "explain" and anything unrecognised: say what the assistant can do, without creating or
+  // changing anything by itself (ТЗ §5).
+  log("replied", "nlu explain");
+  return send(chatId,
+    "Не понял вопрос. Можно спросить, например:\n" +
+    "«Какие проекты GEELY в работе?» · «Что сейчас на замере?» · «Какие проекты у Иванова?»\n" +
+    "«Какие мои задачи просрочены?» · «Что нужно сделать сегодня?» · «Покажи задачи на этой неделе»\n" +
+    "«Создай задачу …» · «Перенеси задачу … на пятницу» · «Отметь задачу … выполненной»",
+    MAIN_KB);
+}
+
+function renderTasksResult(chatId, result, log) {
+  const list = result.items;
+  setDialog(chatId, { mode: "list", list: list.map((t) => t.id) });
+  log("listed", `nlu tasks:${list.length}`);
+  if (!list.length) return send(chatId, `${result.title}: таких задач нет.`);
+  return send(chatId, `${result.title} (${list.length}):\n${list.map(taskLine).join("\n")}\n\nНажмите код или пришлите номер, чтобы открыть карточку.`);
+}
+
+function renderTaskCreateConfirm(chatId, draft, originMessageId, log) {
+  setDialog(chatId, { mode: "nlu_confirm", mutation: "create", draft, origin_message_id: originMessageId });
+  log("replied", "nlu create confirm");
+  return send(chatId, `Создать задачу «${draft.title}»?\nСрок: ${draft.due ? fmtDue(draft.due) : "не указан"}`, kb([[B.yesGeneric, B.no]]));
+}
+
+function renderTaskMoveConfirm(chatId, task, due, log) {
+  setDialog(chatId, { mode: "nlu_confirm", mutation: "move", task_id: task.id, due });
+  log("replied", `nlu move confirm:${task.id}`);
+  return send(chatId, `Перенести срок задачи «${task.title}»?\nБыло: ${task.due ? fmtDue(task.due) : "—"}\nБудет: ${fmtDue(due)}`,
+    kb([[B.yesGeneric, B.no]]));
+}
+
+function renderTaskCompleteConfirm(chatId, task, log) {
+  setDialog(chatId, { mode: "nlu_confirm", mutation: "complete", task_id: task.id });
+  log("replied", `nlu complete confirm:${task.id}`);
+  return send(chatId, `Отметить задачу «${task.title}» выполненной?`, kb([[B.yesGeneric, B.no]]));
+}
+
+function renderTaskAmbiguous(chatId, result, log) {
+  setDialog(chatId, { mode: "nlu_pick", mutation: result.mutationKind, candidates: result.candidates.map((t) => t.id),
+    due: result.extra && result.extra.due });
+  log("replied", `nlu ambiguous ${result.mutationKind}:${result.candidates.length}`);
+  const lines = result.candidates.map((t, i) => `${i + 1}. ${t.title}`);
+  return send(chatId, `Нашёл несколько подходящих задач:\n${lines.join("\n")}\n\nПришлите номер или уточните название.`, kb([[B.cancel]]));
+}
+
+async function proceedAfterPick(chatId, d, chosen, log) {
+  if (d.mutation === "move") return renderTaskMoveConfirm(chatId, chosen, d.due, log);
+  if (d.mutation === "complete") return renderTaskCompleteConfirm(chatId, chosen, log);
+  resetDialog(chatId);
+  return send(chatId, "Не понял, что делать с выбранной задачей.", MAIN_KB);
+}
+
+/** Applies a change only after the owner pressed "✅ Да" - reuses patchTask()'s own
+ *  version-conflict handling, and (for "create") the same message_id-keyed idempotency the
+ *  step-by-step wizard uses, so a retried webhook delivery or a doubled confirmation tap can never
+ *  create a second task. */
+async function applyNluConfirm(chatId, d, log) {
+  if (d.mutation === "create") {
+    const id = `tg-nlu-${String(chatId).replace(/[^0-9]/g, "")}-${d.origin_message_id}`;
+    let created = tasks.get(id);
+    const duplicate = !!created;
+    if (!created) {
+      created = tasks.create({ id, title: d.draft.title, description: null, quadrant: "inbox", direction: null,
+        responsible: null, from: null, due: d.draft.due || null, priority: null, done: false,
+        calendarSynced: false, telegramNotified: true, source: "telegram", createdAt: nowIso() });
+    }
+    log(duplicate ? "replied" : "created", `${duplicate ? "duplicate " : ""}${created.id}`);
+    return openTask(chatId, created, log, duplicate ? "Эта задача уже создана." : `Готово — задача «${created.title}» создана на доске «${BRAND}».`);
+  }
+  if (d.mutation === "move") return patchTask(chatId, d.task_id, { due: d.due }, `срок изменён на ${fmtDue(d.due)}`, log);
+  if (d.mutation === "complete") return patchTask(chatId, d.task_id, { done: true, doneAt: nowIso() }, "задача отмечена выполненной", log);
+  resetDialog(chatId);
+  return send(chatId, "Не понял, что подтверждать.", MAIN_KB);
 }
 
 module.exports = { handle, claims, parseDue, codeOf, HELP_TEXT, BRAND, BUTTONS: B };
