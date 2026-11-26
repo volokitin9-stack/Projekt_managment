@@ -10,6 +10,7 @@ const express = require("express");
 const dashboardAuth = require("../dashboardAuth");
 const archive = require("../ko/archive");
 const proposals = require("../ko/proposals");
+const koNotifications = require("../koNotificationsModel");
 
 const router = express.Router();
 
@@ -18,6 +19,27 @@ const actorOf = (req) => dashboardAuth.sessionUser(req) || req.get("x-dashboard-
 router.get("/proposals", (req, res) => {
   const status = ["open", "resolved", "all"].includes(req.query.status) ? req.query.status : "open";
   res.json({ proposals: proposals.list({ status }), archive: archive.stats() });
+});
+
+// Notification bell (критическое требование: "центр уведомлений агента КО", администратор-only -
+// this whole router is already mounted under requireAdminRole in server/index.js). GET is read-only;
+// both POSTs below mark read state only - they never touch the proposal itself (просмотр не
+// подтверждает предложение).
+router.get("/notifications", (req, res) => {
+  const status = req.query.status === "unread" ? "unread" : "all";
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+  res.json(koNotifications.list({ status, limit }));
+});
+
+router.post("/notifications/:id/read", dashboardAuth.requireCsrfToken, (req, res) => {
+  const ok = koNotifications.markRead(req.params.id);
+  if (!ok) return res.status(404).json({ error: "Not found" });
+  res.json({ id: req.params.id, read: true });
+});
+
+router.post("/notifications/read-all", dashboardAuth.requireCsrfToken, (req, res) => {
+  const n = koNotifications.markAllRead();
+  res.json({ marked: n });
 });
 
 // Photo preview for the review screen (session-gated; not a public URL).

@@ -41,6 +41,10 @@ const dashboardAuth = require("./dashboardAuth");
 seed();
 // maintenance of review items created by an earlier build (resolved, never deleted)
 require("./workflowModel").resolveStageItemsOfNonMain(store);
+// КО notification bell: backfill read-state rows for proposals that already existed before this
+// feature shipped (критическое требование: "не потерять ожидающие решения предложения и не
+// создать дубли" on first boot after the update) - idempotent, safe to run on every restart.
+require("./koNotificationsModel").backfillFromExistingProposals();
 // a restart must not leave a Windows-agent job "running" forever past its lease (Railway deployment only)
 agentJobs.recoverAtBoot();
 

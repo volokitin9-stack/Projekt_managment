@@ -134,6 +134,63 @@
   }
   .header-clock .clock-date{ font-size:9px; color:var(--ink-soft); margin-top:1px; }
 
+  /* ---- КО notification bell (administrator only) ---- */
+  .notif-bell-wrap{ position:relative; flex-shrink:0; }
+  .notif-bell-btn{
+    position:relative; display:inline-flex; align-items:center; justify-content:center;
+    width:28px; height:28px; background:none; border:1px solid var(--line); border-radius:7px;
+    color:var(--ink-soft); cursor:pointer;
+  }
+  .notif-bell-btn:hover{ color:var(--ink); border-color:var(--accent); }
+  .notif-bell-btn.has-unread{ color:var(--accent-ink); }
+  .notif-badge{
+    position:absolute; top:-6px; right:-6px; min-width:16px; height:16px; padding:0 3px;
+    background:var(--crit); color:#fff; border-radius:9px; font-size:10px; font-weight:700;
+    line-height:16px; text-align:center; font-variant-numeric:tabular-nums;
+  }
+  .notif-panel{
+    display:none; position:absolute; top:calc(100% + 8px); right:0; width:360px; max-width:92vw;
+    max-height:70vh; background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    box-shadow:var(--shadow); z-index:40; flex-direction:column; overflow:hidden;
+  }
+  .notif-panel.open{ display:flex; }
+  .notif-panel-head{
+    display:flex; align-items:center; justify-content:space-between; padding:10px 12px;
+    border-bottom:1px solid var(--line); font-weight:700; font-size:12.5px;
+  }
+  .notif-panel-close{ background:none; border:none; color:var(--ink-soft); cursor:pointer; padding:2px; display:inline-flex; }
+  .notif-panel-close:hover{ color:var(--ink); }
+  .notif-panel-sub{ padding:6px 12px 0; font-size:11px; color:var(--ink-soft); }
+  .notif-panel-actions{ padding:6px 12px; }
+  .notif-mark-all-btn{
+    width:100%; padding:6px 8px; font-size:11.5px; font-weight:600; background:var(--surface-2);
+    border:1px solid var(--line); border-radius:6px; color:var(--ink); cursor:pointer;
+  }
+  .notif-mark-all-btn:hover{ background:var(--surface-3); }
+  .notif-mark-all-btn:disabled{ opacity:.5; cursor:default; }
+  .notif-panel-list{ overflow-y:auto; flex:1 1 auto; padding:0 6px 8px; }
+  .notif-empty{ padding:18px 12px; text-align:center; color:var(--ink-faint); font-size:12px; }
+  .notif-item{
+    display:block; width:100%; text-align:left; background:none; border:none; cursor:pointer;
+    padding:8px 8px; margin:2px 0; border-radius:8px; color:var(--ink);
+  }
+  .notif-item:hover{ background:var(--surface-2); }
+  .notif-item.unread{ background:var(--accent-soft); }
+  .notif-item-row{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+  .notif-item-project{ font-weight:700; font-size:12.5px; }
+  .notif-item-time{ font-size:10.5px; color:var(--ink-faint); white-space:nowrap; }
+  .notif-item-kind{ font-size:11px; color:var(--accent-ink); margin-top:1px; }
+  .notif-item-summary{ font-size:12px; color:var(--ink-soft); margin-top:3px; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+  .notif-item-status{ display:inline-flex; margin-top:5px; font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:20px; }
+  .notif-item-status.pending{ background:var(--warn-soft); color:var(--warn); }
+  .notif-item-status.applied{ background:var(--good-soft); color:var(--good); }
+  .notif-item-status.rejected{ background:var(--crit-soft); color:var(--crit); }
+  .ko-row-flash{ animation:koRowFlash 2.2s ease-out 1; }
+  @keyframes koRowFlash{ 0%{ background:var(--accent-soft); } 100%{ background:transparent; } }
+  @media (max-width:520px){
+    .notif-panel{ position:fixed; top:46px; right:8px; left:8px; width:auto; max-width:none; }
+  }
+
   /* ---- integrations panel ---- */
   .integrations-panel{
     display:grid; grid-template-columns:repeat(4,1fr);
@@ -738,6 +795,23 @@
       <span class="name">ДОСКА ПРОЕКТОВ</span>
       <span class="sub">дерево задач</span>
     </div>
+    <div class="notif-bell-wrap" id="notifBellWrap" style="display:none;">
+      <button type="button" class="notif-bell-btn" id="notifBellBtn" aria-haspopup="true" aria-expanded="false" title="Уведомления агента КО">
+        <span class="icon" id="notifBellIcon"></span>
+        <span class="notif-badge" id="notifBadge" style="display:none;">0</span>
+      </button>
+      <div class="notif-panel" id="notifPanel">
+        <div class="notif-panel-head">
+          <span>Уведомления агента КО</span>
+          <button type="button" class="notif-panel-close" id="notifPanelCloseBtn" aria-label="Закрыть"><span class="icon" id="notifCloseIcon"></span></button>
+        </div>
+        <div class="notif-panel-sub" id="notifPanelCounts"></div>
+        <div class="notif-panel-actions">
+          <button type="button" class="notif-mark-all-btn" id="notifMarkAllBtn">Отметить все как прочитанные</button>
+        </div>
+        <div class="notif-panel-list" id="notifPanelList"></div>
+      </div>
+    </div>
     <div class="header-clock">
       <div class="clock-time" id="clockTime">—:—:—</div>
       <div class="clock-date" id="clockDate">—</div>
@@ -1076,7 +1150,8 @@
     "chevrons-left": '<polyline points="11 17 6 12 11 7"></polyline><polyline points="18 17 13 12 18 7"></polyline>',
     "layout-grid": '<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>',
     table: '<path d="M3 3h18v18H3z"></path><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line><line x1="9" y1="3" x2="9" y2="21"></line>',
-    "arrow-down-up": '<path d="m3 16 4 4 4-4"></path><path d="M7 20V4"></path><path d="m21 8-4-4-4 4"></path><path d="M17 4v16"></path>'
+    "arrow-down-up": '<path d="m3 16 4 4 4-4"></path><path d="M7 20V4"></path><path d="m21 8-4-4-4 4"></path><path d="M17 4v16"></path>',
+    bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path>'
   };
   function iconSvg(name, size, strokeW){
     var inner = LUCIDE[name] || "";
@@ -1084,6 +1159,8 @@
   }
   function setIcon(elId, name, size){ var el = document.getElementById(elId); if(el) el.innerHTML = iconSvg(name, size||16); }
 
+  setIcon("notifBellIcon","bell",15);
+  setIcon("notifCloseIcon","x",14);
   setIcon("iconCalendar","calendar",12);
   setIcon("iconSend","send",12);
   setIcon("iconCheckBtn","send",13);
@@ -1551,6 +1628,12 @@
   var engKo = [];
   var engStagesLoaded = false;
   var engSubview = "board";
+  // Persists across renderEngBoard() calls (unlike a function-local var) - a render that happens
+  // while #engBoardView is hidden (another eng subview active, e.g. opened from a КО notification
+  // click-through) must not overwrite a real remembered scroll position with the 0 a hidden
+  // element always reports for scrollTop.
+  var engColScroll = {};
+  var engBoardScrollLeft = 0;
   var engUnconfirmedCollapsed = false;
 
   function loadStages(){
@@ -1878,12 +1961,14 @@
     // saving and restoring scrollTop here, that reset a reader's position to the top of the column
     // mid-browse, on every refresh cycle (and the board's own horizontal scroll with it). Keyed by
     // stage, not by card list, so it survives the project list inside a column changing too.
-    var engColScroll = {};
-    var engBoardScrollLeft = wrap.scrollLeft;
-    Array.prototype.forEach.call(wrap.querySelectorAll(".eng-col[data-stage]"), function(col){
-      var body = col.querySelector(".eng-col-body");
-      if(body) engColScroll[col.getAttribute("data-stage")] = body.scrollTop;
-    });
+    var wrapVisible = wrap.offsetParent !== null;
+    if(wrapVisible) engBoardScrollLeft = wrap.scrollLeft;
+    if(wrapVisible){
+      Array.prototype.forEach.call(wrap.querySelectorAll(".eng-col[data-stage]"), function(col){
+        var body = col.querySelector(".eng-col-body");
+        if(body) engColScroll[col.getAttribute("data-stage")] = body.scrollTop;
+      });
+    }
 
     wrap.innerHTML = ENG_STAGES.map(function(stage){
       var inStage = engSortProjects(confirmed.filter(function(p){ return p.stage === stage; }));
@@ -1913,7 +1998,7 @@
     Array.prototype.forEach.call(wrap.querySelectorAll(".eng-col[data-stage]"), function(col){
       var body = col.querySelector(".eng-col-body");
       var top = engColScroll[col.getAttribute("data-stage")];
-      if(body && top) body.scrollTop = top;
+      if(body && top != null) body.scrollTop = top;
     });
 
     var pager = document.getElementById("engStagePager");
@@ -2390,7 +2475,7 @@
       }).join("");
       var unresolved = !pl.resolved_project_id && ["new_task","needs_clarification"].indexOf(pl.kind) === -1;
       var applyLabel = (pl.kind === "project_match" || pl.kind === "needs_clarification") ? "Принять к сведению" : "Применить";
-      return '<tr><td>'+escapeHtml(KO_KIND[pl.kind]||pl.kind)+'<div style="font-size:11px;color:var(--ink-faint);">уверенность: '+escapeHtml(KO_CONF[pl.confidence]||pl.confidence||"—")+'</div></td>' +
+      return '<tr id="ko-row-'+escapeHtml(r.id)+'"><td>'+escapeHtml(KO_KIND[pl.kind]||pl.kind)+'<div style="font-size:11px;color:var(--ink-faint);">уверенность: '+escapeHtml(KO_CONF[pl.confidence]||pl.confidence||"—")+'</div></td>' +
         '<td>'+escapeHtml(koProjectLabel(pl))+(unresolved ? '<div style="font-size:11px;color:var(--danger,#b42318);">'+escapeHtml(pl.resolution_note||"проект не определён")+'</div>' : '')+'</td>' +
         '<td style="max-width:420px;"><div>'+escapeHtml(pl.summary||"")+'</div>'+(koChangeLabel(pl)?'<div style="font-weight:600;margin-top:3px;">'+escapeHtml(koChangeLabel(pl))+'</div>':'') +
         '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:3px;">'+escapeHtml(pl.rationale||"")+'</div>'+ev+(ph?'<div>'+ph+'</div>':'')+'</td>' +
@@ -2617,6 +2702,21 @@
     document.getElementById("engImportView").style.display = v === "import" ? "" : "none";
     if(v === "import") loadImports();
     renderEngSubviewLists();
+    // Belt-and-braces alongside renderEngBoard()'s own save/restore: re-apply the remembered
+    // scroll now that #engBoardView is actually visible again, in case a render happened while it
+    // was hidden (e.g. a КО notification click-through switches subview, loads fresh eng data,
+    // then switches back) and setting scrollTop on a display:none node did not stick.
+    if(v === "board"){
+      var engBoard = document.getElementById("engBoard");
+      if(engBoard){
+        engBoard.scrollLeft = engBoardScrollLeft;
+        Array.prototype.forEach.call(engBoard.querySelectorAll(".eng-col[data-stage]"), function(col){
+          var body = col.querySelector(".eng-col-body");
+          var top = engColScroll[col.getAttribute("data-stage")];
+          if(body && top != null) body.scrollTop = top;
+        });
+      }
+    }
   }
 
   document.getElementById("engView").addEventListener("click", function(e){
@@ -3996,6 +4096,12 @@
     document.getElementById("tabGlobalBtn").style.display = hide;
     document.getElementById("tabIntegrationsBtn").style.display = hide;
     document.getElementById("tabUsersBtn").style.display = (currentRole === "admin") ? "" : "none";
+    // Критическое требование: "Центр уведомлений агента КО доступен только администратору" /
+    // "Менеджеры ko_viewer не видят колокольчик и уведомления" - the bell (and its panel) simply
+    // doesn't exist in the DOM for a manager session; the server additionally 403s the API itself
+    // (server/index.js mounts /api/ko, including /api/ko/notifications, under requireAdminRole).
+    document.getElementById("notifBellWrap").style.display = (currentRole === "admin") ? "" : "none";
+    if(currentRole !== "admin") closeNotifPanel();
     // Within "Конструкторский отдел" itself: only the two pure-viewing subtabs stay visible for
     // a manager - "Нераспределённые фото"/"Доп. работы"/"Банк задач"/"На проверке"/"Предложения
     // агента КО"/"Импорт плана" are all admin workflows (approving matches, applying/rejecting
@@ -4035,8 +4141,119 @@
   }
 
   var POLL_INTERVAL_MS = 20000;
-  loadWhoAmI().then(loadAll).then(applyEngDeepLink);
+  // Both mechanisms share this one startup chain: the КО notification poll is fire-and-forget
+  // (independent of board data), while applyEngDeepLink() (?eng=<id> links, PR #8) must wait for
+  // loadAll()'s own promise to resolve, since it needs engProjects already populated to find the
+  // target card - hence returning loadAll() rather than calling it as a bare side effect.
+  loadWhoAmI().then(function(){ loadKoNotifications(); return loadAll(); }).then(applyEngDeepLink);
   setInterval(loadAll, POLL_INTERVAL_MS);
+
+  // ---- КО notification bell (администратор только) ----
+  // Deliberately its own fetch + render path, entirely separate from loadAll()/renderAll() above:
+  // критическое требование "не перерисовывать всю Канбан-доску при изменении уведомлений" и "не
+  // сбрасывать прокрутку Канбана" - this poll never touches the tree/eng-board DOM, so there is
+  // nothing in it that could reset a scroll position or redraw a card.
+  var notifState = { notifications: [], unread_count: 0, pending_count: 0 };
+  var notifPanelOpen = false;
+  var NOTIF_STATUS_LABEL = { pending: "Ожидает", applied: "Принято", rejected: "Отклонено" };
+  function notifStatusOf(n){
+    if(!n.resolved) return "pending";
+    return n.resolution === "rejected" ? "rejected" : "applied";
+  }
+  function notifPanelHtml(){
+    if(!notifState.notifications.length){
+      return '<div class="notif-empty">Уведомлений нет.</div>';
+    }
+    return notifState.notifications.map(function(n){
+      var pl = n.payload || {};
+      var status = notifStatusOf(n);
+      var kindLabel = KO_KIND[pl.kind] || pl.kind || "—";
+      var project = koProjectLabel(pl);
+      var when = fmtTz(n.created_at, "Asia/Yekaterinburg");
+      return '<button type="button" class="notif-item'+(n.read?"":" unread")+'" data-action="open-notif" data-notif-id="'+escapeHtml(n.notification_id)+'" data-proposal-id="'+escapeHtml(n.id)+'">' +
+        '<div class="notif-item-row"><span class="notif-item-project">'+escapeHtml(project)+'</span><span class="notif-item-time">'+escapeHtml(when)+' ЕКБ</span></div>' +
+        '<div class="notif-item-kind">'+escapeHtml(kindLabel)+'</div>' +
+        '<div class="notif-item-summary">'+escapeHtml(pl.summary||"")+'</div>' +
+        '<span class="notif-item-status '+status+'">'+NOTIF_STATUS_LABEL[status]+'</span>' +
+      '</button>';
+    }).join("");
+  }
+  function renderNotifBell(){
+    var badge = document.getElementById("notifBadge");
+    var bellBtn = document.getElementById("notifBellBtn");
+    if(notifState.unread_count > 0){
+      badge.style.display = "";
+      badge.textContent = notifState.unread_count > 99 ? "99+" : String(notifState.unread_count);
+      bellBtn.classList.add("has-unread");
+    } else {
+      badge.style.display = "none";
+      bellBtn.classList.remove("has-unread");
+    }
+    document.getElementById("notifPanelCounts").textContent =
+      "Непрочитанных: "+notifState.unread_count+" · Ожидают решения: "+notifState.pending_count;
+    var markAllBtn = document.getElementById("notifMarkAllBtn");
+    markAllBtn.disabled = notifState.unread_count === 0;
+    if(notifPanelOpen) document.getElementById("notifPanelList").innerHTML = notifPanelHtml();
+  }
+  function loadKoNotifications(){
+    if(currentRole !== "admin") return Promise.resolve();
+    return apiFetch("/api/ko/notifications?status=all&limit=50").then(function(res){
+      notifState = res || notifState;
+      renderNotifBell();
+    }).catch(function(){ /* a transient failure here must not disturb the board */ });
+  }
+  function openNotifPanel(){
+    notifPanelOpen = true;
+    document.getElementById("notifPanel").classList.add("open");
+    document.getElementById("notifBellBtn").setAttribute("aria-expanded", "true");
+    document.getElementById("notifPanelList").innerHTML = notifPanelHtml();
+    loadKoNotifications();
+  }
+  function closeNotifPanel(){
+    notifPanelOpen = false;
+    document.getElementById("notifPanel").classList.remove("open");
+    document.getElementById("notifBellBtn").setAttribute("aria-expanded", "false");
+  }
+  function flashKoRow(proposalId){
+    var row = document.getElementById("ko-row-"+proposalId);
+    if(!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    row.classList.remove("ko-row-flash");
+    void row.offsetWidth; // restart the animation if the same row is opened twice in a row
+    row.classList.add("ko-row-flash");
+  }
+  // Критическое требование: "При нажатии на уведомление открывать конкретное предложение агента
+  // с обоснованием" + "Просмотр уведомления не должен автоматически подтверждать предложение" -
+  // this only marks the *notification* read and navigates to the existing, unmodified "Предложения
+  // агента КО" screen (which already shows summary/rationale/evidence per row); applying or
+  // rejecting still needs its own separate button click, exactly as before this feature.
+  function openKoNotification(notifId, proposalId){
+    closeNotifPanel();
+    apiFetch("/api/ko/notifications/"+encodeURIComponent(notifId)+"/read", { method: "POST", body: {} })
+      .then(loadKoNotifications).catch(function(){});
+    setTab("eng");
+    setEngSubview("ko");
+    loadEngProjects().then(function(){ flashKoRow(proposalId); });
+  }
+  document.getElementById("notifBellBtn").addEventListener("click", function(e){
+    e.stopPropagation();
+    if(notifPanelOpen) closeNotifPanel(); else openNotifPanel();
+  });
+  document.getElementById("notifPanelCloseBtn").addEventListener("click", function(e){ e.stopPropagation(); closeNotifPanel(); });
+  document.getElementById("notifMarkAllBtn").addEventListener("click", function(e){
+    e.stopPropagation();
+    apiFetch("/api/ko/notifications/read-all", { method: "POST", body: {} }).then(loadKoNotifications).catch(function(){});
+  });
+  document.getElementById("notifPanelList").addEventListener("click", function(e){
+    var btn = e.target.closest('[data-action="open-notif"]');
+    if(!btn) return;
+    openKoNotification(btn.getAttribute("data-notif-id"), btn.getAttribute("data-proposal-id"));
+  });
+  document.addEventListener("click", function(e){
+    if(notifPanelOpen && !e.target.closest("#notifBellWrap")) closeNotifPanel();
+  });
+  var NOTIF_POLL_INTERVAL_MS = 20000;
+  setInterval(loadKoNotifications, NOTIF_POLL_INTERVAL_MS);
 
   document.getElementById("refreshBtn").addEventListener("click", function(){
     var syncEl = document.getElementById("syncStatus");
