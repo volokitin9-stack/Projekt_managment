@@ -259,6 +259,52 @@ function daysInStage(stageEnteredAt) {
   return Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 86400000)) : null;
 }
 
+function daysBetween(fromIso, toIso) {
+  const ms = new Date(toIso).getTime() - new Date(fromIso).getTime();
+  return Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 86400000)) : null;
+}
+
+/**
+ * Full stage-visit breakdown (ТЗ "длительность нахождения на каждой стадии"), built entirely from
+ * `project_history`'s own "stage_transition"/"stage_entered_at" rows plus the project's current
+ * `status`/`stage_entered_at` - nothing here is stored separately, nothing is invented, and a
+ * repeat visit to a stage already seen earlier is kept as its own entry (never merged into the
+ * first one). `liveStatus`/`liveStageEnteredAt` are the project's own authoritative fields (the
+ * same ones `daysInStage` above already uses for the Kanban card) - they decide what "the current
+ * stage" is, so a data gap in the history log can never disagree with what the board itself shows.
+ *
+ * Returns { completed: [{stage, entered_at, exited_at, days, visit}], current: {stage,
+ * entered_at, days, visit} | null }. `entered_at` is null (never guessed) when no event recorded
+ * it and the live field doesn't have it either - the caller/UI shows "Нет данных" for that.
+ */
+function buildStageHistory(history, liveStatus, liveStageEnteredAt) {
+  const events = (history || []).filter((h) => h.action === "stage_transition" || h.action === "stage_entered_at");
+  const completed = [];
+  const visitSeq = {};
+  let open = null; // { stage, enteredAt }
+  events.forEach((ev) => {
+    if (ev.action === "stage_transition") {
+      if (open) {
+        const exitedAt = ev.at || null;
+        visitSeq[open.stage] = (visitSeq[open.stage] || 0) + 1;
+        completed.push({ stage: open.stage, entered_at: open.enteredAt || null, exited_at: exitedAt,
+          days: open.enteredAt && exitedAt ? daysBetween(open.enteredAt, exitedAt) : null, visit: visitSeq[open.stage] });
+      }
+      open = ev.new_value ? { stage: ev.new_value, enteredAt: ev.at || null } : null;
+    } else if (open) {                      // "stage_entered_at": a confirmed override of when `open` truly started
+      open.enteredAt = ev.new_value || open.enteredAt;
+    }
+  });
+  let current = null;
+  if (liveStatus) {
+    visitSeq[liveStatus] = (visitSeq[liveStatus] || 0) + 1;
+    const enteredAt = (open && open.stage === liveStatus ? open.enteredAt : null) || liveStageEnteredAt || null;
+    current = { stage: liveStatus, entered_at: enteredAt, days: enteredAt ? daysInStage(enteredAt) : null,
+      visit: visitSeq[liveStatus] };
+  }
+  return { completed, current };
+}
+
 function groupBy(list, key) {
   const m = new Map();
   list.forEach((x) => {
@@ -324,6 +370,7 @@ function rowToApi(row, { includeRelations = true, index = null } = {}) {
     extra_attributes: data.extra_attributes || {},
     stage_entered_at: row.stage_entered_at || null,
     days_in_stage: status ? daysInStage(row.stage_entered_at) : null,
+    stage_history: includeRelations ? buildStageHistory(history, status, row.stage_entered_at) : undefined,
     description: data.description || "",
     source: data.source || "manual",
     comments: data.comments || [],
@@ -460,7 +507,13 @@ function listProjects({ category, includeRelations = true } = {}) {
   });
 }
 
-function pushHistory(s, projectId, action, source, actor, previousValue, newValue) {
+// `batchId` (optional) groups every history row produced by one operation (one sync run, one
+// dashboard save, one creation) so the journal can show them as a single, expandable event instead
+// of a flat list of fragments - server/historyLabels.js's presentHistoryEvents() does that
+// grouping. Purely additive: a row with no batchId (every row written before this field existed)
+// still renders exactly as before, as its own standalone entry - nothing here rewrites old rows or
+// changes what is stored for them.
+function pushHistory(s, projectId, action, source, actor, previousValue, newValue, batchId) {
   s.project_history.push({
     id: uuidv4(),
     project_id: projectId,
@@ -469,7 +522,8 @@ function pushHistory(s, projectId, action, source, actor, previousValue, newValu
     actor: actor || null,
     previous_value: previousValue === undefined ? null : clone(previousValue),
     new_value: newValue === undefined ? null : clone(newValue),
-    at: nowIso()
+    at: nowIso(),
+    batch_id: batchId || null
   });
 }
 
@@ -484,7 +538,7 @@ function recordActivity(projectId, action, source, actor, previousValue, newValu
  * removed_from_source (never deleted).  Fields last edited manually are kept
  * and reported.  Runs inside the caller's transaction (state `s`).
  */
-function applyActivities(s, projectId, activities, scope, sync) {
+function applyActivities(s, projectId, activities, scope, sync, batchId) {
   if (!Array.isArray(activities)) return { error: "activities must be a list" };
   const month = scope && scope.plan_month;
   if (!month || !MONTH_RX.test(String(month))) return { error: "activity_scope.plan_month (YYYY-MM) is required with activities" };
@@ -514,7 +568,7 @@ function applyActivities(s, projectId, activities, scope, sync) {
         field_sources: fs, created_at: ts, updated_at: ts }));
       pushHistory(s, projectId, "activity_added", "agent", actor, null,
         { activity_key: a.activity_key, name: a.name, plan_month: month, source_file: (sync && sync.source_file) || null,
-          sync_run_id: sync && sync.run_id });
+          sync_run_id: sync && sync.run_id }, batchId);
       summary.added += 1;
       return;
     }
@@ -526,14 +580,14 @@ function applyActivities(s, projectId, activities, scope, sync) {
         summary.kept_manual.push({ activity_key: a.activity_key, field: k, dashboard_value: row[k], file_value: a[k] });
         return;
       }
-      pushHistory(s, projectId, `activity_updated:${a.activity_key}.${k}`, "agent", actor, row[k], a[k]);
+      pushHistory(s, projectId, `activity_updated:${a.activity_key}.${k}`, "agent", actor, row[k], a[k], batchId);
       row[k] = a[k];
       sources[k] = "agent";
       changed = true;
     });
     if (row.removed_from_source) {
       row.removed_from_source = false;
-      pushHistory(s, projectId, `activity_updated:${a.activity_key}.removed_from_source`, "agent", actor, true, false);
+      pushHistory(s, projectId, `activity_updated:${a.activity_key}.removed_from_source`, "agent", actor, true, false, batchId);
       changed = true;
     }
     if (changed) {
@@ -546,7 +600,7 @@ function applyActivities(s, projectId, activities, scope, sync) {
     if (!seen.has(row.activity_key) && !row.removed_from_source) {
       row.removed_from_source = true;
       row.updated_at = ts;
-      pushHistory(s, projectId, "activity_removed_from_source", "agent", actor, null, { activity_key: row.activity_key });
+      pushHistory(s, projectId, "activity_removed_from_source", "agent", actor, null, { activity_key: row.activity_key }, batchId);
       summary.removed_from_source += 1;
     }
   });
@@ -556,6 +610,7 @@ function applyActivities(s, projectId, activities, scope, sync) {
 function updateActivityManual(projectId, activityId, changes, actor) {
   const errors = validateActivity(changes, ACTIVITY_MANUAL_FIELDS);
   if (errors.length) return { error: "Validation failed", details: errors };
+  const batchId = uuidv4();
   return store.tx((s) => {
     const row = s.project_activities.find((a) => a.id === activityId && a.project_id === projectId);
     if (!row) return { error: "not_found" };
@@ -563,7 +618,7 @@ function updateActivityManual(projectId, activityId, changes, actor) {
     let changed = false;
     Object.keys(changes).forEach((k) => {
       if ((row[k] === undefined ? null : row[k]) === changes[k]) return;
-      pushHistory(s, projectId, `activity_updated:${row.activity_key}.${k}`, "manual", actor || "dashboard_user", row[k], changes[k]);
+      pushHistory(s, projectId, `activity_updated:${row.activity_key}.${k}`, "manual", actor || "dashboard_user", row[k], changes[k], batchId);
       row[k] = changes[k];
       sources[k] = "manual";
       changed = true;
@@ -602,24 +657,26 @@ function createProject(input, { externalId = null, needsReview = false, source =
   delete data.last_plan_month;
   const fieldSources = {};
   Object.keys(data).forEach((k) => { if (!isEmpty(data[k])) fieldSources[k] = src; });
+  const batchId = uuidv4();
+  const pushBatched = (s, pid, action, source2, actor2, prev, next) => pushHistory(s, pid, action, source2, actor2, prev, next, batchId);
   const summary = store.tx((s) => {
     const newRow = { id, external_project_id: externalId, data, version: 1, needs_review: !!needsReview, created_at: ts,
       updated_at: ts, record_category: category, stage_entered_at: data.status ? ts : null, field_sources: fieldSources,
       last_plan_month: lastPlanMonth };
     s.projects.push(newRow);
     pushHistory(s, id, "created", src, actor, null, { record_category: category, source_file: data.source_file || null,
-      sync_run_id: sync && sync.run_id });
+      sync_run_id: sync && sync.run_id }, batchId);
     if (data.status) {
-      pushHistory(s, id, "stage_transition", src, actor, null, data.status);
+      pushHistory(s, id, "stage_transition", src, actor, null, data.status, batchId);
       workflowModel.onConfirmedTransition(s, newRow, src);
     }
     let summary = null;
     if (activities) {
-      const r = applyActivities(s, id, activities, activityScope, sync);
+      const r = applyActivities(s, id, activities, activityScope, sync, batchId);
       if (r.error) throw failWith(400, r.error, r.details);
       summary = r.summary;
     }
-    if (workflow) workflowModel.applyWorkflow(s, newRow, workflow, { actor, sync, push: pushHistory });
+    if (workflow) workflowModel.applyWorkflow(s, newRow, workflow, { actor, sync, push: pushBatched });
     return summary;
   });
   const project = getProject(id);
@@ -634,6 +691,8 @@ function createProject(input, { externalId = null, needsReview = false, source =
  */
 function updateProject(id, patch, { actor = null, source = "manual", expectedVersion = null, activities = null,
   activityScope = null, sync = null, stageAt = null, protectManual = true, workflow = null } = {}) {
+  const batchId = uuidv4();
+  const pushBatched = (s, pid, action, source2, actor2, prev, next) => pushHistory(s, pid, action, source2, actor2, prev, next, batchId);
   return store.tx((s) => {
     const row = s.projects.find((r) => r.id === id);
     if (!row) return { error: "not_found" };
@@ -673,7 +732,7 @@ function updateProject(id, patch, { actor = null, source = "manual", expectedVer
     });
     let summary = null;
     if (activities) {
-      const r = applyActivities(s, row.id, activities, activityScope, sync);
+      const r = applyActivities(s, row.id, activities, activityScope, sync, batchId);
       if (r.error) throw failWith(400, r.error, r.details);
       summary = r.summary;
     }
@@ -687,7 +746,7 @@ function updateProject(id, patch, { actor = null, source = "manual", expectedVer
     if (workflow) {
       row.data = current;
       row.field_sources = fieldSources;
-      wfChanged = workflowModel.applyWorkflow(s, row, workflow, { actor, sync, push: pushHistory }).changed;
+      wfChanged = workflowModel.applyWorkflow(s, row, workflow, { actor, sync, push: pushBatched }).changed;
     }
     const actChanged = summary && (summary.added || summary.updated || summary.removed_from_source);
     if (changes.length || actChanged || wfChanged) {
@@ -699,15 +758,15 @@ function updateProject(id, patch, { actor = null, source = "manual", expectedVer
     changes.forEach(([k, prev, next]) => {
       if (k === "status") {
         // logged when it is recorded; a verified earlier entry time is kept as its own event
-        pushHistory(s, row.id, "stage_transition", source, actor, prev || null, next);
-        if (stageAt) pushHistory(s, row.id, "stage_entered_at", source, actor, null, row.stage_entered_at);
+        pushHistory(s, row.id, "stage_transition", source, actor, prev || null, next, batchId);
+        if (stageAt) pushHistory(s, row.id, "stage_entered_at", source, actor, null, row.stage_entered_at, batchId);
       } else {
-        pushHistory(s, row.id, `updated:${k}`, source, actor, prev, next);
+        pushHistory(s, row.id, `updated:${k}`, source, actor, prev, next, batchId);
       }
     });
     if (sync && sync.run_id && (changes.length || actChanged || wfChanged)) {
       pushHistory(s, row.id, "agent_sync", "agent", actor, null, { sync_run_id: sync.run_id,
-        source_file: sync.source_file || null, fields: changes.map((c) => c[0]), activities: summary });
+        source_file: sync.source_file || null, fields: changes.map((c) => c[0]), activities: summary }, batchId);
     }
     return { id: row.id, conflicts, activity_summary: summary };
   });
@@ -769,5 +828,7 @@ module.exports = {
   recordActivity,
   pushHistory,
   rowToApi,
-  workloadSummary
+  workloadSummary,
+  buildStageHistory,
+  daysInStage
 };

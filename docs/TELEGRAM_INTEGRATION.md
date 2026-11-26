@@ -52,20 +52,26 @@ implementation).
   exactly like the old `telegram_messages` collection) — flag it and it can be added.
 - **Morning digest.** Reimplemented (критическое требование №2, "Дополнение к ТЗ Telegram-интеграции
   «Штурмана»") in `server/telegram/dailyDigest.js`, following the same self-rearming-timer pattern
-  as `server/planSource/scheduler.js`. Schedule and content are copied from the old Claude trigger's
-  own prompt, not reinvented: weekdays only, 07:53 Europe/Moscow (`CRON_TZ=Europe/Moscow 53 7 * * 1-5`,
-  **no** work-calendar/holiday awareness — the Excel scheduler has that, the old digest never did),
-  sent to `TELEGRAM_OWNER_CHAT_ID` only, reading `tasks` (`done:false`, grouped by `quadrant` in the
-  fixed order inbox/do/plan/delegate/drop), one line per task with whichever of
+  as `server/planSource/scheduler.js`. Originally copied the old Claude trigger's exact time
+  verbatim (weekdays, 07:53 Europe/Moscow) rather than reinventing it - **fixed** to 09:00
+  Asia/Yekaterinburg (see `docs/MORNING_DIGEST_TIME_FIX.md`: the old trigger, and this module's
+  copy of its schedule, used the wrong timezone for this project, and the old trigger itself is now
+  disabled - still **no** work-calendar/holiday awareness, matching the old digest exactly on that
+  point - the Excel scheduler has that, the digest never did), sent to `TELEGRAM_OWNER_CHAT_ID`
+  only, reading `tasks` (`done:false`, grouped by `quadrant` in the fixed order
+  inbox/do/plan/delegate/drop), one line per task with whichever of
   направление/от/ответственный/срок is set, "— просрочено" for an unfinished task whose срок has
-  passed. At most one send per local calendar date (`telegram_digest` object in `server/store.js`,
-  independent of `plan_source`/`plan_source_runs` — ticking one scheduler never touches the other's
-  state or timer, see `tests/test_telegram_digest.py::test_does_not_interfere_with_the_excel_planning_agent_schedule`).
+  passed - plus, since this same fix, a section listing КО (engineering) project changes from the
+  last 24 hours (see `docs/MORNING_DIGEST_TIME_FIX.md` §"КО changes section"). At most one send per
+  local calendar date (`telegram_digest` object in `server/store.js`, independent of
+  `plan_source`/`plan_source_runs` — ticking one scheduler never touches the other's state or timer,
+  see `tests/test_telegram_digest.py::test_does_not_interfere_with_the_excel_planning_agent_schedule`).
   A restart does not resend today's digest; a run more than 30 minutes late (including a server that
-  started after 07:53) is recorded as missed and not replayed, same rule as the Excel scheduler.
+  started after 09:00) is recorded as missed and not replayed, same rule as the Excel scheduler.
   Status is reported under `daily_digest` in `GET /api/telegram/status`. Never creates, updates or
-  deletes a task — read-only against `tasks`. Only ever sends to `TELEGRAM_OWNER_CHAT_ID`; it never
-  even references `TELEGRAM_ENGINEERING_CHAT_ID`, and the hard guard below would refuse it anyway.
+  deletes a task or project — read-only against `tasks` and `project_history`. Only ever sends to
+  `TELEGRAM_OWNER_CHAT_ID`; it never even references `TELEGRAM_ENGINEERING_CHAT_ID`, and the hard
+  guard below would refuse it anyway.
 - **Data migration (ТЗ Stage 4).** Not performed by this change. The Artifact's live `tasks`
   collection (34 real records at audit time) and `server/docStore.js`'s `tasks` collection
   (`server/seed.js`'s demo data) are **different data** today. Stage 4 below must copy the real
