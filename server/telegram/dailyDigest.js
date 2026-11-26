@@ -1,14 +1,26 @@
 "use strict";
 
-// Критическое требование №2 ("Дополнение к ТЗ Telegram-интеграции «Штурмана»"): the daily personal
-// task digest that the old Claude Artifact sent every weekday morning, re-implemented here so it
-// keeps working in the cloud Штурман. Per the ТЗ's own instruction ("не придумывать новое время
-// отправки или состав сводки без подтверждения") every rule below is copied from that artifact's
-// own scheduled-trigger prompt and from this app's own earlier, actually-sent digest - nothing
-// here is invented:
-//   - schedule: CRON_TZ=Europe/Moscow 53 7 * * 1-5 -> 07:53 Europe/Moscow, Monday-Friday only, with
-//     NO work-calendar/holiday awareness (unlike server/planSource/scheduler.js's PLAN_WORK_CALENDAR
-//     check for the Excel agent - the old digest never had that, so this doesn't either).
+// Daily personal task digest, sent every weekday morning.
+//
+// History of this schedule (see docs/MORNING_DIGEST_TIME_FIX.md for the full investigation): the
+// original version of this module copied its time verbatim from an old Claude Code scheduled task
+// ("Штурман: утренняя сводка", cron `CRON_TZ=Europe/Moscow 53 7 * * 1-5`) that pre-dates this
+// server and used to send the digest directly from a Claude session (reading the old Claude
+// Artifact, not this app, and calling the Telegram Bot API itself) - that scheduled task, and two
+// other leftover ones from the same era ("Утренний обзор канбан-доски", "Штурман: опрос
+// Telegram"), are now disabled but still exist; they are not this module and must not be
+// re-enabled, or the digest (and task creation from Telegram) would run twice from two unrelated
+// places. This module is the one, current, server-side implementation - confirmed scheduled
+// correctly below, independent of both the disabled legacy triggers above and of the unrelated
+// 16:00 Asia/Yekaterinburg КО-chat analysis (a separate Claude scheduled task, untouched by this
+// file).
+//   - schedule: 09:00 Asia/Yekaterinburg, Monday-Friday only (fixed per this fix's requirement),
+//     with NO work-calendar/holiday awareness (unlike server/planSource/scheduler.js's
+//     PLAN_WORK_CALENDAR check for the Excel agent - this digest never had that, so it still
+//     doesn't). Uses the exact same TZ-correct conversion (planSource/workCalendar.js's
+//     zonedInstant/localParts) the Excel scheduler already uses at its own 09:00
+//     Asia/Yekaterinburg - that function was audited as part of this fix and is not itself the
+//     source of any offset bug; see the investigation doc.
 //   - content: active (done:false) tasks from the "tasks" doc store, grouped by quadrant in the
 //     fixed order inbox/do/plan/delegate/drop, one numbered line per task showing whichever of
 //     направление/от кого/ответственный/срок is actually set, "— просрочено" appended when an
@@ -16,22 +28,25 @@
 //   - destination: TELEGRAM_OWNER_CHAT_ID only. This module never reads or references
 //     TELEGRAM_ENGINEERING_CHAT_ID, and botApi.call()'s own guard (server/telegram/botApi.js) would
 //     refuse it anyway if it somehow did.
-//   - idempotency: at most one send per local (Europe/Moscow) calendar date - recorded in the
+//   - idempotency: at most one send per local (Asia/Yekaterinburg) calendar date - recorded in the
 //     "telegram_digest" object (server/store.js OBJECTS), independent of plan_source/plan_source_runs
 //     so this never touches the Excel agent's own scheduling or import-lock state (see
 //     docs/TELEGRAM_INTEGRATION.md "Interaction with the Excel scheduler"). A restart does not
 //     resend today's digest; a run that fires more than GRACE_MINUTES late is marked "missed" and
 //     not replayed, the same rule planSource/scheduler.js uses for the Excel check.
-//   - never creates, updates or deletes a task - it only reads the "tasks" collection.
+//   - never creates, updates or deletes a task or project - it only reads the "tasks" collection
+//     (and, for the КО projects section added alongside this fix, only reads project_history -
+//     see server/telegram/engineeringDigest.js).
 
 const { createDocStore } = require("../docStore");
 const store = require("../store");
 const cal = require("../planSource/workCalendar");
 const botApi = require("./botApi");
 const telegramLog = require("./log");
+const engineeringDigest = require("./engineeringDigest");
 
-const TIMEZONE = "Europe/Moscow";
-const SCHEDULE_TIME = "07:53";
+const TIMEZONE = "Asia/Yekaterinburg";
+const SCHEDULE_TIME = "09:00";
 const GRACE_MINUTES = 30;
 const MAX_TIMER_MS = 6 * 60 * 60 * 1000;
 const TEST_HOOKS = process.env.TELEGRAM_DIGEST_TEST_HOOKS === "1";
@@ -75,16 +90,21 @@ function taskLine(t, at) {
   return meta.length ? `${title} (${meta.join(", ")})` : title;
 }
 
-/** Pure, independently testable: the digest text for a given task list and instant. */
-function buildDigestText(tasks, at) {
+/** Pure, independently testable: the digest text for a given task list and instant, plus the
+ *  already-built КО-changes section text (server/telegram/engineeringDigest.js - kept separate so
+ *  this function needs no store access of its own and stays a pure formatter, same as before this
+ *  section existed). `engineeringSection` is optional so every pre-existing caller/test of this
+ *  function (personal tasks only) keeps working unchanged. */
+function buildDigestText(tasks, at, engineeringSection) {
   const header = `Доброе утро! Активные задачи — ${ruDateLabel(at, TIMEZONE)}`;
   const active = tasks.filter((t) => !t.done);
-  if (!active.length) return `${header}\n\nНа сегодня активных задач нет.`;
-  const byQuadrant = {};
-  active.forEach((t) => { (byQuadrant[t.quadrant] || (byQuadrant[t.quadrant] = [])).push(t); });
-  const blocks = QUADRANT_ORDER.filter((q) => byQuadrant[q] && byQuadrant[q].length).map((q) =>
-    `${QUADRANT_LABELS[q]}:\n${byQuadrant[q].map((t, i) => `${i + 1}. ${taskLine(t, at)}`).join("\n")}`);
-  return [header].concat(blocks).join("\n\n");
+  const taskBlock = active.length ? [header].concat((() => {
+    const byQuadrant = {};
+    active.forEach((t) => { (byQuadrant[t.quadrant] || (byQuadrant[t.quadrant] = [])).push(t); });
+    return QUADRANT_ORDER.filter((q) => byQuadrant[q] && byQuadrant[q].length).map((q) =>
+      `${QUADRANT_LABELS[q]}:\n${byQuadrant[q].map((t, i) => `${i + 1}. ${taskLine(t, at)}`).join("\n")}`);
+  })()).join("\n\n") : `${header}\n\nНа сегодня активных задач нет.`;
+  return engineeringSection ? `${taskBlock}\n\n${engineeringSection}` : taskBlock;
 }
 
 function digestState() {
@@ -115,7 +135,8 @@ async function tick(t = now(), { startup = false } = {}) {
     return { action: "missed", date: dateKey };
   }
   const tasks = createDocStore("tasks").list();
-  const text = buildDigestText(tasks, t);
+  const engineeringSection = engineeringDigest.buildEngineeringChangesSection(t);
+  const text = buildDigestText(tasks, t, engineeringSection);
   try {
     await botApi.sendMessage(process.env.TELEGRAM_OWNER_CHAT_ID, text);
     setDigestState({ last_sent_date: dateKey, last_sent_at: new Date().toISOString(),
