@@ -38,7 +38,10 @@ const COLLECTIONS = ["stages", "docs", "projects", "project_activities", "projec
   // КО chat archive for the shturman-ko-analyst agent (server/ko/archive.js) - append-only
   "ko_messages", "ko_files",
   // one record per personal-task import (server/taskImport.js) - what it created, for rollback
-  "task_imports"];
+  "task_imports",
+  // read state for the КО notification bell (server/koNotificationsModel.js) - one row per
+  // shturman-ko-analyst proposal id, never deleted
+  "ko_notifications"];
 // Single-object sections (added without a format change: missing = empty).
 const OBJECTS = ["plan_source", "agent_status", "telegram_digest", "telegram_webhook", "ko_archive",
   // per-chat dialog state of the personal menu bot (server/telegram/personalBot.js)

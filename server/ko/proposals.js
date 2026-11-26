@@ -19,6 +19,7 @@ const store = require("../store");
 const storage = require("../storage");
 const projectsModel = require("../projectsModel");
 const reviewQueue = require("../reviewQueueModel");
+const koNotifications = require("../koNotificationsModel");
 const { createDocStore } = require("../docStore");
 const rules = require("./rules");
 const archive = require("./archive");
@@ -150,6 +151,11 @@ function submit(list) {
     payload.last_submitted_at = nowIso();
     const r = reviewQueue.upsertIn(s, { kind: KIND, payload, reason: proposal.summary, source: SOURCE,
       dedupeKey: proposal.dedupe_key, severity: "review" });
+    // One notification per proposal id, created the first time it is seen - idempotent, so a
+    // re-submission that only merges evidence (status "updated"/"duplicate") never creates a second
+    // bell entry for the same proposal (критическое требование: "повторное получение предложения
+    // не должно создавать дубль").
+    koNotifications.ensureForProposalIn(s, r.id);
     return { dedupe_key: proposal.dedupe_key, id: r.id, status, resolved_project_id: proposal.resolved_project_id };
   }));
   const counts = results.reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
