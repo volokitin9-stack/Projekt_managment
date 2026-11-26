@@ -643,8 +643,20 @@
   .eng-hist{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
   .eng-hist li{ font-size:12px; color:var(--ink); border-left:2px solid var(--line); padding:2px 0 2px 9px; }
   .eng-hist li.stage{ border-left-color:var(--accent); }
+  .eng-hist li.stage.current{ background:var(--accent-soft, rgba(0,0,0,.03)); border-left-width:3px; }
   .eng-hist .when{ font-family:"JetBrains Mono",monospace; font-size:10.5px; color:var(--ink-faint); margin-right:6px; }
   .eng-hist .src{ font-size:10px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.03em; margin-left:6px; }
+  .eng-hist-event{ font-size:12px; border-left:2px solid var(--line); padding:2px 0 2px 9px; margin-bottom:6px; }
+  .eng-hist-event summary{ cursor:pointer; color:var(--ink); }
+  .eng-hist-event summary .when{ font-family:"JetBrains Mono",monospace; font-size:10.5px; color:var(--ink-faint); margin-right:6px; }
+  .eng-hist-event summary .src{ font-size:10px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.03em; margin-left:6px; }
+  .eng-hist-body{ padding:6px 0 2px 2px; }
+  .eng-hist-change{ display:flex; gap:8px; font-size:11.5px; padding:2px 0; border-bottom:1px dashed var(--line); }
+  .eng-hist-change .k{ color:var(--ink-soft); flex:0 0 160px; }
+  .eng-hist-change .v{ color:var(--ink); }
+  .eng-hist-raw{ margin-top:6px; }
+  .eng-hist-raw summary{ cursor:pointer; font-size:11px; color:var(--ink-faint); }
+  .eng-hist-raw pre{ font-size:10.5px; white-space:pre-wrap; word-break:break-word; background:var(--surface-2); padding:8px; border-radius:6px; margin-top:4px; max-height:300px; overflow:auto; }
   .eng-gallery{ display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:8px; }
   .eng-thumb{ aspect-ratio:1/1; border-radius:8px; border:1px solid var(--line); background:var(--surface-3) center/cover no-repeat; cursor:zoom-in; }
   .eng-lightbox{ position:fixed; inset:0; z-index:60; background:rgba(3,8,14,.86); display:none; align-items:center; justify-content:center;
@@ -1969,26 +1981,6 @@
   });
 
   // ---- project details: information, workload, history, photos ----
-  function engHistoryLabel(h){
-    var a = h.action || "";
-    var pv = h.previous_value, nv = h.new_value;
-    function st(x){ return x ? (ENG_STAGE_LABELS[x] || x) : "не подтверждён"; }
-    function val(x){ if(x === null || x === undefined || x === "") return "—"; return typeof x === "object" ? JSON.stringify(x) : String(x); }
-    if(a === "created") return "Проект создан" + (nv && nv.source_file ? " (из файла «"+nv.source_file+"»)" : "");
-    if(a === "stage_transition") return "Этап: "+st(pv)+" → "+st(nv);
-    if(a === "stage_entered_at") return "Дата входа в этап (подтверждена): "+fmtTs(nv);
-    if(a === "agent_sync") return "Синхронизация планировщика" + (nv && nv.source_file ? " · файл «"+nv.source_file+"»" : "") +
-      (nv && nv.fields && nv.fields.length ? " · поля: "+nv.fields.join(", ") : "") +
-      (nv && nv.activities ? " · работы: +"+(nv.activities.added||0)+" ~"+(nv.activities.updated||0) : "");
-    if(a === "activity_added") return "Добавлена работа «"+val(nv && nv.name)+"» ("+val(nv && nv.plan_month)+")";
-    if(a === "activity_removed_from_source") return "Работа "+val(nv && nv.activity_key)+" отсутствует в новом плане (сохранена)";
-    if(a.indexOf("activity_updated:") === 0) return "Работа "+a.slice(17)+": "+val(pv)+" → "+val(nv);
-    if(a.indexOf("updated:") === 0) return "Изменено «"+a.slice(8)+"»: "+val(pv)+" → "+val(nv);
-    if(a === "file_uploaded" || a === "image_uploaded") return "Добавлен файл" + (nv && nv.caption ? " «"+nv.caption+"»" : "");
-    if(a.indexOf("event:") === 0) return "Событие агента: "+a.slice(6);
-    if(a === "comment:stage_transition") return "Комментарий к переходу: "+val(nv);
-    return a;
-  }
   var ENG_SOURCE_LABELS = { manual:"вручную", agent:"агент", seed:"демо", telegram:"Telegram" };
 
   var ENG_ATTENTION_LABELS = {
@@ -2082,6 +2074,30 @@
     );
   }
 
+  // ---- длительность на каждой стадии (server/projectsModel.js's buildStageHistory - computed
+  // from project_history's own stage_transition/stage_entered_at rows + the live status/
+  // stage_entered_at, never stored separately, never a fictitious event) ----
+  function engStageHistoryRow(v, isCurrent){
+    var label = ENG_STAGE_LABELS[v.stage] || v.stage;
+    var visitSuffix = v.visit > 1 ? ' <span style="color:var(--ink-faint);font-size:11px;">(повторно, визит '+v.visit+')</span>' : '';
+    var entered = v.entered_at ? fmtTs(v.entered_at) : 'Нет данных';
+    if(isCurrent){
+      var days = v.days == null ? 'Длительность неизвестна' : v.days+' '+ruDaysWord(v.days)+' (с '+entered+')';
+      return '<li class="stage current"><b>'+escapeHtml(label)+'</b>'+visitSuffix+' — <span class="v">'+escapeHtml(days)+'</span> · на стадии сейчас</li>';
+    }
+    var exited = v.exited_at ? fmtTs(v.exited_at) : 'Нет данных';
+    var days = v.days == null ? 'Нет данных' : v.days+' '+ruDaysWord(v.days);
+    return '<li class="stage"><b>'+escapeHtml(label)+'</b>'+visitSuffix+' — '+escapeHtml(entered)+' → '+escapeHtml(exited)+' ('+escapeHtml(days)+')</li>';
+  }
+  function engStageHistorySection(p){
+    var sh = p.stage_history || { completed: [], current: null };
+    if(!sh.current && !sh.completed.length) return '<div class="eng-empty">Этап ещё не подтверждался</div>';
+    var rows = [];
+    if(sh.current) rows.push(engStageHistoryRow(sh.current, true));
+    sh.completed.slice().reverse().forEach(function(v){ rows.push(engStageHistoryRow(v, false)); });
+    return '<ul class="eng-hist">'+rows.join("")+'</ul>';
+  }
+
   function engWorkloadSection(p){
     var w = p.workload || {}; var acts = p.activities || [];
     if(!acts.length) return '<div class="eng-empty">Работы по плану не загружены</div>';
@@ -2122,13 +2138,37 @@
     );
   }
 
+  // Readable journal (server/historyLabels.js's presentHistoryEvents, via GET /api/projects/:id's
+  // history_events) - one grouped, expandable event per operation (one sync, one dashboard save,
+  // the creation), Russian field labels, never a raw JSON dump. A technical/diagnostic field (plan-
+  // import metadata such as delivery_chance/mapping_rule/unmapped_columns, bundled inside
+  // `details`/`extra_attributes`) is left out of the visible list entirely here - hidden_count
+  // says how many were skipped, and the raw rows behind them are in `ev.raw`, sent by the server
+  // only when the viewer is the administrator (role-gated server-side, not just hidden by this
+  // markup - see routes/projects.js).
+  function engHistoryChangeHtml(c){
+    if(c.technical) return '<div class="eng-hist-change technical"><span class="k">'+escapeHtml(c.label)+'</span>' +
+      '<span class="v" style="color:var(--ink-faint);">техническое — см. диагностику ниже</span></div>';
+    return '<div class="eng-hist-change"><span class="k">'+escapeHtml(c.label)+'</span>' +
+      '<span class="v">'+escapeHtml(c.old)+' → '+escapeHtml(c.new)+'</span></div>';
+  }
+  function engHistoryEventHtml(ev){
+    var visible = ev.changes.filter(function(c){ return !c.technical; });
+    var body = visible.length ? visible.map(engHistoryChangeHtml).join("") :
+      '<div class="eng-empty" style="padding:2px 0;">Нет изменений, видимых в обычном журнале</div>';
+    var hiddenNote = ev.hidden_count ? '<div style="font-size:11px;color:var(--ink-faint);margin-top:4px;">+'+ev.hidden_count+
+      ' техническ'+(ev.hidden_count===1?'ое поле':'их поля')+' скрыт'+(ev.hidden_count===1?'о':'ы')+'</div>' : '';
+    var rawHtml = (ev.raw && ev.raw.length) ? '<details class="eng-hist-raw"><summary>Служебный JSON (режим администратора)</summary>' +
+      '<pre>'+escapeHtml(JSON.stringify(ev.raw, null, 2))+'</pre></details>' : '';
+    return '<details class="eng-hist-event"><summary><span class="when">'+fmtTs(ev.at)+'</span> '+escapeHtml(ev.title) +
+      '<span class="src">'+escapeHtml(ENG_SOURCE_LABELS[ev.source]||ev.source||"")+(ev.actor?' · '+escapeHtml(ev.actor):'')+'</span></summary>' +
+      '<div class="eng-hist-body">'+body+hiddenNote+rawHtml+'</div></details>';
+  }
   function engHistorySection(p){
-    var hist = (p.history || []).slice().reverse();
-    if(!hist.length) return '<div class="eng-empty">История пуста</div>';
-    return '<ul class="eng-hist">' + hist.slice(0, 200).map(function(h){
-      return '<li class="'+(h.action==="stage_transition"?"stage":"")+'"><span class="when">'+fmtTs(h.at)+'</span>'+escapeHtml(engHistoryLabel(h))+
-        '<span class="src">'+escapeHtml(ENG_SOURCE_LABELS[h.source]||h.source||"")+(h.actor?' · '+escapeHtml(h.actor):'')+'</span></li>';
-    }).join("") + '</ul>' + (hist.length > 200 ? '<div class="eng-empty">Показаны последние 200 событий из '+hist.length+'</div>' : '');
+    var events = p.history_events || [];
+    if(!events.length) return '<div class="eng-empty">История пуста</div>';
+    return events.slice(0, 200).map(engHistoryEventHtml).join("") +
+      (events.length > 200 ? '<div class="eng-empty">Показаны последние 200 событий из '+events.length+'</div>' : '');
   }
 
   function engPhotosSection(p){
@@ -2168,6 +2208,7 @@
       '<div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px;">'+escapeHtml(p.product||p.project_name||"")+
         (p.article_number?' · арт. '+escapeHtml(p.article_number):'')+' · '+(p.engineer?escapeHtml(p.engineer):'<i>Не назначен</i>')+'</div>' +
       '<div class="eng-sec"><div class="eng-sec-head"><span>Информация о проекте</span></div>'+engInfoSection(p)+'</div>' +
+      '<div class="eng-sec"><div class="eng-sec-head"><span>Длительность по стадиям</span></div>'+engStageHistorySection(p)+'</div>' +
       '<div class="eng-sec"><div class="eng-sec-head"><span>Трудозатраты</span></div>'+engWorkloadSection(p)+'</div>' +
       '<div class="eng-sec"><div class="eng-sec-head"><span>История проекта</span></div>'+engHistorySection(p)+'</div>' +
       '<div class="eng-sec"><div class="eng-sec-head"><span>Фотографии и файлы</span></div>'+engPhotosSection(p)+'</div>';
@@ -3980,8 +4021,21 @@
     }).catch(function(){ currentRole = "admin"; currentCsrfToken = null; });
   }
 
+  // Deep link from the morning Telegram digest's КО-changes section (server/telegram/
+  // engineeringDigest.js, "?eng=<project_id>") - opens that project's card once, right after the
+  // first load; never re-triggers on the later poll ticks (loadAll() itself doesn't call this).
+  var engDeepLinkId = (function(){
+    try { return new URLSearchParams(location.search).get("eng") || null; } catch(e){ return null; }
+  })();
+  function applyEngDeepLink(){
+    if(!engDeepLinkId) return;
+    var id = engDeepLinkId; engDeepLinkId = null;
+    setTab("eng");
+    if(engFind(id)) openEngDetail(id);
+  }
+
   var POLL_INTERVAL_MS = 20000;
-  loadWhoAmI().then(loadAll);
+  loadWhoAmI().then(loadAll).then(applyEngDeepLink);
   setInterval(loadAll, POLL_INTERVAL_MS);
 
   document.getElementById("refreshBtn").addEventListener("click", function(){

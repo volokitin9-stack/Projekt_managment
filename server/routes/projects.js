@@ -8,6 +8,34 @@ const { v4: uuidv4 } = require("uuid");
 const storage = require("../storage");
 const projectsModel = require("../projectsModel");
 const store = require("../store");
+const historyLabels = require("../historyLabels");
+
+function stageLabelMap() {
+  const map = {};
+  store.read((s) => s.stages).forEach((s) => { map[s.key] = s.label; });
+  return map;
+}
+
+// Критическое требование (роль ko_viewer) + requirement "служебный JSON — только администратору":
+// the raw `history`/`activity` arrays (and each activity's own raw `details` object) carry the
+// same plan-import diagnostic metadata (delivery_chance, probability_note, sales_channel,
+// mapping_rule, unmapped_columns, actual_hours_source, ...) the readable journal
+// (history_events) deliberately leaves out - removing them from a non-administrator's response
+// closes the API itself, not just the UI, as the actual boundary. Only ever touches the response
+// object; server/projectsModel.js's own stored data is never read differently or changed by this.
+function redactTechnicalForRole(project, isAdmin) {
+  if (isAdmin) return project;
+  delete project.history;
+  delete project.activity;
+  if (Array.isArray(project.activities)) {
+    project.activities = project.activities.map((a) => {
+      const clean = Object.assign({}, a);
+      delete clean.details;
+      return clean;
+    });
+  }
+  return project;
+}
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: storage.MAX_UPLOAD_BYTES } });
@@ -42,13 +70,20 @@ router.get("/", (req, res) => {
     list = list.filter((p) =>
       [p.manufacturer, p.vehicle_model, p.product_type, p.project_id, p.article_number].join(" ").toLowerCase().includes(needle));
   }
-  res.json(list);
+  const isAdmin = req.authRole === "admin";
+  res.json(list.map((p) => redactTechnicalForRole(p, isAdmin)));
 });
 
 router.get("/:id", (req, res) => {
   const project = projectsModel.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: "Not found" });
-  res.json(project);
+  const isAdmin = req.authRole === "admin";
+  // Критическое требование (роль ko_viewer): the readable journal (Russian labels, grouped
+  // events) is available to both roles - only the raw technical fields/rows behind it are
+  // admin-only, decided here server-side (req.authRole), never left to the client to hide.
+  project.history_events = historyLabels.presentHistoryEvents(project.history,
+    { admin: isAdmin, stageLabels: stageLabelMap(), activities: project.activities || [] });
+  res.json(redactTechnicalForRole(project, isAdmin));
 });
 
 // GET /api/projects/:id/files/:fileId/view — streams a project photo/document inline (not as a
