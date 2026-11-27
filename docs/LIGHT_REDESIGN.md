@@ -104,9 +104,56 @@ checked `#notifBadge`'s own `display` to detect "no unread" - that CSS toggle mo
 parent `#notifBadgeWrap` when the badge became an inline pill instead of a floating circle, so the
 script now checks the wrapper.
 
+## Pre-Phase-4 checks (owner's two open questions)
+
+1. **Detail panel tabs (Общее/Фото/История/Комментарии)** - still **not implemented**. Checked
+   `#treeDetailBody` again: it still renders everything as stacked sections, not tabs. Carried
+   forward into the remaining plan below; nothing about it changes with this phase's work (no
+   fields, stage history or photos touched).
+2. **Messages button real-click + click-through** - reconfirmed with the actual real-Chromium
+   tests (`test_browser_admin_bell_panel_and_click_through_preserve_kanban_scroll`,
+   `test_browser_ko_viewer_has_no_bell_and_api_refuses_it`) against the current commit: both pass.
+   The button opens the panel, click-through lands on the exact proposal, scroll is preserved.
+
+## Phase 4 — Personal task manager (horizontal tree)
+
+Same visual language as Phase 3, applied to `public/index.html`'s D3 tree (`#boardView`/
+`#globalView`) - no change to the tree's data model, layout algorithm (`buildGraphData()`),
+category keys (`inbox/do/plan/delegate/drop`), or any business logic:
+
+- `.task-card`/`.branch-root`/`.branch-card` background switched from the pale `--surface-2` to
+  true `--surface` (white), hover switched from a neutral grey (`--surface-3`) to a blue tint
+  (`--accent-soft`) - the "голубая подсветка активных элементов" the owner asked for.
+  `.filter-chip.active` (the quadrant legend) got the same blue treatment, matching the sidebar's
+  own `.tab-btn.active` convention.
+- `.shell`'s `max-width:1440px` (centering the whole app content with unused side margins on
+  anything wider) removed - this was capping every tab's usable width, the task tree included; the
+  sidebar already bounds the left edge.
+- Compacted the three panels above the tree (`.integrations-panel` 60px→46px min-height,
+  `.actions-row` 30px→28px buttons, `.filters-row` tightened) and corrected `.tree-wrap`'s height
+  formula, which still subtracted Phase 2's old 40px header instead of the current 60px (a real,
+  previously-unnoticed regression from Phase 2 - the canvas was 20px taller than its container).
+- Zoom/pan/center/fit, branch collapse, and the deterministic left/right layout are untouched code
+  paths - verified rather than rebuilt (see below).
+
+**Verified with a real browser** (genuine d3.js fetched from npm for this check only, since the
+egress proxy blocks the CDN this page normally loads it from - production behaviour is unaffected):
+- 6 seeded tasks across all 5 quadrants, two with subtasks (one with a `done:true` subtask,
+  confirming only open subtasks render, as already designed) - multi-level (root→quadrant→task→
+  subtask) tree renders correctly at both 1920×1080 and 1366×768, full width used, no page scroll.
+- Dragged the canvas, then clicked "Обновить список" (a full data refresh): the zoom/pan transform
+  was byte-identical before and after - confirms the tree already preserves its view state across a
+  refresh (the `boardViewInitialized` guard was already there from before this redesign).
+- Added a task via the FAB - appeared in the correct quadrant immediately.
+- Opened an existing task's detail panel, checked "Выполнено" - it left the active tree and
+  appeared under "Сделано", counts updated correctly everywhere (quadrant legend, sync counter).
+
+No "Штурман" branding anywhere (unchanged from before - the app has said "Доска проектов"
+throughout this whole redesign).
+
 ## Remaining phases (not yet done)
 
-5. Personal task manager visual pass (mostly inherited from Phase 2/3's token and header changes -
-   verify once real task data is on screen; the graph/tree logic itself is untouched).
+5. Project detail panel: real tabs (Общее/Фото/История/Комментарии) - see open question 1 above.
+   The only still-open structural item from the original audit.
 6. Responsive pass beyond the three required desktop breakpoints (tablet/mobile).
-7. Full regression pass + final screenshots under both roles.
+7. Full regression pass + final screenshots under both roles, all tabs.

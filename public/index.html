@@ -67,7 +67,10 @@
   @media (prefers-reduced-motion: reduce){ *{ transition:none !important; animation:none !important; } }
   button{ font-family:inherit; }
 
-  .shell{ max-width:1440px; margin:0 auto; padding-bottom:0; }
+  /* No max-width: the redesign calls for using the full available workspace width (sidebar
+     already bounds the content on the left) - a centered 1440px column left real screen space
+     unused on anything wider, the personal task tree included. */
+  .shell{ padding-bottom:0; }
 
   svg.icon{ display:block; flex-shrink:0; }
 
@@ -268,9 +271,9 @@
   .integrations-panel{
     display:grid; grid-template-columns:repeat(4,1fr);
     background:var(--surface); border-bottom:1px solid var(--line);
-    min-height:60px;
+    min-height:46px;
   }
-  .integ-group{ padding:7px 14px; display:flex; flex-direction:column; gap:4px; border-right:1px solid var(--line); justify-content:center; }
+  .integ-group{ padding:5px 14px; display:flex; flex-direction:column; gap:3px; border-right:1px solid var(--line); justify-content:center; }
   .integ-group:last-child{ border-right:none; }
   .integ-label{ font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-soft); font-weight:600; }
   .integ-row{ display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--ink); }
@@ -286,9 +289,9 @@
   .status-dot.bad{ background:var(--crit); box-shadow:0 0 0 2px var(--crit-soft); }
 
   /* ---- quick actions row ---- */
-  .actions-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:7px 14px; border-bottom:1px solid var(--line); background:var(--bg); }
+  .actions-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 14px; border-bottom:1px solid var(--line); background:var(--bg); }
   .action-btn{
-    height:30px; padding:0 12px; display:inline-flex; align-items:center; gap:6px;
+    height:28px; padding:0 12px; display:inline-flex; align-items:center; gap:6px;
     background:var(--surface-2); border:1px solid var(--line); border-radius:8px;
     color:var(--ink); font-weight:600; font-size:11.5px; cursor:pointer; transition:all .18s ease;
   }
@@ -299,14 +302,14 @@
   .action-feedback{ font-size:11px; color:var(--ink-soft); }
 
   /* ---- filter chips ---- */
-  .filters-row{ display:flex; gap:6px; flex-wrap:wrap; padding:7px 14px; border-bottom:1px solid var(--line); background:var(--bg); overflow-x:auto; }
+  .filters-row{ display:flex; gap:6px; flex-wrap:wrap; padding:6px 14px; border-bottom:1px solid var(--line); background:var(--bg); overflow-x:auto; }
   .filter-chip{
     display:flex; align-items:center; gap:6px; padding:4px 10px; border-radius:20px;
     background:var(--surface-2); border:1px solid transparent; cursor:pointer; flex-shrink:0;
     font-size:11px; color:var(--ink-soft); font-weight:500; transition:all .18s ease;
   }
   .filter-chip:hover{ background:var(--surface-3); }
-  .filter-chip.active{ border-color:var(--accent); background:var(--surface-3); color:var(--ink); }
+  .filter-chip.active{ border-color:var(--accent); background:var(--accent-soft); color:var(--accent-ink); }
   .filter-dot{ width:7px; height:7px; border-radius:50%; flex-shrink:0; }
   .filter-count{ font-family:"JetBrains Mono", monospace; color:var(--ink-faint); font-variant-numeric:tabular-nums; }
 
@@ -315,7 +318,7 @@
 
   /* ---- tree (graph) area ---- */
   .tree-wrap{
-    position:relative; width:100%; height:calc(100vh - 40px - 60px - 44px - 38px);
+    position:relative; width:100%; height:calc(100vh - 60px - 46px - 40px - 36px);
     min-height:460px;
     background-color:var(--bg);
     background-image:
@@ -344,11 +347,11 @@
 
   .task-card-fo{ overflow:visible; }
   .task-card{
-    width:220px; min-height:54px; background:var(--surface-2); border:1px solid var(--line);
+    width:220px; min-height:54px; background:var(--surface); border:1px solid var(--line);
     border-radius:10px; display:flex; align-items:center; gap:10px; padding:10px 12px;
     cursor:pointer; box-shadow:var(--shadow); transition:border-color .15s ease, background .15s ease;
   }
-  .task-card:hover{ border-color:var(--accent); background:var(--surface-3); }
+  .task-card:hover{ border-color:var(--accent); background:var(--accent-soft); }
   .task-card .dot{ width:9px; height:9px; border-radius:50%; flex-shrink:0; }
   .task-card .body{ min-width:0; flex:1; display:flex; flex-direction:column; gap:3px; }
   .task-card .title{ font-size:12.5px; font-weight:600; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -364,10 +367,10 @@
   /* ---- global tab: branch root card + subtask cards (horizontal tree) ---- */
   .branch-root{
     width:100%; height:100%; box-sizing:border-box; position:relative;
-    display:flex; align-items:center; gap:14px; background:var(--surface-2); border:1px solid var(--line);
+    display:flex; align-items:center; gap:14px; background:var(--surface); border:1px solid var(--line);
     border-radius:14px; padding:16px; cursor:pointer; box-shadow:var(--shadow); transition:border-color .15s ease, background .15s ease;
   }
-  .branch-root:hover{ border-color:var(--accent); background:var(--surface-3); }
+  .branch-root:hover{ border-color:var(--accent); background:var(--accent-soft); }
   .branch-root .icon-circle{ width:48px; height:48px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; color:#06121F; }
   .branch-root .body{ min-width:0; flex:1; display:flex; flex-direction:column; gap:7px; }
   .branch-root .title{ font-size:14.5px; font-weight:700; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -378,10 +381,10 @@
 
   .branch-card{
     width:100%; height:100%; box-sizing:border-box;
-    display:flex; align-items:center; gap:10px; background:var(--surface-2); border:1px solid var(--line);
+    display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--line);
     border-radius:10px; padding:0 14px; cursor:pointer; box-shadow:var(--shadow); transition:border-color .15s ease, background .15s ease;
   }
-  .branch-card:hover{ border-color:var(--accent); background:var(--surface-3); }
+  .branch-card:hover{ border-color:var(--accent); background:var(--accent-soft); }
   .branch-card .dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
   .branch-card .title{ flex:1; min-width:0; font-size:13px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .branch-card.done .title{ text-decoration:line-through; color:var(--ink-soft); }
