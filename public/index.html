@@ -115,22 +115,73 @@
     .mobile-menu-btn{ display:inline-flex !important; }
   }
 
-  /* ---- header (compact: the board/graph is the main surface, not the chrome) ---- */
+  /* ---- header (compact, but tall enough for the section breadcrumb + messages + profile) ---- */
   .app-header{
     position:sticky; top:0; z-index:20;
-    height:40px;
+    height:60px;
     background:var(--surface);
     border-bottom:1px solid var(--line);
-    display:flex; align-items:center; justify-content:space-between;
-    padding:0 14px; gap:12px;
+    display:flex; align-items:center; justify-content:flex-start;
+    padding:0 18px; gap:10px;
   }
+  .header-spacer{ flex:1 1 auto; }
   .mobile-menu-btn{
     display:none; align-items:center; justify-content:center; width:28px; height:28px; flex-shrink:0;
     background:none; border:1px solid var(--line); border-radius:7px; color:var(--ink-soft); cursor:pointer;
   }
-  .brand{ display:flex; flex-direction:row; align-items:baseline; gap:6px; min-width:90px; }
-  .brand .name{ font-weight:700; font-size:13px; letter-spacing:.05em; color:var(--ink); }
-  .brand .sub{ font-size:9.5px; color:var(--ink-soft); letter-spacing:.02em; }
+  /* The sidebar's own .sidebar-brand already shows "Д ДОСКА ПРОЕКТОВ" at the top-left of the whole
+     app shell (same row as this header) - repeating it here too would be the exact duplication
+     the redesign spec calls out ("Avoid duplicating the same application title in multiple
+     prominent locations"). This copy exists only for the narrow/mobile layout, where the sidebar
+     collapses off-canvas and nothing else carries the brand - see the max-width:767px override. */
+  .brand{ display:none; flex-direction:row; align-items:center; gap:7px; min-width:0; }
+  .brand .mark{
+    width:24px; height:24px; border-radius:6px; background:var(--accent-soft); color:var(--accent-ink);
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px; flex-shrink:0;
+  }
+  .brand .name{ font-weight:700; font-size:13px; letter-spacing:.05em; color:var(--ink); white-space:nowrap; }
+  .header-section-wrap{ position:relative; flex-shrink:0; }
+  .header-section-btn{
+    display:inline-flex; align-items:center; gap:5px; background:none; border:none; cursor:pointer;
+    font-size:15px; font-weight:600; color:var(--ink-soft); padding:6px 4px; border-radius:6px;
+  }
+  .header-section-btn:hover{ color:var(--ink); background:var(--surface-2); }
+  .header-section-btn .icon{ width:15px; height:15px; color:var(--ink-faint); }
+  .header-section-menu{
+    display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:200px; background:var(--surface);
+    border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); z-index:40; padding:6px; flex-direction:column; gap:1px;
+  }
+  .header-section-menu.open{ display:flex; }
+  .header-section-item{
+    display:block; width:100%; text-align:left; background:none; border:none; cursor:pointer; padding:7px 10px;
+    border-radius:7px; font-size:13px; color:var(--ink); font-weight:500;
+  }
+  .header-section-item:hover{ background:var(--surface-2); }
+  .header-section-item.active{ background:var(--accent-soft); color:var(--accent-ink); }
+  .user-chip-wrap{ position:relative; flex-shrink:0; }
+  .user-chip{
+    display:inline-flex; align-items:center; gap:9px; background:none; border:none; cursor:pointer;
+    padding:5px 6px; border-radius:9px;
+  }
+  .user-chip:hover{ background:var(--surface-2); }
+  .user-avatar{
+    width:32px; height:32px; border-radius:50%; background:var(--accent); color:#fff; font-weight:700;
+    font-size:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .user-meta{ display:flex; flex-direction:column; align-items:flex-start; line-height:1.3; }
+  .user-name{ font-size:12.5px; font-weight:600; color:var(--ink); white-space:nowrap; }
+  .user-role{ font-size:10.5px; color:var(--ink-soft); white-space:nowrap; }
+  .user-chip .icon{ width:14px; height:14px; color:var(--ink-faint); }
+  .user-menu{
+    display:none; position:absolute; top:calc(100% + 4px); right:0; min-width:140px; background:var(--surface);
+    border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); z-index:40; padding:6px;
+  }
+  .user-menu.open{ display:block; }
+  .user-menu-item{
+    display:block; width:100%; text-align:left; background:none; border:none; cursor:pointer; padding:7px 10px;
+    border-radius:7px; font-size:13px; color:var(--ink);
+  }
+  .user-menu-item:hover{ background:var(--crit-soft); color:var(--crit-ink); }
   .header-tabs{ display:flex; gap:3px; background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:2px; }
   .tab-btn{
     padding:4px 13px; background:none; border:none; cursor:pointer; border-radius:6px;
@@ -145,61 +196,72 @@
   }
   .header-clock .clock-date{ font-size:9px; color:var(--ink-soft); margin-top:1px; }
 
-  /* ---- КО notification bell (administrator only) ---- */
+  /* ---- Сообщения: the КО notification bell, relabelled per the redesign spec (administrator
+     only). Same #notifBellWrap/#notifBellBtn/#notifPanel/#notifPanelList/#notifBadge ids and the
+     same ko_notifications-backed data underneath - only the presentation changed. ---- */
   .notif-bell-wrap{ position:relative; flex-shrink:0; }
-  .notif-bell-btn{
-    position:relative; display:inline-flex; align-items:center; justify-content:center;
-    width:28px; height:28px; background:none; border:1px solid var(--line); border-radius:7px;
-    color:var(--ink-soft); cursor:pointer;
+  .messages-btn{
+    display:inline-flex; align-items:center; gap:7px; height:34px; padding:0 12px;
+    background:var(--surface); border:1px solid var(--line); border-radius:9px;
+    color:var(--ink-soft); cursor:pointer; font-size:13px; font-weight:600;
   }
-  .notif-bell-btn:hover{ color:var(--ink); border-color:var(--accent); }
-  .notif-bell-btn.has-unread{ color:var(--accent-ink); }
-  .notif-badge{
-    position:absolute; top:-6px; right:-6px; min-width:16px; height:16px; padding:0 3px;
-    background:var(--crit); color:#fff; border-radius:9px; font-size:10px; font-weight:700;
-    line-height:16px; text-align:center; font-variant-numeric:tabular-nums;
+  .messages-btn:hover{ border-color:var(--accent); color:var(--ink); }
+  .messages-btn .icon{ width:16px; height:16px; flex-shrink:0; }
+  .messages-btn.has-unread{ color:var(--ink); }
+  .messages-badge{
+    display:inline-flex; align-items:baseline; gap:3px; background:var(--accent-soft); color:var(--accent-ink);
+    border-radius:20px; padding:2px 8px; font-size:11.5px; font-weight:700; font-variant-numeric:tabular-nums;
   }
+  #notifChevron{ color:var(--ink-faint); width:13px; height:13px; }
   .notif-panel{
-    display:none; position:absolute; top:calc(100% + 8px); right:0; width:360px; max-width:92vw;
-    max-height:70vh; background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    display:none; position:absolute; top:calc(100% + 8px); right:0; width:380px; max-width:92vw;
+    max-height:70vh; background:var(--surface); border:1px solid var(--line); border-radius:12px;
     box-shadow:var(--shadow); z-index:40; flex-direction:column; overflow:hidden;
   }
   .notif-panel.open{ display:flex; }
-  .notif-panel-head{
-    display:flex; align-items:center; justify-content:space-between; padding:10px 12px;
-    border-bottom:1px solid var(--line); font-weight:700; font-size:12.5px;
-  }
-  .notif-panel-close{ background:none; border:none; color:var(--ink-soft); cursor:pointer; padding:2px; display:inline-flex; }
-  .notif-panel-close:hover{ color:var(--ink); }
-  .notif-panel-sub{ padding:6px 12px 0; font-size:11px; color:var(--ink-soft); }
-  .notif-panel-actions{ padding:6px 12px; }
+  .notif-panel-sub{ padding:9px 12px 0; font-size:11px; color:var(--ink-faint); }
+  .notif-panel-actions{ padding:8px 10px 0; }
   .notif-mark-all-btn{
     width:100%; padding:6px 8px; font-size:11.5px; font-weight:600; background:var(--surface-2);
     border:1px solid var(--line); border-radius:6px; color:var(--ink); cursor:pointer;
   }
   .notif-mark-all-btn:hover{ background:var(--surface-3); }
   .notif-mark-all-btn:disabled{ opacity:.5; cursor:default; }
-  .notif-panel-list{ overflow-y:auto; flex:1 1 auto; padding:0 6px 8px; }
-  .notif-empty{ padding:18px 12px; text-align:center; color:var(--ink-faint); font-size:12px; }
+  .notif-panel-list{ overflow-y:auto; flex:1 1 auto; padding:6px 6px 2px; }
+  .notif-empty{ padding:22px 12px; text-align:center; color:var(--ink-faint); font-size:12.5px; }
   .notif-item{
-    display:block; width:100%; text-align:left; background:none; border:none; cursor:pointer;
-    padding:8px 8px; margin:2px 0; border-radius:8px; color:var(--ink);
+    display:flex; align-items:flex-start; gap:9px; width:100%; text-align:left; background:none;
+    border:none; cursor:pointer; padding:8px; margin:1px 0; border-radius:9px; color:var(--ink);
   }
   .notif-item:hover{ background:var(--surface-2); }
   .notif-item.unread{ background:var(--accent-soft); }
+  .notif-item-icon{
+    width:28px; height:28px; border-radius:50%; flex-shrink:0; display:flex; align-items:center;
+    justify-content:center; background:var(--surface-3); color:var(--ink-faint); margin-top:1px;
+  }
+  .notif-item.unread .notif-item-icon{ background:var(--accent); color:#fff; }
+  .notif-item.unread .notif-item-icon.rejected{ background:var(--crit); }
+  .notif-item.unread .notif-item-icon.applied{ background:var(--good); }
+  .notif-item-icon .icon{ width:14px; height:14px; }
+  .notif-item-body{ min-width:0; flex:1 1 auto; }
   .notif-item-row{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
-  .notif-item-project{ font-weight:700; font-size:12.5px; }
-  .notif-item-time{ font-size:10.5px; color:var(--ink-faint); white-space:nowrap; }
-  .notif-item-kind{ font-size:11px; color:var(--accent-ink); margin-top:1px; }
-  .notif-item-summary{ font-size:12px; color:var(--ink-soft); margin-top:3px; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
-  .notif-item-status{ display:inline-flex; margin-top:5px; font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:20px; }
-  .notif-item-status.pending{ background:var(--warn-soft); color:var(--warn); }
-  .notif-item-status.applied{ background:var(--good-soft); color:var(--good); }
-  .notif-item-status.rejected{ background:var(--crit-soft); color:var(--crit); }
+  .notif-item-line{ font-size:12.5px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .notif-item-time{ font-size:10.5px; color:var(--ink-faint); white-space:nowrap; flex-shrink:0; }
+  .notif-item-sub{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .notif-item-sub.pending{ color:var(--warn-ink); }
+  .notif-item-sub.applied{ color:var(--good-ink); }
+  .notif-item-sub.rejected{ color:var(--crit-ink); }
+  .notif-panel-footer{
+    display:flex; align-items:center; justify-content:center; gap:5px; padding:10px; margin-top:2px;
+    border-top:1px solid var(--line); font-size:12px; font-weight:600; color:var(--accent-ink);
+    text-decoration:none; cursor:pointer;
+  }
+  .notif-panel-footer:hover{ background:var(--surface-2); }
+  .notif-panel-footer .icon{ width:13px; height:13px; }
   .ko-row-flash{ animation:koRowFlash 2.2s ease-out 1; }
   @keyframes koRowFlash{ 0%{ background:var(--accent-soft); } 100%{ background:transparent; } }
   @media (max-width:520px){
-    .notif-panel{ position:fixed; top:46px; right:8px; left:8px; width:auto; max-width:none; }
+    .notif-panel{ position:fixed; top:64px; right:8px; left:8px; width:auto; max-width:none; }
   }
 
   /* ---- integrations panel ---- */
@@ -522,8 +584,8 @@
   }
   .eng-kpis{ display:flex; gap:10px; flex-wrap:wrap; padding:12px 20px 0; }
   .kpi-tile{
-    flex:1 1 130px; min-width:110px; background:var(--surface-2); border:1px solid var(--line);
-    border-radius:10px; padding:9px 13px;
+    flex:1 1 130px; min-width:110px; background:var(--surface); border:1px solid var(--line);
+    border-radius:var(--radius); padding:9px 13px; box-shadow:var(--shadow);
   }
   .kpi-tile .kpi-label{ font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-soft); font-weight:600; }
   .kpi-tile .kpi-value{ font-family:"JetBrains Mono",monospace; font-size:19px; font-weight:700; color:var(--ink); margin-top:2px; }
@@ -533,6 +595,16 @@
   .kpi-tile.clickable:hover{ border-color:var(--accent); background:var(--surface-3); }
   .kpi-tile.clickable.active{ border-color:var(--accent); background:var(--accent-soft); }
   .kpi-tile.clickable.active .kpi-value{ color:var(--accent-ink); }
+  /* main KPI strip only (not the reused .eng-sums mini-stats, which stay label-over-value) */
+  .eng-kpis .kpi-tile{ display:flex; align-items:center; gap:11px; }
+  .kpi-icon{
+    width:36px; height:36px; border-radius:10px; flex-shrink:0; display:flex; align-items:center;
+    justify-content:center; background:var(--accent-soft); color:var(--accent);
+  }
+  .eng-kpis .kpi-tile.warn .kpi-icon{ background:var(--warn-soft); color:var(--warn-ink); }
+  .eng-kpis .kpi-tile.crit .kpi-icon{ background:var(--crit-soft); color:var(--crit-ink); }
+  .kpi-icon .icon{ width:18px; height:18px; }
+  .kpi-body{ min-width:0; }
 
   .eng-density-toggle{ display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; flex-shrink:0; }
   .eng-density-btn{ height:34px; width:34px; display:flex; align-items:center; justify-content:center; background:var(--surface-2); border:none; border-right:1px solid var(--line); color:var(--ink-soft); cursor:pointer; }
@@ -586,6 +658,12 @@
     position:sticky; top:0; z-index:2; padding:11px 13px; border-bottom:1px solid var(--line);
     background:var(--surface-2); flex-shrink:0;
   }
+  .eng-col-title{ display:flex; align-items:center; gap:7px; }
+  .eng-col-icon{
+    width:24px; height:24px; border-radius:7px; flex-shrink:0; display:flex; align-items:center;
+    justify-content:center; background:var(--accent-soft); color:var(--accent);
+  }
+  .eng-col-icon .icon{ width:14px; height:14px; }
   .eng-col-name{ font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink); }
   .eng-col-meta{ display:flex; align-items:center; gap:7px; margin-top:3px; font-size:11px; color:var(--ink-soft); }
   .eng-col-crit-badge{
@@ -603,22 +681,28 @@
   .eng-card:hover{ border-color:var(--accent); background:var(--surface-3); }
   .eng-card.critical{ border-left:3px solid var(--crit); }
   .eng-card.high{ border-left:3px solid var(--warn); }
-  .eng-card-img{
-    width:100%; aspect-ratio:16/10; background:var(--surface-3); display:flex;
-    align-items:center; justify-content:center; color:var(--ink-faint); flex-shrink:0;
+  .eng-card-top{ display:flex; align-items:center; gap:10px; padding:11px 13px 0; }
+  .eng-card-thumb{
+    width:44px; height:44px; border-radius:9px; background:var(--surface-3); display:flex;
+    align-items:center; justify-content:center; color:var(--ink-faint); flex-shrink:0; overflow:hidden;
   }
-  .eng-card-body{ padding:11px 13px 13px; display:flex; flex-direction:column; gap:5px; }
+  .eng-card-thumb.has-photo{ background-size:cover; background-position:center; color:transparent; }
+  .eng-card-thumb .icon{ width:20px; height:20px; }
+  .eng-card-heading{ min-width:0; }
+  .eng-card-body{ padding:8px 13px 13px; display:flex; flex-direction:column; gap:5px; }
   .eng-card-make{ font-size:12.5px; font-weight:700; letter-spacing:.02em; color:var(--ink); }
-  .eng-card-model{ font-size:11px; color:var(--ink-soft); margin-top:-3px; }
+  .eng-card-model{ font-size:11px; color:var(--ink-soft); margin-top:-1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   /* density modes */
-  .eng-board.density-compact .eng-card-img{ display:none; }
-  .eng-board.density-compact .eng-card-body{ padding:8px 11px 10px; gap:3px; }
+  .eng-board.density-compact .eng-card-thumb{ display:none; }
+  .eng-board.density-compact .eng-card-top{ padding-top:9px; }
+  .eng-board.density-compact .eng-card-body{ padding:6px 11px 9px; gap:3px; }
   .eng-board.density-compact .eng-col{ width:252px; flex-basis:252px; }
-  .eng-board.density-images .eng-card-img{ aspect-ratio:16/9; }
+  .eng-board.density-images .eng-card-thumb{ width:52px; height:52px; }
   .eng-card-source{ font-size:9.5px; font-weight:600; letter-spacing:.02em; padding:1px 6px; border-radius:20px; white-space:nowrap; }
   .eng-card-source.confirmed{ background:var(--good-soft); color:var(--good); }
   .eng-card-source.actual{ background:var(--accent-soft); color:var(--accent-ink); }
   .eng-card-source.planned{ background:var(--surface-3); color:var(--ink-soft); }
+  .eng-card-source.unconfirmed{ background:var(--warn-soft); color:var(--warn-ink); }
   .eng-card-next{ font-size:10.5px; color:var(--ink); background:var(--surface-3); border-radius:6px; padding:3px 7px; margin-top:2px; }
   .eng-card-next b{ font-weight:600; }
   .eng-card-next.none{ color:var(--ink-faint); font-style:italic; background:none; padding:0; }
@@ -651,25 +735,37 @@
   .eng-subtab.active{ background:var(--accent-soft); color:var(--accent-ink); }
   .eng-subtab .n{ font-family:"JetBrains Mono",monospace; font-size:10.5px; margin-left:4px; opacity:.8; }
   .eng-card-article{ font-size:10.5px; font-family:"JetBrains Mono",monospace; color:var(--ink-faint); }
-  .eng-card-stage-row{ display:flex; align-items:center; justify-content:space-between; gap:6px; }
-  .eng-card-stage{ font-size:10.5px; color:var(--ink-soft); }
-  .eng-card-stage b{ font-family:"JetBrains Mono",monospace; color:var(--ink); font-weight:700; }
-  .eng-card-stage.unknown{ color:var(--ink-faint); font-style:italic; }
+  .eng-card-stage-row{ display:flex; align-items:center; justify-content:space-between; gap:6px; min-height:17px; }
+  .eng-card-days{ display:inline-flex; align-items:center; gap:4px; font-size:10.5px; color:var(--ink-soft); white-space:nowrap; }
+  .eng-card-days .icon{ width:11px; height:11px; color:var(--ink-faint); }
+  .eng-card-days.unknown{ color:var(--ink-faint); font-style:italic; }
   .eng-card-engineer.none{ color:var(--ink-faint); font-style:italic; }
-  .eng-card-img.has-photo{ background-size:cover; background-position:center; }
   .eng-priority-pill.none{ background:var(--surface-3); color:var(--ink-faint); }
   .eng-priority-pill.none .dot{ background:transparent; border:1px solid var(--ink-faint); }
   .eng-card[draggable="true"]{ cursor:grab; }
   .eng-card.dragging{ opacity:.45; }
   .eng-col.drop-target{ border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
-  .eng-unconfirmed{ margin:12px 20px 0; border:1px dashed var(--line); border-radius:12px; background:var(--surface); }
-  .eng-unconfirmed-head{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; padding:9px 13px;
-    border-bottom:1px dashed var(--line); font-size:11.5px; color:var(--ink-soft); }
+  .eng-unconfirmed{ margin:12px 20px 0; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); box-shadow:var(--shadow); }
+  .eng-unconfirmed-head{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; padding:11px 14px;
+    border-bottom:1px solid var(--line); font-size:11.5px; color:var(--ink-soft); }
+  .eng-unconfirmed-head-title{ display:flex; align-items:center; gap:7px; }
+  .eng-unconfirmed-head-title .icon{ width:14px; height:14px; color:var(--warn); flex-shrink:0; }
   .eng-unconfirmed-head b{ color:var(--ink); text-transform:uppercase; letter-spacing:.04em; font-size:11.5px; }
-  .eng-unconfirmed-body{ display:flex; gap:10px; overflow-x:auto; padding:10px; }
-  .eng-unconfirmed-body .eng-card{ flex:0 0 230px; }
+  .eng-unconfirmed-body{ display:flex; flex-direction:column; gap:1px; padding:4px; }
   .eng-unconfirmed.collapsed .eng-unconfirmed-body{ display:none; }
-  .eng-suggest{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:4px; }
+  .eng-unconfirmed-card{
+    display:flex; align-items:center; gap:12px; padding:9px 10px; border-radius:9px; cursor:pointer;
+    transition:background .15s ease;
+  }
+  .eng-unconfirmed-card:hover{ background:var(--surface-2); }
+  .eng-unconfirmed-main{ min-width:160px; flex:1 1 200px; }
+  .eng-unconfirmed-title{ font-size:12.5px; font-weight:700; color:var(--ink); }
+  .eng-unconfirmed-product{ font-size:11px; color:var(--ink-soft); margin-top:1px; }
+  .eng-unconfirmed-meta{ display:flex; flex-direction:column; gap:2px; min-width:150px; flex:1 1 180px; }
+  .eng-unconfirmed-reason{ font-size:11px; color:var(--ink-faint); font-style:italic; }
+  @media (max-width:900px){
+    .eng-unconfirmed-card{ flex-wrap:wrap; }
+  }
   .eng-mini-btn{ font-size:10.5px; font-weight:600; padding:3px 8px; border-radius:6px; border:1px solid var(--line); background:none;
     color:var(--accent-ink); cursor:pointer; }
   .eng-mini-btn:hover{ border-color:var(--accent); }
@@ -747,8 +843,12 @@
   }
   @media (max-width:767px){
     .app-header{ height:auto; flex-wrap:wrap; padding:6px 14px; row-gap:5px; }
-    .brand{ min-width:0; }
+    .brand{ display:flex; min-width:0; }
+    .header-section-wrap{ display:none; }
     .header-clock{ min-width:0; }
+    .user-meta{ display:none; }
+    .messages-btn .messages-label, .messages-btn .icon#notifChevron{ display:none; }
+    .messages-btn{ padding:6px; }
     .integrations-panel{ grid-template-columns:1fr 1fr; }
     .integ-group{ padding:6px 14px; border-right:none; border-bottom:1px solid var(--line); }
     .actions-row{ padding:6px 14px; }
@@ -803,29 +903,49 @@
   <header class="app-header">
     <button type="button" class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Меню"><span class="icon" id="navIconMenu"></span></button>
     <div class="brand">
+      <span class="mark">Д</span>
       <span class="name">ДОСКА ПРОЕКТОВ</span>
-      <span class="sub">дерево задач</span>
     </div>
+    <div class="header-section-wrap" id="headerSectionWrap">
+      <button type="button" class="header-section-btn" id="headerSectionBtn" aria-haspopup="true" aria-expanded="false">
+        <span id="headerSectionLabel">Доска</span>
+        <span class="icon" id="headerSectionChevron"></span>
+      </button>
+      <div class="header-section-menu" id="headerSectionMenu"></div>
+    </div>
+    <div class="header-spacer"></div>
     <div class="notif-bell-wrap" id="notifBellWrap" style="display:none;">
-      <button type="button" class="notif-bell-btn" id="notifBellBtn" aria-haspopup="true" aria-expanded="false" title="Уведомления агента КО">
+      <button type="button" class="messages-btn" id="notifBellBtn" aria-haspopup="true" aria-expanded="false" title="Сообщения">
         <span class="icon" id="notifBellIcon"></span>
-        <span class="notif-badge" id="notifBadge" style="display:none;">0</span>
+        <span class="messages-label">Сообщения</span>
+        <span class="messages-badge" id="notifBadgeWrap" style="display:none;"><span id="notifBadge">0</span><span id="notifBadgeSuffix"></span></span>
+        <span class="icon" id="notifChevron"></span>
       </button>
       <div class="notif-panel" id="notifPanel">
-        <div class="notif-panel-head">
-          <span>Уведомления агента КО</span>
-          <button type="button" class="notif-panel-close" id="notifPanelCloseBtn" aria-label="Закрыть"><span class="icon" id="notifCloseIcon"></span></button>
-        </div>
         <div class="notif-panel-sub" id="notifPanelCounts"></div>
-        <div class="notif-panel-actions">
+        <div class="notif-panel-actions" id="notifPanelActions" style="display:none;">
           <button type="button" class="notif-mark-all-btn" id="notifMarkAllBtn">Отметить все как прочитанные</button>
         </div>
         <div class="notif-panel-list" id="notifPanelList"></div>
+        <a href="#" class="notif-panel-footer" id="notifOpenAllLink">Открыть все сообщения <span class="icon" id="notifOpenAllIcon"></span></a>
       </div>
     </div>
     <div class="header-clock">
       <div class="clock-time" id="clockTime">—:—:—</div>
       <div class="clock-date" id="clockDate">—</div>
+    </div>
+    <div class="user-chip-wrap" id="userChipWrap" style="display:none;">
+      <button type="button" class="user-chip" id="userChipBtn" aria-haspopup="true" aria-expanded="false">
+        <span class="user-avatar" id="userAvatar">—</span>
+        <span class="user-meta">
+          <span class="user-name" id="userNameLabel">—</span>
+          <span class="user-role" id="userRoleLabel">—</span>
+        </span>
+        <span class="icon" id="userChevron"></span>
+      </button>
+      <div class="user-menu" id="userMenu">
+        <button type="button" class="user-menu-item" id="userLogoutBtn">Выйти</button>
+      </div>
     </div>
   </header>
 
@@ -911,12 +1031,12 @@
 
   <div id="engBoardView">
     <div class="eng-kpis">
-      <div class="kpi-tile clickable" data-kpi="all"><div class="kpi-label">Всего проектов</div><div class="kpi-value" id="engKpiTotal">0</div></div>
-      <div class="kpi-tile clickable" data-kpi="active"><div class="kpi-label">В работе</div><div class="kpi-value" id="engKpiActive">0</div></div>
-      <div class="kpi-tile warn clickable" data-kpi="overdue"><div class="kpi-label">Просрочено</div><div class="kpi-value" id="engKpiOverdue">0</div></div>
-      <div class="kpi-tile clickable" data-kpi="noengineer"><div class="kpi-label">Без ответственного</div><div class="kpi-value" id="engKpiNoEngineer">0</div></div>
-      <div class="kpi-tile crit clickable" data-kpi="critical"><div class="kpi-label">Критические</div><div class="kpi-value" id="engKpiCrit">0</div></div>
-      <div class="kpi-tile"><div class="kpi-label">Среднее время на стадии</div><div class="kpi-value" id="engKpiAvgDays">—</div></div>
+      <div class="kpi-tile clickable" data-kpi="all"><span class="kpi-icon" id="kpiIconTotal"></span><div class="kpi-body"><div class="kpi-label">Всего проектов</div><div class="kpi-value" id="engKpiTotal">0</div></div></div>
+      <div class="kpi-tile clickable" data-kpi="active"><span class="kpi-icon" id="kpiIconActive"></span><div class="kpi-body"><div class="kpi-label">В работе</div><div class="kpi-value" id="engKpiActive">0</div></div></div>
+      <div class="kpi-tile warn clickable" data-kpi="overdue"><span class="kpi-icon" id="kpiIconOverdue"></span><div class="kpi-body"><div class="kpi-label">Просрочено</div><div class="kpi-value" id="engKpiOverdue">0</div></div></div>
+      <div class="kpi-tile clickable" data-kpi="noengineer"><span class="kpi-icon" id="kpiIconNoEngineer"></span><div class="kpi-body"><div class="kpi-label">Без ответственного</div><div class="kpi-value" id="engKpiNoEngineer">0</div></div></div>
+      <div class="kpi-tile crit clickable" data-kpi="critical"><span class="kpi-icon" id="kpiIconCrit"></span><div class="kpi-body"><div class="kpi-label">Критические</div><div class="kpi-value" id="engKpiCrit">0</div></div></div>
+      <div class="kpi-tile"><span class="kpi-icon" id="kpiIconAvgDays"></span><div class="kpi-body"><div class="kpi-label">Среднее время на стадии</div><div class="kpi-value" id="engKpiAvgDays">—</div></div></div>
     </div>
 
     <div class="eng-toolbar">
@@ -1162,7 +1282,17 @@
     "layout-grid": '<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>',
     table: '<path d="M3 3h18v18H3z"></path><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line><line x1="9" y1="3" x2="9" y2="21"></line>',
     "arrow-down-up": '<path d="m3 16 4 4 4-4"></path><path d="M7 20V4"></path><path d="m21 8-4-4-4 4"></path><path d="M17 4v16"></path>',
-    bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path>'
+    bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path>',
+    mail: '<rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect><path d="m22 6-10 7L2 6"></path>',
+    "chevron-down": '<polyline points="6 9 12 15 18 9"></polyline>',
+    flask: '<path d="M9 2v6.5L4.5 17a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L15 8.5V2"></path><path d="M9 2h6"></path><path d="M8.5 13h7"></path>',
+    ruler: '<path d="m3 17 14-14 4 4L7 21z"></path><path d="m14.5 6.5 2 2"></path><path d="m11.5 9.5 2 2"></path><path d="m8.5 12.5 2 2"></path><path d="m5.5 15.5 2 2"></path>',
+    "file-check": '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="m9 15 2 2 4-4"></path>',
+    play: '<polygon points="5 3 19 12 5 21 5 3"></polygon>',
+    user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle>',
+    "alert-triangle": '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>',
+    "bar-chart-2": '<line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line>',
+    car: '<path d="M19 17h2v-4.5a2 2 0 0 0-.4-1.2L18 7h-1.5l-1-2.5A2 2 0 0 0 13.6 3H8.4a2 2 0 0 0-1.9 1.5L5.5 7H4L1.4 11.3a2 2 0 0 0-.4 1.2V17h2"></path><circle cx="7" cy="17" r="2"></circle><circle cx="17" cy="17" r="2"></circle><path d="M9 17h6"></path><path d="M3 11h18"></path>'
   };
   function iconSvg(name, size, strokeW){
     var inner = LUCIDE[name] || "";
@@ -1170,8 +1300,17 @@
   }
   function setIcon(elId, name, size){ var el = document.getElementById(elId); if(el) el.innerHTML = iconSvg(name, size||16); }
 
-  setIcon("notifBellIcon","bell",15);
-  setIcon("notifCloseIcon","x",14);
+  setIcon("kpiIconTotal","layout-grid",17);
+  setIcon("kpiIconActive","play",16);
+  setIcon("kpiIconOverdue","clock",17);
+  setIcon("kpiIconNoEngineer","user",17);
+  setIcon("kpiIconCrit","alert-triangle",17);
+  setIcon("kpiIconAvgDays","bar-chart-2",17);
+  setIcon("notifBellIcon","mail",15);
+  setIcon("notifChevron","chevron-down",13);
+  setIcon("headerSectionChevron","chevron-down",13);
+  setIcon("userChevron","chevron-down",13);
+  setIcon("notifOpenAllIcon","arrow-right",13);
   setIcon("iconCalendar","calendar",12);
   setIcon("iconSend","send",12);
   setIcon("iconCheckBtn","send",13);
@@ -1620,6 +1759,10 @@
     scanning:"Сканирование", development:"Разработка", prototype:"Тестовый образец",
     measurement:"Замер", documentation:"Оформление"
   };
+  var ENG_STAGE_ICON = {
+    scanning:"search", development:"tool", prototype:"flask",
+    measurement:"ruler", documentation:"file-check"
+  };
   var ENG_PRIORITY_LABELS = { critical:"Критично", high:"Высокий", normal:"Средний", low:"Низкий", none:"Не указан" };
   var ENG_PRIORITY_ORDER = { critical:0, high:1, normal:2, low:3, none:4 };
   var ENG_ACTIVITY_LABELS = { scanning:"Сканирование", development:"Разработка", test_prototype:"Тестовый образец",
@@ -1837,14 +1980,14 @@
 
   function engStageLine(p){
     if(!p.stage){
-      return '<div class="eng-card-stage unknown">Этап не подтверждён' +
-        (p.planned_stage ? ' · по плану: '+escapeHtml(ENG_STAGE_LABELS[p.planned_stage] || p.planned_stage) : '') + '</div>';
+      return '<span class="eng-card-days unknown"><span class="icon">'+iconSvg("clock",12)+'</span>Этап не подтверждён' +
+        (p.planned_stage ? ' · по плану: '+escapeHtml(ENG_STAGE_LABELS[p.planned_stage] || p.planned_stage) : '') + '</span>';
     }
     if(p.days_in_stage === null || p.days_in_stage === undefined){
-      return '<div class="eng-card-stage unknown">Длительность неизвестна' +
-        (p.days_since_stage_detected != null ? ' · определён '+p.days_since_stage_detected+' '+ruDaysWord(p.days_since_stage_detected)+' назад' : '') + '</div>';
+      return '<span class="eng-card-days unknown"><span class="icon">'+iconSvg("clock",12)+'</span>Длительность неизвестна' +
+        (p.days_since_stage_detected != null ? ' · определён '+p.days_since_stage_detected+' '+ruDaysWord(p.days_since_stage_detected)+' назад' : '') + '</span>';
     }
-    return '<div class="eng-card-stage">На стадии: <b>'+p.days_in_stage+'</b> '+ruDaysWord(p.days_in_stage)+'</div>';
+    return '<span class="eng-card-days"><span class="icon">'+iconSvg("clock",12)+'</span>'+p.days_in_stage+' '+ruDaysWord(p.days_in_stage)+'</span>';
   }
 
   // Stage-source indicator: how the current (confirmed-on-board) stage was determined.
@@ -1872,32 +2015,63 @@
     return '<div class="eng-card-next">Далее: <b>'+escapeHtml(n.label)+'</b></div>';
   }
 
-  function engCardHtml(p, opts){
-    opts = opts || {};
+  // Vehicle thumbnail vs. engineering attachment (redesign spec §12.3): the project's own uploaded
+  // photo (an attachment - assembly/engineering photos, nothing to do with stock vehicle imagery)
+  // is shown when present, exactly as before. No vehicle-model catalog exists to source a separate
+  // "clean car photo" from, and none is scraped, hotlinked or generated here - when there is no
+  // attachment yet, the card shows a plain, compact car pictogram instead of guessing or leaving a
+  // large empty area.
+  function engCardThumbHtml(p){
+    var photo = (p.images || []).filter(function(i){ return i.is_primary; })[0] || (p.images || [])[0];
+    if(photo) return '<div class="eng-card-thumb has-photo" style="background-image:url(\''+encodeURI(photo.view_url||photo.url)+'\')"></div>';
+    return '<div class="eng-card-thumb"><span class="icon">'+iconSvg("car",18)+'</span></div>';
+  }
+  function engCardHtml(p){
     var overdue = engIsOverdue(p);
     var dueStr = formatDue(p.deadline);
-    var photo = (p.images || []).filter(function(i){ return i.is_primary; })[0] || (p.images || [])[0];
-    var img = photo
-      ? '<div class="eng-card-img has-photo" style="background-image:url(\''+encodeURI(photo.view_url||photo.url)+'\')"></div>'
-      : '';
     return (
       '<div class="eng-card '+p.prio+'" data-action="open-eng-project" data-id="'+p.id+'" draggable="'+(isViewer()?'false':'true')+'">' +
-        img +
+        '<div class="eng-card-top">' +
+          engCardThumbHtml(p) +
+          '<div class="eng-card-heading"><div class="eng-card-make">'+escapeHtml(p.make)+'</div><div class="eng-card-model">'+escapeHtml(p.model)+'</div></div>' +
+        '</div>' +
         '<div class="eng-card-body">' +
-          '<div class="eng-card-make">'+escapeHtml(p.make)+'</div>' +
-          '<div class="eng-card-model">'+escapeHtml(p.model)+'</div>' +
-          '<div class="eng-card-product">'+escapeHtml(p.product)+'</div>' +
-          (p.article_number ? '<div class="eng-card-article">арт. '+escapeHtml(p.article_number)+'</div>' : '') +
-          '<div class="eng-card-stage-row">'+engStageLine(p)+engStageSourceBadge(p)+'</div>' +
+          '<div class="eng-card-product">'+escapeHtml(p.product)+(p.article_number ? ' <span class="eng-card-article">· арт. '+escapeHtml(p.article_number)+'</span>' : '')+'</div>' +
+          '<div class="eng-card-stage-row">'+engStageSourceBadge(p)+'</div>' +
           engNextActionLine(p) +
+          '<div class="eng-card-foot">' +
+            '<span class="eng-priority-pill '+p.prio+'"><span class="dot"></span>'+ENG_PRIORITY_LABELS[p.prio]+'</span>' +
+            engStageLine(p) +
+          '</div>' +
           '<div class="eng-card-foot">' +
             (p.engineer ? '<span class="eng-card-engineer">'+escapeHtml(p.engineer)+'</span>'
                         : '<span class="eng-card-engineer none">Не назначен</span>') +
-            '<span class="eng-priority-pill '+p.prio+'"><span class="dot"></span>'+ENG_PRIORITY_LABELS[p.prio]+'</span>' +
           '</div>' +
           (dueStr ? '<div class="eng-card-due'+(overdue?' overdue':'')+'">'+(overdue?'просрочено, ':'')+escapeHtml(dueStr)+'</div>' : '') +
-          (opts.suggest && p.planned_stage ? '<div class="eng-suggest"><button type="button" class="eng-mini-btn" data-action="confirm-stage" data-id="'+p.id+'" data-stage="'+escapeHtml(p.planned_stage)+'">Подтвердить «'+escapeHtml(ENG_STAGE_LABELS[p.planned_stage]||p.planned_stage)+'»</button></div>' : '') +
         '</div>' +
+      '</div>'
+    );
+  }
+  // Compact horizontal card for "Этап не подтверждён" (redesign spec §10.2) - same project data
+  // and the same confirm-stage action as before, laid out as a single row instead of a vertical
+  // Kanban tile. The whole row opens the project; the confirm button stops that click from
+  // bubbling via the shared #engView delegated handler's own confirm-stage branch.
+  function engUnconfirmedCardHtml(p){
+    var reason = p.planned_stage ? ('По плану: '+escapeHtml(ENG_STAGE_LABELS[p.planned_stage]||p.planned_stage)) : "Следующий шаг требует уточнения";
+    return (
+      '<div class="eng-unconfirmed-card" data-action="open-eng-project" data-id="'+p.id+'">' +
+        engCardThumbHtml(p) +
+        '<div class="eng-unconfirmed-main">' +
+          '<div class="eng-unconfirmed-title">'+escapeHtml(p.make)+' '+escapeHtml(p.model)+'</div>' +
+          '<div class="eng-unconfirmed-product">'+escapeHtml(p.product)+'</div>' +
+        '</div>' +
+        '<div class="eng-unconfirmed-meta">' +
+          '<span class="eng-card-source unconfirmed">Этап не подтверждён</span>' +
+          '<span class="eng-unconfirmed-reason">'+reason+'</span>' +
+        '</div>' +
+        (p.engineer ? '<span class="eng-card-engineer">'+escapeHtml(p.engineer)+'</span>' : '<span class="eng-card-engineer none">Не назначен</span>') +
+        '<span class="eng-priority-pill '+p.prio+'"><span class="dot"></span>'+ENG_PRIORITY_LABELS[p.prio]+'</span>' +
+        (p.planned_stage ? '<button type="button" class="eng-mini-btn" data-action="confirm-stage" data-id="'+p.id+'" data-stage="'+escapeHtml(p.planned_stage)+'">Подтвердить «'+escapeHtml(ENG_STAGE_LABELS[p.planned_stage]||p.planned_stage)+'»</button>' : '') +
       '</div>'
     );
   }
@@ -1957,11 +2131,11 @@
       un.style.display = "";
       un.className = "eng-unconfirmed" + (engUnconfirmedCollapsed ? " collapsed" : "");
       un.innerHTML =
-        '<div class="eng-unconfirmed-head"><span><b>Этап не подтверждён</b> · '+unconfirmed.length+' '+ruProjectsWord(unconfirmed.length)+
+        '<div class="eng-unconfirmed-head"><span class="eng-unconfirmed-head-title"><span class="icon">'+iconSvg("alert-triangle",14)+'</span><b>Этап не подтверждён</b> · '+unconfirmed.length+' '+ruProjectsWord(unconfirmed.length)+
         ' · перетащите карточку в колонку или подтвердите предложенный этап</span><span style="display:flex;gap:6px;">' +
         (withSuggestion ? '<button type="button" class="eng-mini-btn" data-action="confirm-all-suggested">Подтвердить предложенные ('+withSuggestion+')</button>' : '') +
         '<button type="button" class="eng-mini-btn" data-action="toggle-unconfirmed">'+(engUnconfirmedCollapsed?'Показать':'Свернуть')+'</button></span></div>' +
-        '<div class="eng-unconfirmed-body">'+engSortProjects(unconfirmed).map(function(p){ return engCardHtml(p, { suggest:true }); }).join("")+'</div>';
+        '<div class="eng-unconfirmed-body">'+engSortProjects(unconfirmed).map(engUnconfirmedCardHtml).join("")+'</div>';
     } else {
       un.style.display = "none";
       un.innerHTML = "";
@@ -1990,7 +2164,7 @@
       return (
         '<div class="eng-col" data-stage="'+stage+'">' +
           '<div class="eng-col-head">' +
-            '<div class="eng-col-name">'+ENG_STAGE_LABELS[stage]+'</div>' +
+            '<div class="eng-col-title"><span class="eng-col-icon">'+iconSvg(ENG_STAGE_ICON[stage]||"circle",15)+'</span><span class="eng-col-name">'+ENG_STAGE_LABELS[stage]+'</span></div>' +
             '<div class="eng-col-meta"><span>'+inStage.length+' '+ruProjectsWord(inStage.length)+'</span>' +
               (critInStage ? '<span class="eng-col-crit-badge">'+critInStage+' крит.</span>' : '') +
             '</div>' +
@@ -3822,6 +3996,7 @@
     else if(tab === "eng") renderEngBoard();
     else if(tab === "users") renderUsersView();
     else { renderIntegrationsView(); renderTaskImport(); }
+    setHeaderSectionLabel();
   }
   document.getElementById("tabBoardBtn").addEventListener("click", function(){ setTab("board"); });
   document.getElementById("tabGlobalBtn").addEventListener("click", function(){ setTab("global"); });
@@ -4135,6 +4310,7 @@
       currentRole = (who && who.role) || "admin";
       currentCsrfToken = (who && who.csrf_token) || null;
       applyRoleGating();
+      renderUserChip(who);
     }).catch(function(){ currentRole = "admin"; currentCsrfToken = null; });
   }
 
@@ -4166,14 +4342,19 @@
   // nothing in it that could reset a scroll position or redraw a card.
   var notifState = { notifications: [], unread_count: 0, pending_count: 0 };
   var notifPanelOpen = false;
-  var NOTIF_STATUS_LABEL = { pending: "Ожидает", applied: "Принято", rejected: "Отклонено" };
+  var NOTIF_STATUS_LABEL = { pending: "Ожидает решения", applied: "Принято", rejected: "Отклонено" };
+  var NOTIF_STATUS_ICON = { pending: "clock", applied: "check-circle", rejected: "x" };
   function notifStatusOf(n){
     if(!n.resolved) return "pending";
     return n.resolution === "rejected" ? "rejected" : "applied";
   }
+  function ruNewWord(n){
+    var n10 = n % 10, n100 = n % 100;
+    return (n10 === 1 && n100 !== 11) ? "новое" : "новых";
+  }
   function notifPanelHtml(){
     if(!notifState.notifications.length){
-      return '<div class="notif-empty">Уведомлений нет.</div>';
+      return '<div class="notif-empty">Сообщений нет.</div>';
     }
     return notifState.notifications.map(function(n){
       var pl = n.payload || {};
@@ -4182,29 +4363,39 @@
       var project = koProjectLabel(pl);
       var when = fmtTz(n.created_at, "Asia/Yekaterinburg");
       return '<button type="button" class="notif-item'+(n.read?"":" unread")+'" data-action="open-notif" data-notif-id="'+escapeHtml(n.notification_id)+'" data-proposal-id="'+escapeHtml(n.id)+'">' +
-        '<div class="notif-item-row"><span class="notif-item-project">'+escapeHtml(project)+'</span><span class="notif-item-time">'+escapeHtml(when)+' ЕКБ</span></div>' +
-        '<div class="notif-item-kind">'+escapeHtml(kindLabel)+'</div>' +
-        '<div class="notif-item-summary">'+escapeHtml(pl.summary||"")+'</div>' +
-        '<span class="notif-item-status '+status+'">'+NOTIF_STATUS_LABEL[status]+'</span>' +
+        '<span class="notif-item-icon '+status+'"><span class="icon" data-notif-icon="'+status+'"></span></span>' +
+        '<span class="notif-item-body">' +
+          '<span class="notif-item-row"><span class="notif-item-line">'+escapeHtml(kindLabel)+': '+escapeHtml(project)+'</span><span class="notif-item-time">'+escapeHtml(when)+'</span></span>' +
+          '<span class="notif-item-sub '+status+'">'+escapeHtml(NOTIF_STATUS_LABEL[status])+(pl.summary ? ' · '+escapeHtml(pl.summary) : '')+'</span>' +
+        '</span>' +
       '</button>';
     }).join("");
   }
   function renderNotifBell(){
+    var badgeWrap = document.getElementById("notifBadgeWrap");
     var badge = document.getElementById("notifBadge");
+    var suffix = document.getElementById("notifBadgeSuffix");
     var bellBtn = document.getElementById("notifBellBtn");
     if(notifState.unread_count > 0){
-      badge.style.display = "";
+      badgeWrap.style.display = "";
       badge.textContent = notifState.unread_count > 99 ? "99+" : String(notifState.unread_count);
+      suffix.textContent = " "+ruNewWord(notifState.unread_count);
       bellBtn.classList.add("has-unread");
     } else {
-      badge.style.display = "none";
+      badgeWrap.style.display = "none";
       bellBtn.classList.remove("has-unread");
     }
     document.getElementById("notifPanelCounts").textContent =
       "Непрочитанных: "+notifState.unread_count+" · Ожидают решения: "+notifState.pending_count;
     var markAllBtn = document.getElementById("notifMarkAllBtn");
+    document.getElementById("notifPanelActions").style.display = notifState.unread_count === 0 ? "none" : "";
     markAllBtn.disabled = notifState.unread_count === 0;
-    if(notifPanelOpen) document.getElementById("notifPanelList").innerHTML = notifPanelHtml();
+    if(notifPanelOpen){
+      document.getElementById("notifPanelList").innerHTML = notifPanelHtml();
+      Array.prototype.forEach.call(document.querySelectorAll("[data-notif-icon]"), function(el){
+        el.innerHTML = iconSvg(NOTIF_STATUS_ICON[el.getAttribute("data-notif-icon")] || "mail", 14);
+      });
+    }
   }
   function loadKoNotifications(){
     if(currentRole !== "admin") return Promise.resolve();
@@ -4250,7 +4441,6 @@
     e.stopPropagation();
     if(notifPanelOpen) closeNotifPanel(); else openNotifPanel();
   });
-  document.getElementById("notifPanelCloseBtn").addEventListener("click", function(e){ e.stopPropagation(); closeNotifPanel(); });
   document.getElementById("notifMarkAllBtn").addEventListener("click", function(e){
     e.stopPropagation();
     apiFetch("/api/ko/notifications/read-all", { method: "POST", body: {} }).then(loadKoNotifications).catch(function(){});
@@ -4260,11 +4450,100 @@
     if(!btn) return;
     openKoNotification(btn.getAttribute("data-notif-id"), btn.getAttribute("data-proposal-id"));
   });
+  // "Открыть все сообщения" - the full, unmodified "Предложения агента КО" list (real data,
+  // nothing new to build: every message here already is a КО proposal).
+  document.getElementById("notifOpenAllLink").addEventListener("click", function(e){
+    e.preventDefault(); e.stopPropagation();
+    closeNotifPanel();
+    setTab("eng");
+    setEngSubview("ko");
+  });
   document.addEventListener("click", function(e){
     if(notifPanelOpen && !e.target.closest("#notifBellWrap")) closeNotifPanel();
   });
+  document.addEventListener("keydown", function(e){
+    if(e.key !== "Escape") return;
+    if(notifPanelOpen) closeNotifPanel();
+    closeHeaderSectionMenu();
+    closeUserMenu();
+  });
   var NOTIF_POLL_INTERVAL_MS = 20000;
   setInterval(loadKoNotifications, NOTIF_POLL_INTERVAL_MS);
+
+  // ---- header section breadcrumb (mirrors the sidebar's own tabs - no new navigation, just a
+  // second, closer-to-hand way to reach the same five real sections) ----
+  var HEADER_SECTIONS = [
+    { tab: "board", label: "Доска" },
+    { tab: "global", label: "Глобально" },
+    { tab: "eng", label: "Конструкторский отдел" },
+    { tab: "integrations", label: "Интеграции" },
+    { tab: "users", label: "Пользователи", adminOnly: true }
+  ];
+  var headerSectionMenuOpen = false;
+  function renderHeaderSectionMenu(){
+    document.getElementById("headerSectionMenu").innerHTML = HEADER_SECTIONS
+      .filter(function(s){ return !s.adminOnly || currentRole === "admin"; })
+      .filter(function(s){ return !isViewer() || s.tab === "eng"; })
+      .map(function(s){ return '<button type="button" class="header-section-item'+(s.tab===activeTab?" active":"")+'" data-tab="'+s.tab+'">'+s.label+'</button>'; }).join("");
+  }
+  function setHeaderSectionLabel(){
+    var cur = HEADER_SECTIONS.filter(function(s){ return s.tab === activeTab; })[0];
+    document.getElementById("headerSectionLabel").textContent = cur ? cur.label : "Доска";
+  }
+  function openHeaderSectionMenu(){
+    headerSectionMenuOpen = true;
+    renderHeaderSectionMenu();
+    document.getElementById("headerSectionMenu").classList.add("open");
+    document.getElementById("headerSectionBtn").setAttribute("aria-expanded", "true");
+  }
+  function closeHeaderSectionMenu(){
+    headerSectionMenuOpen = false;
+    document.getElementById("headerSectionMenu").classList.remove("open");
+    document.getElementById("headerSectionBtn").setAttribute("aria-expanded", "false");
+  }
+  document.getElementById("headerSectionBtn").addEventListener("click", function(e){
+    e.stopPropagation();
+    if(headerSectionMenuOpen) closeHeaderSectionMenu(); else openHeaderSectionMenu();
+  });
+  document.getElementById("headerSectionMenu").addEventListener("click", function(e){
+    var btn = e.target.closest("[data-tab]");
+    if(!btn) return;
+    closeHeaderSectionMenu();
+    setTab(btn.getAttribute("data-tab"));
+    setHeaderSectionLabel();
+  });
+  document.addEventListener("click", function(e){
+    if(headerSectionMenuOpen && !e.target.closest("#headerSectionWrap")) closeHeaderSectionMenu();
+  });
+
+  // ---- user profile chip (real session identity from /api/whoami - never a placeholder name) ----
+  var userMenuOpen = false;
+  function openUserMenu(){ userMenuOpen = true; document.getElementById("userMenu").classList.add("open"); document.getElementById("userChipBtn").setAttribute("aria-expanded","true"); }
+  function closeUserMenu(){ userMenuOpen = false; document.getElementById("userMenu").classList.remove("open"); document.getElementById("userChipBtn").setAttribute("aria-expanded","false"); }
+  document.getElementById("userChipBtn").addEventListener("click", function(e){
+    e.stopPropagation();
+    if(userMenuOpen) closeUserMenu(); else openUserMenu();
+  });
+  document.addEventListener("click", function(e){
+    if(userMenuOpen && !e.target.closest("#userChipWrap")) closeUserMenu();
+  });
+  document.getElementById("userLogoutBtn").addEventListener("click", function(){
+    apiFetch("/api/logout", { method: "POST", body: {} }).catch(function(){}).then(function(){ location.href = "/login.html"; });
+  });
+  function avatarInitials(name){
+    var parts = String(name||"").trim().split(/\s+/).filter(Boolean);
+    if(!parts.length) return "?";
+    return parts.length === 1 ? parts[0].slice(0,2).toUpperCase() : (parts[0][0]+parts[1][0]).toUpperCase();
+  }
+  function renderUserChip(who){
+    var wrap = document.getElementById("userChipWrap");
+    if(!who || !who.auth_required || !who.authenticated){ wrap.style.display = "none"; return; }
+    var displayName = who.full_name || who.username || "";
+    wrap.style.display = "";
+    document.getElementById("userAvatar").textContent = avatarInitials(displayName);
+    document.getElementById("userNameLabel").textContent = displayName;
+    document.getElementById("userRoleLabel").textContent = ROLE_LABELS[who.role] || who.role || "";
+  }
 
   document.getElementById("refreshBtn").addEventListener("click", function(){
     var syncEl = document.getElementById("syncStatus");
