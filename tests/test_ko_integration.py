@@ -549,7 +549,9 @@ def test_create_project_from_proposal_requires_fields_dedupes_and_is_not_double_
     # the proposal itself is now resolved, with the created project's id recorded as the result
     resolved = [x for x in s.get(srv.url + "/api/ko/proposals?status=all", timeout=10).json()["proposals"] if x["id"] == proposal_id][0]
     assert resolved["resolved"] and resolved["resolution"] == "applied"
-    assert resolved["payload"]["decision"]["result"] == {"project_id": project_id, "created": True}
+    result = resolved["payload"]["decision"]["result"]
+    assert result["project_id"] == project_id and result["created"] is True
+    assert result["photos"] == {"attached": [], "unavailable": []}, "no photos on this proposal - nothing to attach"
 
     # a second click on the same (now resolved) proposal must not create a second project
     again = s.post(url, json=fields, timeout=10)
@@ -757,6 +759,204 @@ def test_check6_created_project_lands_in_the_correct_kanban_section(env):
     # this is exactly the predicate public/index.html's loadEngProjects() uses for the Kanban's
     # "Активные проекты": record_category === "main_project" && !is_completed
     assert taishan["record_category"] == "main_project" and not taishan.get("is_completed")
+
+
+# ------------------------------------------------------------------ photo attachment (Lada Azimut
+# арт. 6029 incident)
+#
+# Root cause, confirmed by reading the code (no access to any live Railway data): apply()'s own
+# `photo_link` branch (server/ko/proposals.js) already attached a proposal's photos correctly for
+# an EXISTING, already-resolved project - but createProjectFromProposal() (added for needs_
+# clarification/project_match proposals about a vehicle with no project yet, e.g. Lada Azimut
+# арт. 6029/TAISHAN/HGH) never looked at payload.photos at all: it created the project and a text
+# comment citing the evidence, and simply never called attachProjectFile. The Telegram originals
+# were never lost - they stayed in the КО archive (server/ko/archive.js, ko_files/KO_FILES_DIR,
+# the same persistent DATA_DIR volume as everything else) - the project's own `project_files` row
+# was just never created. attachProposalPhotos() is the fix, shared by project creation and the
+# new manual attach-photos action below.
+
+
+def _submit_with_photos(srv, make, model, article, mid, text, photo_file_ids, extra=None):
+    """The message at `mid` (with `text` as its caption, carrying at least the first photo) must
+    already be archived by the caller via hook() before this runs - evidence quotes must match what
+    was actually archived, exactly like every other proposal submission in this file."""
+    p = {"kind": "needs_clarification", "project_ref": {"manufacturer": make, "vehicle_model": model,
+         "product_type": "Защита картера", "article_number": article},
+         "summary": text, "rationale": "новая модель, проекта пока нет в системе", "confidence": "low",
+         "evidence": [ev(mid, text)], "photos": [{"file_id": fid, "observation": "фото"} for fid in photo_file_ids]}
+    if extra:
+        p.update(extra)
+    return submit(srv, [p]).json()["results"][0]["id"]
+
+
+def test_photo_multi_photo_proposal_and_project_creation_attaches_them(env):
+    """The exact reported incident: a proposal with two photos, a project created from it, the
+    photos must land on the project's own Фото tab (its `images`), not just stay visible inside
+    the proposal panel."""
+    srv = env()
+    hook(srv, msg(1300, caption="Lada Azimut, защита картера, арт. 6029, фото выше", photo="p1"))
+    hook(srv, msg(1301, caption="защита картера 6029, другой ракурс", photo="p2"))
+    photo_ids = [m["photos"][0]["file_id"] for m in messages(srv)["messages"][:2]]
+    proposal_id = _submit_with_photos(srv, "Lada", "Azimut", "6029", 1300, "Lada Azimut, защита картера, арт. 6029, фото выше", photo_ids)
+
+    s = session(srv)
+    fields = {"manufacturer": "Lada", "vehicle_model": "Azimut", "product_type": "Защита картера", "article_number": "6029", "status": "scanning"}
+    cr = s.post(srv.url + f"/api/ko/proposals/{proposal_id}/create-project", json=fields, timeout=10)
+    assert cr.status_code == 201, cr.text
+    project_id = cr.json()["result"]["project_id"]
+    assert len(cr.json()["result"]["photos"]["attached"]) == 2
+    assert cr.json()["result"]["photos"]["unavailable"] == []
+
+    created = project(srv, s, project_id)
+    assert len(created["images"]) == 2, "both photos must be on the created project's own Фото tab"
+
+    resolved = [x for x in s.get(srv.url + "/api/ko/proposals?status=all", timeout=10).json()["proposals"] if x["id"] == proposal_id][0]
+    assert all(ps["status"] == "attached" and ps["project_id"] == project_id for ps in resolved["payload"]["photo_status"])
+
+
+def test_photo_manual_attach_to_an_existing_project_and_no_duplicate_on_repeat(env):
+    srv = env()
+    hook(srv, msg(1310, caption="Ещё фото буксировочного", photo="p1"))
+    photo_id = messages(srv)["messages"][0]["photos"][0]["file_id"]
+    tow = find_project(srv, "HAVAL", "Буксировочное устройство")
+    proposal_id = _submit_with_photos(srv, "HAVAL", "Jolion", None, 1310, "Ещё фото буксировочного", [photo_id])
+    s = session(srv)
+
+    r1 = s.post(srv.url + f"/api/ko/proposals/{proposal_id}/attach-photos", json={"project_id": tow["id"]}, timeout=10)
+    assert r1.status_code == 200, r1.text
+    assert len(r1.json()["photos"]["attached"]) == 1
+    after1 = project(srv, s, tow["id"])
+    assert len([i for i in after1["images"] if i.get("telegram_message_id") == "1310"]) == 1
+
+    # repeat the exact same action - no duplicate (attachProjectFile's own (chat,message) dedupe)
+    r2 = s.post(srv.url + f"/api/ko/proposals/{proposal_id}/attach-photos", json={"project_id": tow["id"]}, timeout=10)
+    assert r2.status_code == 200
+    assert r2.json()["photos"]["attached"][0]["duplicate"] is True
+    after2 = project(srv, s, tow["id"])
+    assert len([i for i in after2["images"] if i.get("telegram_message_id") == "1310"]) == 1
+
+
+def test_photo_status_and_backlog_survive_a_server_restart(env):
+    srv = env()
+    hook(srv, msg(1320, caption="Lada Vesta, арт. 6030", photo="p2"))
+    photo_id = messages(srv)["messages"][0]["photos"][0]["file_id"]
+    proposal_id = _submit_with_photos(srv, "Lada", "Vesta", "6030", 1320, "Lada Vesta, арт. 6030", [photo_id])
+    s = session(srv)
+    fields = {"manufacturer": "Lada", "vehicle_model": "Vesta", "product_type": "Защита картера", "article_number": "6030", "status": "scanning"}
+    cr = s.post(srv.url + f"/api/ko/proposals/{proposal_id}/create-project", json=fields, timeout=10)
+    project_id = cr.json()["result"]["project_id"]
+
+    srv.restart()
+    s2 = session(srv)
+    created = project(srv, s2, project_id)
+    assert len(created["images"]) == 1
+    resolved = [x for x in s2.get(srv.url + "/api/ko/proposals?status=all", timeout=10).json()["proposals"] if x["id"] == proposal_id][0]
+    assert resolved["payload"]["photo_status"][0]["status"] == "attached"
+    backlog = s2.get(srv.url + "/api/ko/photo-backlog", timeout=10).json()
+    assert proposal_id in {r["proposal_id"] for r in backlog["fully_attached"]}
+
+
+def test_photo_missing_original_is_reported_not_fatal(env):
+    """A proposal can only ever be submitted referencing a photo that *was* successfully archived
+    (checkPhotos in server/ko/proposals.js already refuses submission otherwise) - the realistic
+    way an original later becomes unavailable is the underlying file disappearing from
+    KO_FILES_DIR after the fact (a volume issue, manual cleanup), while its ko_files metadata still
+    says "stored". Simulated here by deleting the archive's file bytes directly on disk - никогда
+    не предполагать наличие оригинала по одной лишь миниатюре/метаданным, must not block project
+    creation - it must be reported, per критическое требование "при отсутствии оригинала явно
+    указывать, что он недоступен"."""
+    import shutil
+    srv = env()
+    hook(srv, msg(1330, caption="Lada Largus, арт. 6031", photo="p1"))
+    photo_id = messages(srv)["messages"][0]["photos"][0]["file_id"]
+    proposal_id = _submit_with_photos(srv, "Lada", "Largus", "6031", 1330, "Lada Largus, арт. 6031", [photo_id])
+    shutil.rmtree(srv.data_dir / "ko-files", ignore_errors=True)  # the original disappears from disk
+    s = session(srv)
+    fields = {"manufacturer": "Lada", "vehicle_model": "Largus", "product_type": "Защита картера", "article_number": "6031", "status": "scanning"}
+    cr = s.post(srv.url + f"/api/ko/proposals/{proposal_id}/create-project", json=fields, timeout=10)
+    assert cr.status_code == 201, cr.text
+    assert cr.json()["result"]["photos"]["attached"] == []
+    assert len(cr.json()["result"]["photos"]["unavailable"]) == 1
+
+    project_id = cr.json()["result"]["project_id"]
+    created = project(srv, s, project_id)
+    assert created["images"] == [], "no project is created with a fake/placeholder image"
+
+    resolved = [x for x in s.get(srv.url + "/api/ko/proposals?status=all", timeout=10).json()["proposals"] if x["id"] == proposal_id][0]
+    assert resolved["payload"]["photo_status"][0]["status"] == "unavailable"
+    backlog = s.get(srv.url + "/api/ko/photo-backlog", timeout=10).json()
+    assert proposal_id in {r["proposal_id"] for r in backlog["unavailable"]}
+
+
+def test_photo_ambiguous_match_is_never_auto_attached_backlog_flags_it(env):
+    """Two projects share "HAVAL"+"Jolion" in the demo seed (защита радиатора vs буксировочное
+    устройство) - a proposal referencing only make+model, no article/product match, must not
+    auto-attach to either; it stays "pending_no_project" until a person picks one explicitly."""
+    srv = env()
+    hook(srv, msg(1340, caption="Jolion, неясно какое изделие", photo="p1"))
+    photo_id = messages(srv)["messages"][0]["photos"][0]["file_id"]
+    proposal_id = _submit_with_photos(srv, "HAVAL", "Jolion", None, 1340, "Jolion, неясно какое изделие", [photo_id])
+    s = session(srv)
+    resolved = [x for x in s.get(srv.url + "/api/ko/proposals?status=all", timeout=10).json()["proposals"] if x["id"] == proposal_id][0]
+    assert resolved["payload"]["resolved_project_id"] is None, "ambiguous match must not resolve to either project automatically"
+    assert resolved["payload"]["photo_status"][0]["status"] == "pending_no_project"
+    backlog = s.get(srv.url + "/api/ko/photo-backlog", timeout=10).json()
+    assert proposal_id in {r["proposal_id"] for r in backlog["no_project_yet"]}
+
+    # the explicit manual action still works, picking one of the two ambiguous candidates
+    jolion_radiator = find_project(srv, "HAVAL", "Защита радиатора")
+    r = s.post(srv.url + f"/api/ko/proposals/{proposal_id}/attach-photos", json={"project_id": jolion_radiator["id"]}, timeout=10)
+    assert r.status_code == 200
+    assert len(r.json()["photos"]["attached"]) == 1
+
+
+def test_photo_role_access_matches_the_rest_of_the_ko_router(env):
+    srv = env()
+    hook(srv, msg(1350, caption="Lada XRAY, арт. 6032", photo="p1"))
+    photo_id = messages(srv)["messages"][0]["photos"][0]["file_id"]
+    proposal_id = _submit_with_photos(srv, "Lada", "XRAY", "6032", 1350, "Lada XRAY, арт. 6032", [photo_id])
+    admin = session(srv)
+    created = admin.post(srv.url + "/api/users", json={"full_name": "Просмотр", "username": "viewer_photo"}, timeout=10)
+    manager = requests.Session()
+    manager.post(srv.url + "/api/login", json={"username": "viewer_photo", "password": created.json()["generated_password"]}, timeout=10)
+
+    tow = find_project(srv, "HAVAL", "Буксировочное устройство")
+    assert manager.post(srv.url + f"/api/ko/proposals/{proposal_id}/attach-photos", json={"project_id": tow["id"]}, timeout=10).status_code == 403
+    assert manager.get(srv.url + "/api/ko/photo-backlog", timeout=10).status_code == 403
+    assert manager.get(srv.url + "/api/ko/proposals?status=all", timeout=10).status_code == 403
+    # admin keeps full access
+    assert admin.get(srv.url + "/api/ko/photo-backlog", timeout=10).status_code == 200
+
+
+def test_photo_backlog_report_names_lada_azimut_taishan_and_hgh_without_touching_anything(env):
+    """Simulates the exact three cases named in the incident report (Lada Azimut арт. 6029, TAISHAN,
+    HGH) as disposable local test data - never real Railway projects - and confirms the read-only
+    report alone identifies each one's actual state without creating or attaching anything itself."""
+    srv = env()
+    hook(srv, msg(1360, caption="Lada Azimut арт. 6029", photo="p1"))
+    azimut_photo = messages(srv)["messages"][0]["photos"][0]["file_id"]
+    azimut_id = _submit_with_photos(srv, "Lada", "Azimut", "6029", 1360, "Lada Azimut арт. 6029", [azimut_photo])
+    taishan_id = _submit_unmatched(srv, "TAISHAN", "X", 1361, "TAISHAN на сканировании")
+    hgh_id = _submit_unmatched(srv, "HGH", "Y", 1362, "HGH на сканировании")
+    s = session(srv)
+
+    before_projects = len(s.get(srv.url + "/api/projects", timeout=10).json())
+    report = s.get(srv.url + "/api/ko/photo-backlog", timeout=10).json()
+    after_projects = len(s.get(srv.url + "/api/projects", timeout=10).json())
+    assert after_projects == before_projects, "the report itself must never create or change a project"
+
+    rows_by_id = {r["proposal_id"]: r for r in report["rows"]}
+    assert azimut_id in rows_by_id and rows_by_id[azimut_id]["photos"][0]["status"] == "pending_no_project"
+    assert taishan_id not in rows_by_id and hgh_id not in rows_by_id, "no photos on these two - not part of the photo backlog at all"
+
+    # now create Azimut's project from its own proposal (not a new/duplicate one) and attach
+    fields = {"manufacturer": "Lada", "vehicle_model": "Azimut", "product_type": "Защита картера", "article_number": "6029", "status": "scanning"}
+    cr = s.post(srv.url + f"/api/ko/proposals/{azimut_id}/create-project", json=fields, timeout=10)
+    assert cr.status_code == 201
+    assert len(cr.json()["result"]["photos"]["attached"]) == 1
+    report2 = s.get(srv.url + "/api/ko/photo-backlog", timeout=10).json()
+    assert azimut_id in {r["proposal_id"] for r in report2["fully_attached"]}
+    assert len([p for p in s.get(srv.url + "/api/projects", timeout=10).json() if p["manufacturer"] == "Lada" and p["vehicle_model"] == "Azimut"]) == 1
 
 
 # ------------------------------------------------------------------ message types (archive v2)

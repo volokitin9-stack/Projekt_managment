@@ -71,4 +71,18 @@ router.post("/proposals/:id/reject", dashboardAuth.requireCsrfToken, (req, res) 
   res.status(r.status).json(r.body);
 });
 
+// Manual photo attach: fixes the case automatic matching correctly refuses (ambiguous identity) or
+// this phase's own bug left unattached - works on a proposal in any state, see
+// server/ko/proposals.js#attachPhotosToProject.
+router.post("/proposals/:id/attach-photos", dashboardAuth.requireCsrfToken, (req, res) => {
+  const r = proposals.attachPhotosToProject(req.params.id, { actor: actorOf(req), projectId: (req.body || {}).project_id || null });
+  res.status(r.status).json(r.body);
+});
+
+// Read-only diagnostic (критическое требование: "не выполнять массовую автоматическую привязку
+// без предварительного отчёта") - never attaches or creates anything itself.
+router.get("/photo-backlog", (req, res) => {
+  res.json(proposals.photoBacklogReport());
+});
+
 module.exports = router;

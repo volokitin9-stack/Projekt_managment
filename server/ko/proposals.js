@@ -162,8 +162,51 @@ function submit(list) {
   return { status: counts.created ? 201 : 200, body: { results, counts } };
 }
 
+/** Which project (if any) a proposal's photos are meant for right now - resolved_project_id for a
+ *  kind that needed one at submit time, or the project a *later* "Создать проект" action made
+ *  (critическое требование: photos follow the same project link the text/evidence already do). */
+function photoTargetProjectId(p) {
+  return p.resolved_project_id ||
+    (p.project_created_later && p.project_created_later.result && p.project_created_later.result.project_id) ||
+    (p.decision && p.decision.result && p.decision.result.project_id) || null;
+}
+
+/** Критическое требование: "во вкладке предложения показывать статус: привязаны / ожидают
+ *  привязки / оригинал недоступен" - computed fresh on every read (never cached, never guessed
+ *  from the miniature alone) by checking the actual archive file status and the actual project's
+ *  attached files, not anything stored at submit time. Returns null when the proposal has no
+ *  photos at all. */
+function photoStatus(item) {
+  const p = item.payload || {};
+  if (!Array.isArray(p.photos) || !p.photos.length) return null;
+  const projectId = photoTargetProjectId(p);
+  const attachedKeys = projectId
+    ? new Set(store.read((s) => s.project_files.filter((f) => f.project_id === projectId))
+        .map((f) => `${f.telegram_chat_id}:${f.telegram_message_id}`))
+    : new Set();
+  return p.photos.map((ph) => {
+    const meta = ph.file_id ? archive.getFileMeta(ph.file_id) : null;
+    // Критическое требование: "не предполагать наличие оригиналов по одной лишь миниатюре" -
+    // meta.status alone only says a download once succeeded; archive.readFile() is the one
+    // function that actually re-opens the bytes on disk (server/ko/archive.js's filePath() calls
+    // fs.existsSync), which is the only way to know the original is still really there.
+    const available = !!(meta && meta.status === "stored" && archive.readFile(ph.file_id));
+    const key = meta ? `${meta.chat_id}:${meta.message_id}` : null;
+    const attached = !!(projectId && key && attachedKeys.has(key));
+    let status;
+    if (attached) status = "attached";
+    else if (!available) status = "unavailable";
+    else if (!projectId) status = "pending_no_project";
+    else status = "pending_unattached";
+    return { file_id: ph.file_id, status, project_id: attached ? projectId : null };
+  });
+}
+
 function list({ status = "open" } = {}) {
-  const all = reviewQueue.list({ kind: KIND, includeResolved: status !== "open" });
+  const all = reviewQueue.list({ kind: KIND, includeResolved: status !== "open" }).map((r) => {
+    const ps = photoStatus(r);
+    return ps ? Object.assign({}, r, { payload: Object.assign({}, r.payload, { photo_status: ps }) }) : r;
+  });
   if (status === "resolved") return all.filter((r) => r.resolved);
   return all;
 }
@@ -294,6 +337,45 @@ function apply(id, { actor, version = null } = {}) {
   return { status: 200, body: { id, applied: true, result } };
 }
 
+/**
+ * Attach every photo in a proposal's own `photos[]` to a project - the identical
+ * validate/store/dedupe path a manual photo upload or the `photo_link` kind already use
+ * (storage.validateFile + projectsModel.attachProjectFile, which already dedupes per-project by
+ * (telegram_chat_id, telegram_message_id), so calling this twice for the same message never
+ * creates a second copy). Never deletes, downloads twice, or otherwise modifies the archived
+ * Telegram original (server/ko/archive.js) - read-only towards it, exactly like `photo_link`.
+ *
+ * Unlike the `photo_link` kind in apply() below (left untouched - критическое требование
+ * "сохранить работающую логику предложения photo_link"), this never aborts partway: a missing or
+ * rejected original is recorded in `unavailable` and the rest of the photos still get attached
+ * (критическое требование: "при отсутствии оригинала явно указывать, что он недоступен", not fail
+ * the whole operation over one bad file) - used by project creation and the manual re-attach
+ * action below, neither of which has an existing all-or-nothing contract to preserve.
+ */
+function attachProposalPhotos(projectId, photos, { actor, caption } = {}) {
+  const path = require("path");
+  const attached = [];
+  const unavailable = [];
+  (photos || []).forEach((ph) => {
+    const meta = ph.file_id ? archive.getFileMeta(ph.file_id) : null;
+    if (!meta || meta.status !== "stored") {
+      unavailable.push({ file_id: ph.file_id || null, reason: meta ? (meta.error || `статус: ${meta.status}`) : "не найден в архиве КО" });
+      return;
+    }
+    const f = archive.readFile(ph.file_id);
+    if (!f) { unavailable.push({ file_id: ph.file_id, reason: "файл отсутствует на диске" }); return; }
+    const file = { buffer: f.buffer, originalname: `telegram-${f.meta.message_id}${path.extname(f.meta.storage_key)}`,
+      mimetype: f.meta.mime_type, size: f.buffer.length };
+    const check = storage.validateFile(file);
+    if (!check.ok) { unavailable.push({ file_id: ph.file_id, reason: check.error }); return; }
+    const r = projectsModel.attachProjectFile(projectId, file, { source: "telegram", uploadedBy: actor,
+      caption: ph.observation || caption || null, telegramMessageId: f.meta.message_id, telegramChatId: f.meta.chat_id,
+      telegramRef: rules.link(f.meta.chat_id, f.meta.message_id) });
+    attached.push({ file_id: ph.file_id, project_file_id: r.id, duplicate: !!r.duplicate });
+  });
+  return { attached, unavailable };
+}
+
 // Критическое требование: "Не превращать любое needs_clarification или project_match
 // автоматически в новый проект" - apply() above never creates a project for any kind; this is a
 // separate, explicit action a person must deliberately choose, with its own validated field set
@@ -354,7 +436,13 @@ function createProjectFromProposal(id, { actor, fields = {} } = {}) {
     { proposal_id: id, kind: p.kind, created: true, late: isLate, links: (p.evidence || []).map((e) => e.link) });
   projectsModel.safeUpdate(project.id, { comments: [{ id: require("uuid").v4(), text: note, source: "manual", author: actor,
     at: nowIso(), ko_proposal_id: id }] }, { source: "manual", actor });
-  const result = { project_id: project.id, created: true };
+  // Критическое требование: the bug this phase fixes - a proposal's own evidence photos were
+  // never attached to a project created from it (createProjectFromProposal had no photo handling
+  // at all before this). Reuses the exact same attach path photo_link already uses for an existing
+  // project; a missing original is reported, never silently dropped and never failing the creation
+  // that already succeeded.
+  const photos = attachProposalPhotos(project.id, p.photos, { actor, caption: p.summary });
+  const result = { project_id: project.id, created: true, photos };
   const ok = isLate ? recordLaterProjectCreation(id, actor, result) : close(id, "applied", actor, result);
   if (!ok) return fail(409, "Предложение изменилось параллельно — обновите страницу и повторите");
   return { status: 201, body: { id, applied: true, result, late: isLate } };
@@ -368,4 +456,69 @@ function reject(id, { actor, reason = null } = {}) {
   return { status: 200, body: { id, rejected: true } };
 }
 
-module.exports = { submit, list, apply, reject, createProjectFromProposal, resolveProject, KIND, SOURCE, MAX_BATCH };
+/**
+ * Критическое требование: "предусмотреть ручную привязку фотографии из предложения к конкретному
+ * проекту" - works on a proposal in ANY state (open, acknowledged, applied, rejected: the photos
+ * are evidence from a real Telegram message, independent of whatever the proposal's own decision
+ * track is) and for ANY project the person picks, no auto-matching involved - this is the explicit
+ * override for exactly the cases automatic matching won't touch (ambiguous identity, or a photo
+ * this phase's bug left stranded on an already-created project). Never touches
+ * resolved/resolved_at/resolution/decision. Reuses attachProposalPhotos, so re-running this for a
+ * project that already has these photos attaches nothing new (dedup is per (chat_id, message_id)
+ * on the target project, not per call).
+ */
+function attachPhotosToProject(id, { actor, projectId } = {}) {
+  const item = getItem(id);
+  if (!item) return fail(404, "Предложение не найдено");
+  const p = item.payload || {};
+  if (!Array.isArray(p.photos) || !p.photos.length) return fail(400, "У предложения нет фотографий");
+  if (!projectId) return fail(400, '"project_id" обязателен');
+  if (!projectsModel.getProjectRow(String(projectId))) return fail(404, "Проект не найден");
+  const photos = attachProposalPhotos(projectId, p.photos, { actor, caption: p.summary });
+  projectsModel.recordActivity(projectId, "ko_proposal_applied", "manual", actor, null,
+    { proposal_id: id, kind: p.kind, manual_photo_attach: true, links: (p.evidence || []).map((e) => e.link) });
+  store.tx((s) => {
+    const r = s.review_queue.find((x) => x.id === String(id) && x.kind === KIND);
+    if (!r) return;
+    const prior = (r.payload.photo_attachments || []).filter((a) => a.project_id !== projectId);
+    r.payload = Object.assign({}, r.payload, { photo_attachments: prior.concat([{ project_id: projectId, by: actor, at: nowIso(), photos }]) });
+  });
+  return { status: 200, body: { id, project_id: projectId, photos } };
+}
+
+/**
+ * Критическое требование: "не выполнять массовую автоматическую привязку без предварительного
+ * отчёта" - read-only, changes nothing. Scans every resolved ko_proposal with photos and reports,
+ * per proposal, whether its photos are already attached to their linked project, could be attached
+ * right now (project known, originals available, just never run - this phase's bug), blocked by a
+ * missing original, or have no project linked at all yet. An administrator reviews this and then
+ * uses apply()/createProjectFromProposal() (if still open) or attachPhotosToProject() (if already
+ * resolved) per proposal - never a bulk auto-apply from this report itself.
+ */
+function photoBacklogReport() {
+  const items = reviewQueue.list({ kind: KIND, includeResolved: true }).filter((r) => (r.payload.photos || []).length);
+  const rows = items.map((r) => {
+    const ps = photoStatus(r);
+    const projectId = photoTargetProjectId(r.payload);
+    const project = projectId ? projectsModel.getProject(projectId) : null;
+    return {
+      proposal_id: r.id, kind: r.payload.kind, summary: r.payload.summary, resolved: r.resolved, resolution: r.resolution || null,
+      project_id: projectId, project_label: project ? [project.manufacturer, project.vehicle_model, project.product_type].filter(Boolean).join(" ") : null,
+      article_number: (r.payload.project_ref || {}).article_number || (project || {}).article_number || null,
+      photos: ps
+    };
+  });
+  const bucket = (pred) => rows.filter((r) => r.photos && r.photos.some(pred));
+  return {
+    generated_at: nowIso(),
+    total_proposals_with_photos: rows.length,
+    ready_to_attach: bucket((x) => x.status === "pending_unattached"),
+    unavailable: bucket((x) => x.status === "unavailable"),
+    no_project_yet: bucket((x) => x.status === "pending_no_project"),
+    fully_attached: rows.filter((r) => r.photos && r.photos.every((x) => x.status === "attached")),
+    rows
+  };
+}
+
+module.exports = { submit, list, apply, reject, createProjectFromProposal, attachPhotosToProject, photoBacklogReport,
+  resolveProject, KIND, SOURCE, MAX_BATCH };
