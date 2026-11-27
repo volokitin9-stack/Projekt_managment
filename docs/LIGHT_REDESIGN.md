@@ -268,10 +268,10 @@ projects and all 4 tabs, zero edit controls in the DOM (`#engEditStage`/`#engNew
 `#engUploadFile` all absent), the messages bell hidden and `/api/ko/notifications` returning 403 for
 the role directly (not just a hidden button), and no export/download affordance anywhere that a
 viewer could reach without the same server-side role check already covering every other mutation
-route. One latent, out-of-scope, pre-existing item was flagged, not fixed (unchanged on this branch,
-unreachable through the UI): `GET /api/projects/:id/history` returns unredacted history to any
-authenticated role, unlike the main `/:id` endpoint, which redacts technical fields for non-admins -
-the frontend never calls this route, so nothing in the app actually exposes it.
+route. One latent, out-of-scope item was flagged here, not fixed in this phase (unreachable through
+the UI, since the frontend never calls this route): `GET /api/projects/:id/history` returned
+unredacted history to any authenticated role, unlike the main `/:id` endpoint, which redacts
+technical fields for non-admins. Closed in Phase 7 below.
 
 ### Data/integration safety
 
@@ -314,8 +314,53 @@ code difference between the branches):
   triggered because the sandbox's real date is Friday 2026-11-27; reproduces identically on the base
   branch.
 
+## Phase 7 — Close the `GET /api/projects/:id/history` access gap
+
+Pre-publication fix requested after Phase 6 flagged this route. It had no role check at all -
+`router.get("/:id/history", ...)` in `server/routes/projects.js` returned `project.history`
+unredacted to *any* authenticated session, administrator or `ko_viewer` alike, unlike every other
+project-data route on this router (`GET /:id`, `GET /`), which already run every response through
+`redactTechnicalForRole`/`presentHistoryEvents` to keep plan-import diagnostic fields
+(`delivery_chance`, `probability_note`, `sales_channel`, `mapping_rule`, `unmapped_columns`,
+`actual_hours_source`, raw `details`) out of a manager's hands. The frontend never calls this route
+(confirmed by grep - the История tab is built entirely from `GET /:id`'s `history_events`), so
+nothing in the app itself was exposed, but a direct API call was.
+
+Fix, in `server/routes/projects.js` only: the handler now branches on `req.authRole === "admin"`,
+exactly like its siblings already do.
+- **Administrator**: unchanged - the same raw `project.history` array as always (requirement:
+  "Администратор должен сохранить полный разрешённый доступ").
+- **Any other role** (`ko_viewer`, and any future non-admin role): the same readable,
+  technical-field-free journal (`historyLabels.presentHistoryEvents(..., { admin: false })`) the
+  История tab already renders from `GET /:id` - not a flat 403 (viewing stays allowed for this role
+  everywhere else on this router) and never the raw rows.
+- **No session at all**: already refused with 401 before reaching this router at all, by the
+  existing global `dashboardAuth.requireDashboardSession` mounted ahead of every `/api/projects`
+  route in `server/index.js` - confirmed with a direct unauthenticated request, not assumed.
+
+No change to `server/projectsModel.js`, `server/historyLabels.js`, how history rows are written, or
+any stage-transition/priority calculation - this is a response-shaping fix in the route handler
+only, reusing logic that already existed for the sibling endpoints.
+
+New regression test: `tests/test_history_journal.py::test_history_endpoint_gates_raw_technical_data_by_role`
+- creates a project with two synced activities (one carrying the full set of technical diagnostic
+fields above), then asserts: the administrator's `/history` response still contains raw rows (one
+whose `action` names `actual_hours`) and still contains `mapping_rule`; the manager's response is a
+non-empty readable-journal array with no `raw` key and none of the six technical field names present
+anywhere in the serialized body; the manager's `/history` output matches `GET /:id`'s
+`history_events` changes exactly (same journal, two different routes); and an anonymous
+(no-cookie) request gets 401. All existing callers of this route re-verified unaffected: the two
+tests that already hit it as the administrator (`tests/test_shturman_app.py::test_confirmed_stage_transition_and_duration`,
+`tests/test_monthly_profile.py::test_dry_run_sync_idempotency_and_updates`) still read the raw
+rows they expect, since their test servers run with no `DASHBOARD_USERNAME`/`PASSWORD` configured -
+the existing "no accounts configured" legacy-install mode, which `requireDashboardSession` already
+treats as full admin access, unchanged by this fix. Full profile re-run after the fix:
+`tests/test_history_journal.py` (9 passed), `tests/test_shturman_app.py`, `tests/test_monthly_profile.py`,
+`tests/test_user_accounts.py`, `tests/test_kanban_scroll.py`, `tests/test_ko_notifications.py` -
+65 passed together. Full `npm test`: **406 passed, 1 skipped, 2 failed** (the same two
+calendar/sandbox failures above; the schedule concurrency flake happened to pass this run).
+
 ## Remaining phases
 
-None. All 6 phases of this redesign are complete. One pre-existing, out-of-scope item remains noted
-above (the unredacted `/api/projects/:id/history` route) - not part of this redesign's brief, not
-reachable through the UI, and not changed by this branch; flagged for awareness, not fixed here.
+None. All 7 phases of this redesign are complete, including the one pre-publication fix Phase 6
+flagged and Phase 7 closed.
