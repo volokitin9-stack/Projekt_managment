@@ -133,13 +133,21 @@ with actual Railway access runs the same report there to get the real picture.
 
 ## 7. Тесты
 
-`tests/test_ko_integration.py` (+11 new, 44 total in the file, all passing):
+`tests/test_ko_integration.py` (+13 new, 46 total in the file, all passing):
 
 - `test_photo_multi_photo_proposal_and_project_creation_attaches_them` - the exact reported
   incident, two photos, reproduced and confirmed fixed end to end (including the project's own
   `images` list and the proposal's live `photo_status`).
 - `test_photo_manual_attach_to_an_existing_project_and_no_duplicate_on_repeat` - the new manual
   action, and that repeating it is a safe no-op.
+- `test_photo_lada_azimut_6029_two_photos_manually_attached_without_recreating_the_project` -
+  the final-check wording literally: an existing Lada Azimut/арт. 6029 project (created from its
+  own proposal, never a duplicate) gets both of the incident's photos via the manual action - one
+  already attached at creation time, the second added later onto the same project id - and a
+  pre-existing, unrelated manual upload on that project survives untouched alongside them
+  (`final["images"]` has all three; project count before/after stays at one Lada Azimut).
+- `test_photo_attach_requires_an_explicit_project_choice` - no `project_id` (or an explicit `null`)
+  is refused with `400` before any matching is attempted; a real id succeeds.
 - `test_photo_status_and_backlog_survive_a_server_restart`.
 - `test_photo_missing_original_is_reported_not_fatal` - the original Telegram bytes are deleted
   from disk directly (simulating real data loss, since a proposal can never be *submitted*
@@ -168,6 +176,26 @@ immediately, opens the new card, and its «Фото» tab shows the real thumbna
 агента КО», the same row now shows "Фото: 1 привязано" with a working "Открыть" link. Zero browser
 console errors. Screenshots delivered in chat.
 
-**Full `npm test`**: 423 passed, 1 skipped, 2 failed - the same two pre-existing, unrelated failures
+**Full `npm test`**: 425 passed, 1 skipped, 2 failed - the same two pre-existing, unrelated failures
 tracked since the light-redesign work (`tests/test_parsing.py::test_pdf_table`;
-`tests/test_telegram_digest.py::test_digest_includes_recent_engineering_changes_with_a_link`).
+`tests/test_telegram_digest.py::test_digest_includes_recent_engineering_changes_with_a_link`),
+re-confirmed again before publication together with `tests/test_ko_notifications.py`,
+`tests/test_kanban_scroll.py`, `tests/test_history_journal.py`, `tests/test_user_accounts.py`,
+`tests/test_shturman_app.py` (61 passed together).
+
+## Pre-publication final checks (this round)
+
+1. `origin/claude/railway-deployment` re-fetched - unchanged since this branch was created
+   (`bd57ea6`, already includes PR #11). A test-merge of it into this branch reports
+   "Already up to date" - no conflicts, nothing foreign in the diff (still exactly the 5 files
+   listed above).
+2. Automatic attach on new-project creation - `test_photo_multi_photo_proposal_and_project_creation_attaches_them`.
+3. Manually linking an *existing* Lada Azimut/арт. 6029 project to both of the incident's photos,
+   without recreating it - `test_photo_lada_azimut_6029_two_photos_manually_attached_without_recreating_the_project`.
+4. Protection against re-attaching + existing attachments preserved - covered by the same test
+   (a pre-existing manual upload survives) and by `test_photo_manual_attach_to_an_existing_project_and_no_duplicate_on_repeat`.
+5. Manual attach is admin-only (`test_photo_role_access_matches_the_rest_of_the_ko_router`) and
+   requires an explicit `project_id` (`test_photo_attach_requires_an_explicit_project_choice`).
+6. `photo-backlog` makes no automatic changes - `test_photo_backlog_report_names_lada_azimut_taishan_and_hgh_without_touching_anything`
+   (project count checked before/after calling the report).
+7. Full profile re-run, see numbers above.

@@ -836,6 +836,66 @@ def test_photo_manual_attach_to_an_existing_project_and_no_duplicate_on_repeat(e
     assert len([i for i in after2["images"] if i.get("telegram_message_id") == "1310"]) == 1
 
 
+def test_photo_lada_azimut_6029_two_photos_manually_attached_without_recreating_the_project(env):
+    """Литерально пункт 4 финальной проверки: ранее созданный проект Lada Azimut, арт. 6029 (здесь -
+    созданный в этом тесте из его собственного предложения, без доступа к боевым данным) получает
+    обе фотографии через ручную привязку, без создания второго проекта, и существующее вложение
+    (загруженное до ручной привязки) остаётся на месте - "сохранение существующих вложений"."""
+    srv = env()
+    hook(srv, msg(1400, caption="Lada Azimut, арт. 6029, фото 1", photo="p1"))
+    hook(srv, msg(1401, caption="Lada Azimut, арт. 6029, фото 2", photo="p2"))
+    photo_ids = [m["photos"][0]["file_id"] for m in messages(srv)["messages"][:2]]
+    proposal_id = _submit_with_photos(srv, "Lada", "Azimut", "6029", 1400, "Lada Azimut, арт. 6029, фото 1", [photo_ids[0]])
+    s = session(srv)
+    fields = {"manufacturer": "Lada", "vehicle_model": "Azimut", "product_type": "Защита картера", "article_number": "6029", "status": "scanning"}
+    cr = s.post(srv.url + f"/api/ko/proposals/{proposal_id}/create-project", json=fields, timeout=10)
+    assert cr.status_code == 201, cr.text
+    project_id = cr.json()["result"]["project_id"]
+    assert len(cr.json()["result"]["photos"]["attached"]) == 1, "the first photo is already attached by creation itself"
+
+    # an existing, unrelated manual upload on the same project - must survive untouched
+    manual_upload = s.post(srv.url + f"/api/projects/{project_id}/files",
+        files={"file": ("manual.jpg", JPEG, "image/jpeg")}, data={"caption": "ручная загрузка до привязки"}, timeout=10)
+    assert manual_upload.status_code in (200, 201), manual_upload.text
+
+    projects_before = len(s.get(srv.url + "/api/projects", timeout=10).json())
+
+    # the second photo, from a second proposal referencing the SAME project explicitly (project_ref
+    # resolves it, since the project now exists) - still goes through the manual action to prove the
+    # literal ask: attach it to the EXISTING project, no new project created
+    proposal2_id = _submit_with_photos(srv, "Lada", "Azimut", "6029", 1401, "Lada Azimut, арт. 6029, фото 2", [photo_ids[1]])
+    r = s.post(srv.url + f"/api/ko/proposals/{proposal2_id}/attach-photos", json={"project_id": project_id}, timeout=10)
+    assert r.status_code == 200, r.text
+    assert len(r.json()["photos"]["attached"]) == 1
+
+    projects_after = len(s.get(srv.url + "/api/projects", timeout=10).json())
+    assert projects_after == projects_before, "no second Lada Azimut project was created"
+    azimut_projects = [p for p in s.get(srv.url + "/api/projects", timeout=10).json() if p["manufacturer"] == "Lada" and p["vehicle_model"] == "Azimut"]
+    assert len(azimut_projects) == 1
+
+    final = project(srv, s, project_id)
+    assert len(final["images"]) == 3, "both Telegram photos plus the pre-existing manual upload, all present"
+    assert any(i.get("caption") == "ручная загрузка до привязки" for i in final["images"]), "the existing manual attachment was preserved, not overwritten"
+
+
+def test_photo_attach_requires_an_explicit_project_choice(env):
+    """Пункт 6 финальной проверки: ручная привязка требует явного выбора проекта (никакого
+    автосопоставления) и доступна только администратору - оба требования проверяются раздельно от
+    401/403 ролевых тестов выше."""
+    srv = env()
+    hook(srv, msg(1410, caption="Радиатор Jolion, доп. фото", photo="p1"))
+    photo_id = messages(srv)["messages"][0]["photos"][0]["file_id"]
+    radiator = find_project(srv, "HAVAL", "Защита радиатора")
+    proposal_id = _submit_with_photos(srv, "HAVAL", "Jolion", None, 1410, "Радиатор Jolion, доп. фото", [photo_id])
+    s = session(srv)
+    url = srv.url + f"/api/ko/proposals/{proposal_id}/attach-photos"
+    assert s.post(url, json={}, timeout=10).status_code == 400, "project_id is mandatory - no implicit/auto target"
+    assert s.post(url, json={"project_id": None}, timeout=10).status_code == 400
+    r = s.post(url, json={"project_id": radiator["id"]}, timeout=10)
+    assert r.status_code == 200, r.text
+    assert len(r.json()["photos"]["attached"]) == 1
+
+
 def test_photo_status_and_backlog_survive_a_server_restart(env):
     srv = env()
     hook(srv, msg(1320, caption="Lada Vesta, арт. 6030", photo="p2"))
