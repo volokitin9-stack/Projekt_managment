@@ -1304,6 +1304,23 @@
   </div>
 </div>
 
+<!-- Критическое требование: "предусмотреть ручную привязку фотографии из предложения к
+     конкретному проекту" - no auto-matching here at all, the person picks the project. -->
+<div class="modal-overlay" id="koAttachModalOverlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="koAttachModalTitle">
+    <h2 id="koAttachModalTitle">Привязать фото к проекту</h2>
+    <div class="form-error" id="koAttachFormError"></div>
+    <div class="field">
+      <label for="koa-search">Поиск проекта (марка, модель, изделие, артикул)</label>
+      <input id="koa-search" type="text" autocomplete="off" placeholder="Начните вводить...">
+    </div>
+    <div id="koa-results" style="max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:6px;"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="koAttachCancelBtn">Отмена</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function(){
   "use strict";
@@ -2822,6 +2839,13 @@
       else if(result.attached) text = "Фото прикреплено к проекту ("+result.attached.length+")";
       else if(result.comment_id) text = "Комментарий добавлен в проект";
       else text = "Проект обновлён";
+      // Критическое требование: при создании проекта фото предложения теперь привязываются
+      // автоматически - показать, что именно получилось (а не скрывать недоступные оригиналы).
+      if(result.photos){
+        var pn = result.photos.attached ? result.photos.attached.length : 0;
+        var pu = result.photos.unavailable ? result.photos.unavailable.length : 0;
+        if(pn || pu) text += "; фото: "+pn+" привязано"+(pu ? ", "+pu+" недоступно" : "");
+      }
       return { text:text+": "+name+where, id:result.project_id, kind:"project" };
     }
     return null;
@@ -2863,6 +2887,23 @@
       var ph = (pl.photos || []).map(function(f){
         return '<img src="/api/ko/files/'+encodeURIComponent(f.file_id)+'" alt="" loading="lazy" style="width:64px;height:64px;object-fit:cover;border-radius:4px;margin:3px 3px 0 0;" title="'+escapeHtml(f.observation||"")+'">';
       }).join("");
+      // Критическое требование: "показывать статус: привязаны / ожидают привязки / оригинал
+      // недоступен" - computed server-side on every read (server/ko/proposals.js#photoStatus),
+      // never guessed from the thumbnail alone.
+      var photoStatusArr = pl.photo_status || null;
+      var photoStatusHtml = "";
+      var photoAttachNeeded = false;
+      if(photoStatusArr && photoStatusArr.length){
+        var psCounts = { attached:0, unavailable:0, pending_no_project:0, pending_unattached:0 };
+        photoStatusArr.forEach(function(x){ psCounts[x.status] = (psCounts[x.status]||0)+1; });
+        var psParts = [];
+        if(psCounts.attached) psParts.push('<span style="color:var(--good-ink);">'+psCounts.attached+' привязано</span>');
+        if(psCounts.pending_unattached) psParts.push('<span style="color:var(--warn-ink);">'+psCounts.pending_unattached+' ожидает привязки</span>');
+        if(psCounts.pending_no_project) psParts.push('<span style="color:var(--warn-ink);">'+psCounts.pending_no_project+' ожидает (нет проекта)</span>');
+        if(psCounts.unavailable) psParts.push('<span style="color:var(--crit-ink);">'+psCounts.unavailable+' оригинал недоступен</span>');
+        photoStatusHtml = '<div style="font-size:10.5px;margin-top:2px;">Фото: '+psParts.join(", ")+'</div>';
+        photoAttachNeeded = !!(psCounts.pending_unattached || psCounts.pending_no_project);
+      }
       var unresolved = !pl.resolved_project_id && pl.kind !== "new_task";
       var applyLabel = (pl.kind === "project_match" || pl.kind === "needs_clarification") ? "Принять к сведению" : "Применить изменение";
       // Критическое требование: "для ранее принятого предложения можно вручную создать новый
@@ -2899,8 +2940,10 @@
         '<div style="font-size:10.5px;color:var(--ink-faint);">создано: '+escapeHtml((r.created_at||"").slice(0,16).replace("T"," "))+'</div></td>' +
         '<td>'+escapeHtml(koProjectLabel(pl))+(!r.resolved && unresolved ? '<div style="font-size:11px;color:var(--crit-ink);">'+escapeHtml(pl.resolution_note||"проект не определён")+'</div>' : '')+'</td>' +
         '<td style="max-width:380px;"><div>'+escapeHtml(pl.summary||"")+'</div>'+(koChangeLabel(pl)?'<div style="font-weight:600;margin-top:3px;">'+escapeHtml(koChangeLabel(pl))+'</div>':'') +
-        '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:3px;">'+escapeHtml(pl.rationale||"")+'</div>'+ev+(ph?'<div>'+ph+'</div>':'')+'</td>' +
-        '<td style="min-width:150px;">'+actionsHtml+'</td></tr>';
+        '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:3px;">'+escapeHtml(pl.rationale||"")+'</div>'+ev+(ph?'<div>'+ph+'</div>':'')+photoStatusHtml+'</td>' +
+        '<td style="min-width:150px;">'+actionsHtml+
+        (photoAttachNeeded ? '<button type="button" class="eng-mini-btn" data-action="ko-open-attach-photos" data-id="'+escapeHtml(r.id)+'" style="margin-top:6px;display:block;">Привязать фото к проекту</button>' : '') +
+        '</td></tr>';
     }).join("");
     return '<div class="eng-panel"><h3>Предложения агента КО</h3><div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Выводы агента по сообщениям и фото чата КО. Каждое изменение применяется теми же проверками, что и ручное редактирование, и записывается в историю проекта со ссылками на сообщения.</div>' +
       tabs + '<table class="eng-table" style="margin-top:10px;"><tr><th>Статус</th><th>Тип</th><th>Проект</th><th>Суть, обоснование, источники</th><th>Результат</th></tr>'+rows+'</table></div>';
@@ -2987,6 +3030,59 @@
           var info = koResultInfo(res.result);
           showSyncNote(info ? info.text : "Проект создан");
           if(res.result && res.result.project_id) openEngDetail(res.result.project_id);
+        });
+      }).catch(function(err){ errEl.textContent = err.message; });
+  });
+
+  // ---- "Привязать фото к проекту": explicit manual attach, no auto-matching at all ----
+  var koAttachProposalId = null;
+  function koaResultsHtml(query){
+    var q = (query||"").trim().toLowerCase();
+    var list = !q ? [] : engAllRecords.filter(function(p){
+      var hay = (p.make+" "+p.model+" "+p.product+" "+(p.article_number||"")).toLowerCase();
+      return hay.indexOf(q) !== -1;
+    }).slice(0, 20);
+    if(!q) return '<div style="padding:10px;font-size:12px;color:var(--ink-faint);">Введите часть марки, модели, изделия или артикула.</div>';
+    if(!list.length) return '<div style="padding:10px;font-size:12px;color:var(--ink-faint);">Ничего не найдено.</div>';
+    return list.map(function(p){
+      return '<button type="button" class="eng-mini-btn" data-action="ko-attach-pick" data-project-id="'+escapeHtml(p.id)+'" ' +
+        'style="display:block;width:100%;text-align:left;border:none;border-bottom:1px solid var(--line);border-radius:0;padding:8px 10px;">' +
+        '<b>'+escapeHtml(p.make)+' '+escapeHtml(p.model)+'</b> · '+escapeHtml(p.product)+
+        (p.article_number ? ' · арт. '+escapeHtml(p.article_number) : '') +
+        '<div style="font-size:10.5px;color:var(--ink-faint);">'+escapeHtml(ENG_CATEGORY_LABELS[p.record_category]||p.record_category)+(p.is_completed?' · сдан':'')+'</div></button>';
+    }).join("");
+  }
+  function openKoAttachPhotosModal(proposalId){
+    var item = engKo.filter(function(r){ return r.id === proposalId; })[0];
+    if(!item) return;
+    koAttachProposalId = proposalId;
+    document.getElementById("koAttachFormError").textContent = "";
+    document.getElementById("koa-search").value = "";
+    document.getElementById("koa-results").innerHTML = koaResultsHtml("");
+    document.getElementById("koAttachModalOverlay").classList.add("open");
+    document.getElementById("koa-search").focus();
+  }
+  function closeKoAttachModal(){ document.getElementById("koAttachModalOverlay").classList.remove("open"); koAttachProposalId = null; }
+  document.getElementById("koAttachCancelBtn").addEventListener("click", closeKoAttachModal);
+  document.getElementById("koAttachModalOverlay").addEventListener("click", function(e){ if(e.target === this) closeKoAttachModal(); });
+  document.getElementById("koa-search").addEventListener("input", function(){
+    document.getElementById("koa-results").innerHTML = koaResultsHtml(this.value);
+  });
+  document.getElementById("koa-results").addEventListener("click", function(e){
+    var btn = e.target.closest('[data-action="ko-attach-pick"]');
+    if(!btn || !koAttachProposalId) return;
+    var projectId = btn.getAttribute("data-project-id");
+    var proposalId = koAttachProposalId;
+    var errEl = document.getElementById("koAttachFormError");
+    errEl.textContent = "";
+    if(!window.confirm("Привязать фото этого предложения к выбранному проекту?")) return;
+    apiFetch("/api/ko/proposals/"+encodeURIComponent(proposalId)+"/attach-photos", { method:"POST", body:{ project_id: projectId } })
+      .then(function(res){
+        closeKoAttachModal();
+        return loadEngProjects().then(function(){
+          var n = (res.photos && res.photos.attached ? res.photos.attached.length : 0);
+          var nUnavail = (res.photos && res.photos.unavailable ? res.photos.unavailable.length : 0);
+          showSyncNote(n ? ("Привязано фото: "+n+(nUnavail?(", недоступно: "+nUnavail):"")) : "Новых фото не привязано"+(nUnavail?(" (недоступно: "+nUnavail+")"):""));
         });
       }).catch(function(err){ errEl.textContent = err.message; });
   });
@@ -3239,6 +3335,11 @@
     if(act === "ko-open-create"){
       e.stopPropagation();
       openKoCreateModal(btn.getAttribute("data-id"));
+      return;
+    }
+    if(act === "ko-open-attach-photos"){
+      e.stopPropagation();
+      openKoAttachPhotosModal(btn.getAttribute("data-id"));
       return;
     }
     if(act === "eng-resolve-review"){
