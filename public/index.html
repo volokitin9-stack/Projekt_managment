@@ -11,33 +11,44 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 <style>
   :root{
-    --bg:#0D1722;
-    --surface:#142230;
-    --surface-2:#192A3A;
-    --surface-3:#1F3245;
-    --ink:#E7EFF8;
-    --ink-soft:#91A9BC;
-    --ink-faint:#5E7788;
-    --line:#293B4B;
-    --accent:#5296FF;
-    --accent-ink:#8FC1FF;
-    --accent-soft:#17304F;
-    --good:#30CE98;
-    --good-soft:#103626;
-    --crit:#F2545B;
-    --crit-soft:#3A1A1E;
-    --warn:#D8A44E;
-    --warn-soft:#3A2E14;
-    --q-urgent:#5296FF;
-    --q-inbox:#95ABBA;
-    --q-others:#27D1C1;
-    --q-give:#30CE98;
-    --q-drop:#758B9A;
-    --root-fill:#CBD8E2;
-    --root-ink:#13202B;
-    --grid-line: rgba(145,169,188,.06);
-    --shadow: 0 4px 18px rgba(2,8,16,.4);
-    --radius:10px;
+    /* Approved Design Concept #4 - light engineering workspace. Token names are unchanged from
+       the previous dark theme (every rule below already references them via var()), so this is a
+       value swap, not a rule-by-rule rewrite - see docs/LIGHT_REDESIGN.md for the handful of
+       exceptions (inline literal colors) that needed a matching fix alongside this block. */
+    --bg:#F5F8FD;
+    --bg-2:#EDF3FC;
+    --sidebar-bg:#F8FAFF;
+    --surface:#FFFFFF;
+    --surface-2:#F3F7FC;
+    --surface-3:#EDF3FC;
+    --ink:#17253D;
+    --ink-soft:#64748B;
+    --ink-faint:#94A3B8;
+    --line:#DFE7F2;
+    --accent:#2463EB;
+    --accent-hover:#174BCB;
+    --accent-ink:#174BCB;
+    --accent-soft:#E5EEFF;
+    --good:#16A36A;
+    --good-soft:#E3F6EC;
+    --good-ink:#0E7A4F;
+    --crit:#E45160;
+    --crit-soft:#FBE8EA;
+    --crit-ink:#B42318;
+    --warn:#E59A22;
+    --warn-soft:#FBF0DD;
+    --warn-ink:#8A5A0A;
+    --info:#347DEB;
+    --q-urgent:#2463EB;
+    --q-inbox:#7C93AE;
+    --q-others:#0EA5A3;
+    --q-give:#16A36A;
+    --q-drop:#AAB8C7;
+    --root-fill:#E5EEFF;
+    --root-ink:#17253D;
+    --grid-line: rgba(23,37,61,.05);
+    --shadow: 0 1px 2px rgba(23,37,61,.06), 0 6px 16px rgba(23,37,61,.08);
+    --radius:12px;
   }
 
   *{box-sizing:border-box;}
@@ -63,7 +74,7 @@
   /* ---- app shell: persistent left sidebar + main workspace ---- */
   .app-shell{ display:flex; min-height:100vh; align-items:stretch; }
   .sidebar{
-    flex-shrink:0; width:198px; background:#101C2A; border-right:1px solid var(--line);
+    flex-shrink:0; width:198px; background:var(--sidebar-bg); border-right:1px solid var(--line);
     display:flex; flex-direction:column; position:sticky; top:0; height:100vh; z-index:25;
     transition:width .16s ease;
   }
@@ -372,7 +383,7 @@
     display:inline-flex; align-items:center; justify-content:center; gap:8px; transition:all .18s ease;
   }
   .btn:hover{ border-color:var(--accent); background:var(--surface-3); }
-  .btn.primary{ background:var(--accent); border-color:var(--accent); color:#06121F; }
+  .btn.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
   .btn.primary:hover{ filter:brightness(1.07); }
   .btn.danger{ border-color:var(--crit); color:var(--crit); }
   .btn.danger:hover{ background:var(--crit-soft); }
@@ -452,9 +463,9 @@
   .fab{
     position:fixed; right:24px; bottom:24px; z-index:20;
     width:64px; height:64px; border-radius:50%;
-    background:var(--accent); color:#06121F; border:none;
+    background:var(--accent); color:#fff; border:none;
     display:flex; align-items:center; justify-content:center;
-    box-shadow:0 8px 22px rgba(82,150,255,.35); cursor:pointer; transition:all .18s ease;
+    box-shadow:0 8px 22px rgba(36,99,235,.35); cursor:pointer; transition:all .18s ease;
   }
   .fab:hover{ filter:brightness(1.08); transform:scale(1.04); }
 
@@ -682,7 +693,7 @@
   .eng-pre{ white-space:pre-wrap; font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--ink-soft); background:var(--surface-2);
     border:1px solid var(--line); border-radius:8px; padding:10px; max-height:420px; overflow:auto; }
   .eng-status{ font-weight:700; }
-  .eng-status.ok{ color:var(--ok, #2FBF71); }
+  .eng-status.ok{ color:var(--good-ink); }
   .eng-status.warn{ color:var(--warn); }
   .eng-status.err{ color:var(--crit); }
   .detail-panel.wide{ width:var(--detail-wide-width, 600px); }
@@ -2476,7 +2487,7 @@
       var unresolved = !pl.resolved_project_id && ["new_task","needs_clarification"].indexOf(pl.kind) === -1;
       var applyLabel = (pl.kind === "project_match" || pl.kind === "needs_clarification") ? "Принять к сведению" : "Применить";
       return '<tr id="ko-row-'+escapeHtml(r.id)+'"><td>'+escapeHtml(KO_KIND[pl.kind]||pl.kind)+'<div style="font-size:11px;color:var(--ink-faint);">уверенность: '+escapeHtml(KO_CONF[pl.confidence]||pl.confidence||"—")+'</div></td>' +
-        '<td>'+escapeHtml(koProjectLabel(pl))+(unresolved ? '<div style="font-size:11px;color:var(--danger,#b42318);">'+escapeHtml(pl.resolution_note||"проект не определён")+'</div>' : '')+'</td>' +
+        '<td>'+escapeHtml(koProjectLabel(pl))+(unresolved ? '<div style="font-size:11px;color:var(--crit-ink);">'+escapeHtml(pl.resolution_note||"проект не определён")+'</div>' : '')+'</td>' +
         '<td style="max-width:420px;"><div>'+escapeHtml(pl.summary||"")+'</div>'+(koChangeLabel(pl)?'<div style="font-weight:600;margin-top:3px;">'+escapeHtml(koChangeLabel(pl))+'</div>':'') +
         '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:3px;">'+escapeHtml(pl.rationale||"")+'</div>'+ev+(ph?'<div>'+ph+'</div>':'')+'</td>' +
         '<td><button type="button" class="eng-mini-btn" data-action="ko-apply" data-id="'+escapeHtml(r.id)+'"'+(unresolved?' disabled title="Проект не определён однозначно"':'')+'>'+applyLabel+'</button> ' +
