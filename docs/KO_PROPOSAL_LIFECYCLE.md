@@ -92,12 +92,28 @@ automatically:
   does for every other kind (`recordActivity(..., "ko_proposal_applied", ..., { proposal_id, kind,
   links })`), plus one manual comment quoting the proposal's summary/evidence on the new project.
 - Frontend: `public/index.html`'s `#koCreateModalOverlay` (same `.modal-overlay`/`.modal` pattern as
-  the existing user-creation dialog), opened only from an *unresolved* proposal whose
-  `resolved_project_id` is null (never for `new_task`, which isn't about an engineering project),
-  pre-filled from the proposal's own `project_ref`/`change`, always requiring the person's explicit
-  confirm (`window.confirm` + the form's own submit) before the request is sent. On success: closes
-  the modal, shows the outcome via the same `koResultInfo()`, and opens the new project's card -
-  which, because it is always `main_project`, is always on the Kanban.
+  the existing user-creation dialog), pre-filled from the proposal's own `project_ref`/`change`,
+  always requiring the person's explicit confirm (`window.confirm` + the form's own submit) before
+  the request is sent. On success: closes the modal, shows the outcome via the same
+  `koResultInfo()`, and opens the new project's card - which, because it is always `main_project`,
+  is always on the Kanban.
+- **Also works on an already-accepted proposal** (критическое требование: "для ранее принятого
+  предложения можно вручную создать новый проект, если он ещё не существует") - specifically one
+  resolved as `acknowledged` (`project_match`/`needs_clarification`, accepted at the time with zero
+  side effect) that nothing has created a project from since. `createProjectFromProposal` checks
+  this *before* its `resolved_project_id`/validation/duplicate logic, which stays identical either
+  way; any other already-resolved state (a real change applied, or rejected) is still refused -
+  creating a project is not a way to undo or redo a different kind of decision.
+  `recordLaterProjectCreation()` writes the outcome to its own `payload.project_created_later` field
+  - **never** to `resolved`/`resolved_at`/`resolution`/`payload.decision`, which stay byte-for-byte
+  what they were at the original acknowledgement (critical requirement: "создание проекта не
+  изменяет задним числом историю первоначального решения"). The frontend shows both: the original
+  "Принято к сведению" line, unchanged, plus a second "Позже: ..." line with its own timestamp/actor
+  and its own "Открыть". Idempotent the same way as the first-creation path - whichever write
+  happens (`close()` or `recordLaterProjectCreation()`) is the last synchronous step before
+  returning, so a double click, a repeated request, or one issued after a server restart all find
+  `project_created_later` already set and are refused with the existing project's id, never a second
+  project.
 
 ## 5. TAISHAN и HGH
 
@@ -105,9 +121,10 @@ Not recreated, not looked up against any live system (no access here). The new h
 `koResultInfo()` are exactly the tool an administrator with real Railway access needs to answer this
 themselves: open «Предложения агента КО» → «Все», find the TAISHAN/HGH rows (they will show
 `resolution: acknowledged` if this diagnosis is right), and their `decision.result` will say plainly
-whether anything was created. If a project was genuinely never created for either, the new «Создать
-проект» action - run once, from the real proposal, with the real evidence still attached - is the
-intended fix, not recreating them from this session.
+whether anything was created. If a project was genuinely never created for either, the «Создать
+проект» button is now available directly on that same already-resolved row (see §4 above) - one
+explicit action, from the real proposal, with the real evidence still attached, run once by the
+administrator with actual access - not recreated or guessed from this session.
 
 ## 6. Совместимость
 
@@ -130,7 +147,7 @@ intended fix, not recreating them from this session.
 
 ## 7. Тесты
 
-`tests/test_ko_integration.py` (+5 new, 31 total in the file, all passing):
+`tests/test_ko_integration.py` (+11 new since this file started, 37 total in the file, all passing):
 
 - `test_needs_clarification_apply_still_creates_nothing_the_taishan_symptom` - reproduces the
   reported symptom exactly; proves `apply()`'s acknowledge path was always correct.
@@ -144,23 +161,55 @@ intended fix, not recreating them from this session.
   `srv.restart()`, including `decision.result`/`reason`, and the still-open one can still become a
   project afterwards.
 
-Existing suites re-run clean: `tests/test_ko_integration.py` (31 passed), plus
+**Pre-publication final checklist** (one test per item, so a future regression names exactly which
+guarantee broke):
+
+1. `test_check1_acknowledged_needs_clarification_and_project_match_show_under_applied` - both kinds,
+   once accepted, come back `resolved: true, resolution: "acknowledged"` from `status=all`, which is
+   exactly the frontend's "Принятые" predicate (`resolved && resolution !== "rejected"`).
+2. `test_check2_create_project_from_a_previously_accepted_proposal` - the new late-creation path,
+   confirmed with `late: true` in the response.
+3. `test_check3_late_creation_never_rewrites_the_original_decision` - byte-for-byte comparison of
+   `resolved_at`/`resolution`/`payload.decision` before and after; only `payload.project_created_later`
+   is new.
+4. `test_check4_late_creation_is_protected_against_double_click_repeat_and_restart` - a second
+   immediate request, a third request after `srv.restart()`, and a direct count of TAISHAN-identity
+   projects (always exactly one).
+5. `test_check5_make_model_product_category_and_stage_are_all_required` - each of
+   manufacturer/vehicle_model/product_type/status individually omitted is refused with `400`; a
+   client attempt to override `record_category` to `"backlog"` is silently ignored - the created
+   project is still `main_project` (category is a fixed, always-enforced value, never a
+   client-settable field at all, so "required" holds unconditionally by construction).
+6. `test_check6_created_project_lands_in_the_correct_kanban_section` - confirms the exact predicate
+   `public/index.html`'s own Kanban list uses (`record_category === "main_project" && !is_completed`)
+   on the freshly created project via the real `/api/projects` the UI itself calls.
+
+Existing suites re-run clean: `tests/test_ko_integration.py` (37 passed), plus
 `tests/test_ko_notifications.py`, `tests/test_kanban_scroll.py`, `tests/test_history_journal.py`,
 `tests/test_user_accounts.py`, `tests/test_shturman_app.py` (61 passed together) - covering the
 messages centre, Kanban scroll, role gating and restart-persistence of *other* features, to confirm
 none of them regressed.
 
-**Real-browser verification** (admin and `ko_viewer`, headless Chromium): all four history tabs with
-live counts; applying a `stage_change` proposal shows "Проект обновлён: этап → Разработка: ..." and
-the row moves to «Принятые» with actor/timestamp; rejecting shows "Предложение отклонено" and the row
-moves to «Отклонённые»; "Открыть" on a resolved row opens the correct project card; the create-project
-modal pre-fills from the proposal, creates `TAISHAN X` as `main_project`/`scanning`, opens its card,
-and the card is immediately visible on the real Kanban's «Сканирование» column; a second attempt at
-the identical identity is refused with the existing project named in the error; `ko_viewer` has no
-"Предложения агента КО" subtab, no bell, and `GET /api/ko/proposals` 403s directly for that role; zero
-browser console errors in either role's session. Screenshots delivered in chat.
+**Real-browser verification** (admin and `ko_viewer`, headless Chromium), two passes:
+- First pass (unresolved proposals): all four history tabs with live counts; applying a
+  `stage_change` proposal shows "Проект обновлён: этап → Разработка: ..." and the row moves to
+  «Принятые» with actor/timestamp; rejecting shows "Предложение отклонено" and the row moves to
+  «Отклонённые»; "Открыть" on a resolved row opens the correct project card; the create-project
+  modal pre-fills from the proposal, creates `TAISHAN X` as `main_project`/`scanning`, opens its
+  card, and the card is immediately visible on the real Kanban's «Сканирование» column; a second
+  attempt at the identical identity is refused with the existing project named in the error;
+  `ko_viewer` has no "Предложения агента КО" subtab, no bell, and `GET /api/ko/proposals` 403s
+  directly for that role.
+- Second pass (the new late-creation path): a TAISHAN `needs_clarification` proposal applied via
+  the API first (simulating "already accepted earlier"), confirmed visible under «Принятые» with the
+  "Создать проект" button still offered on that resolved row; opening the messages bell panel while
+  this screen is open works exactly as before; using "Создать проект" on the resolved row creates
+  the project, opens its card, and the row afterwards shows **both** the original "Принято к
+  сведению - проект не создан и не изменён" line (unchanged) **and** a new "Позже: Проект создан:
+  ..." line with its own timestamp/actor, with the create-project button now gone (already used).
+- Zero browser console errors in any session, either pass. Screenshots delivered in chat both times.
 
-**Full `npm test`**: 410 passed, 1 skipped, 2 failed - the same two pre-existing, unrelated failures
+**Full `npm test`**: 416 passed, 1 skipped, 2 failed - the same two pre-existing, unrelated failures
 tracked since the light-redesign work (`tests/test_parsing.py::test_pdf_table` - sandbox
 `cryptography`/`cffi` issue; `tests/test_telegram_digest.py::test_digest_includes_recent_engineering_changes_with_a_link`
 - a real-calendar edge case in that test's own date helper).

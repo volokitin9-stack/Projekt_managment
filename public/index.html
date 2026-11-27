@@ -2865,7 +2865,13 @@
       }).join("");
       var unresolved = !pl.resolved_project_id && pl.kind !== "new_task";
       var applyLabel = (pl.kind === "project_match" || pl.kind === "needs_clarification") ? "Принять к сведению" : "Применить изменение";
-      var canCreateProject = !r.resolved && !pl.resolved_project_id && pl.kind !== "new_task";
+      // Критическое требование: "для ранее принятого предложения можно вручную создать новый
+      // проект, если он ещё не существует" - acknowledged (project_match/needs_clarification,
+      // accepted with zero side effect at the time) stays eligible after the fact, as long as
+      // nothing has been created from it since (pl.project_created_later). This never reopens or
+      // rewrites the original decision - see server/ko/proposals.js#recordLaterProjectCreation.
+      var canCreateProject = !pl.resolved_project_id && pl.kind !== "new_task" &&
+        (!r.resolved || (r.resolution === "acknowledged" && !pl.project_created_later));
       var actionsHtml;
       if(r.resolved){
         var info = decision ? koResultInfo(decision.result) : null;
@@ -2874,6 +2880,15 @@
         actionsHtml = '<div style="font-size:11.5px;">'+(info ? escapeHtml(info.text) : (r.resolution === "rejected" ? "Предложение отклонено" : "—"))+
           (info && info.id ? ' <button type="button" class="eng-mini-btn" data-action="ko-open-result" data-kind="'+info.kind+'" data-id="'+escapeHtml(info.id)+'">Открыть</button>' : '') +
           '</div><div style="font-size:10.5px;color:var(--ink-faint);margin-top:3px;">'+when+(by?' · '+by:'')+'</div>';
+        if(pl.project_created_later){
+          var laterInfo = koResultInfo(pl.project_created_later.result);
+          actionsHtml += '<div style="font-size:11.5px;margin-top:6px;border-top:1px dashed var(--line);padding-top:4px;">Позже: '+
+            (laterInfo ? escapeHtml(laterInfo.text) : "проект создан")+
+            (laterInfo && laterInfo.id ? ' <button type="button" class="eng-mini-btn" data-action="ko-open-result" data-kind="'+laterInfo.kind+'" data-id="'+escapeHtml(laterInfo.id)+'">Открыть</button>' : '') +
+            '</div><div style="font-size:10.5px;color:var(--ink-faint);">'+escapeHtml((pl.project_created_later.at||"").slice(0,16).replace("T"," "))+' · '+escapeHtml(pl.project_created_later.by||"")+'</div>';
+        } else if(canCreateProject){
+          actionsHtml += '<button type="button" class="eng-mini-btn" data-action="ko-open-create" data-id="'+escapeHtml(r.id)+'" style="margin-top:6px;">Создать проект</button>';
+        }
       } else {
         actionsHtml = '<button type="button" class="eng-mini-btn" data-action="ko-apply" data-id="'+escapeHtml(r.id)+'"'+(unresolved&&!canCreateProject?' disabled title="Проект не определён однозначно"':'')+'>'+applyLabel+'</button> ' +
           '<button type="button" class="eng-mini-btn" data-action="ko-reject" data-id="'+escapeHtml(r.id)+'">Отклонить</button>' +

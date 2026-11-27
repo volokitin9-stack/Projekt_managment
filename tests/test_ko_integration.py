@@ -623,6 +623,142 @@ def test_ko_proposal_history_survives_a_server_restart(env):
     assert cr.status_code == 201, cr.text
 
 
+# ------------------------------------------------------------------ pre-publication final checks
+#
+# 1-6 below mirror the owner's explicit pre-publication checklist for this feature, each as its own
+# test so a future regression points at exactly which guarantee broke.
+
+
+def _submit_unmatched(srv, make, model, mid, text):
+    """A needs_clarification proposal about a vehicle with no existing project - the TAISHAN/HGH
+    shape: resolveProject() finds nothing, so apply() can only acknowledge it."""
+    hook(srv, msg(mid, text))
+    p = {"kind": "needs_clarification", "project_ref": {"manufacturer": make, "vehicle_model": model, "product_type": "Защита картера"},
+         "summary": text, "rationale": "новая модель, проекта пока нет в системе", "confidence": "low",
+         "evidence": [ev(mid, text)]}
+    return submit(srv, [p]).json()["results"][0]["id"]
+
+
+def test_check1_acknowledged_needs_clarification_and_project_match_show_under_applied(env):
+    srv = env()
+    pid1 = _submit_unmatched(srv, "TAISHAN", "X", 1100, "TAISHAN на сканировании")
+    hook(srv, msg(1101, "Возможно это тот же HAVAL Jolion, но не уверен"))
+    jolion_matches = [p for p in ko(srv, "/projects").json()["projects"] if p["manufacturer"] == "HAVAL" and p["vehicle_model"] == "Jolion"]
+    assert jolion_matches, "demo seed must include a HAVAL Jolion project for this check"
+    jolion = jolion_matches[0]
+    pid2 = submit(srv, [{"kind": "project_match", "project_ref": {"project_id": jolion["id"]}, "summary": "Похоже на Jolion",
+        "rationale": "неуверенное совпадение", "confidence": "medium", "evidence": [ev(1101, "возможно это тот же")]}]).json()["results"][0]["id"]
+    s = session(srv)
+    assert s.post(srv.url + f"/api/ko/proposals/{pid1}/apply", json={}, timeout=10).status_code == 200
+    assert s.post(srv.url + f"/api/ko/proposals/{pid2}/apply", json={}, timeout=10).status_code == 200
+
+    all_props = {x["id"]: x for x in s.get(srv.url + "/api/ko/proposals?status=all", timeout=10).json()["proposals"]}
+    for pid, kind in [(pid1, "needs_clarification"), (pid2, "project_match")]:
+        row = all_props[pid]
+        assert row["payload"]["kind"] == kind
+        assert row["resolved"] is True and row["resolution"] == "acknowledged", \
+            f"{kind} must be resolved+acknowledged (frontend's 'Принятые' tab = resolved and resolution != rejected)"
+    # the frontend's own "Принятые" bucket (engKoFilter === "applied") is exactly this predicate
+    resolved_non_rejected = [x for x in all_props.values() if x["resolved"] and x["resolution"] != "rejected"]
+    assert {pid1, pid2} <= {x["id"] for x in resolved_non_rejected}
+
+
+def test_check2_create_project_from_a_previously_accepted_proposal(env):
+    srv = env()
+    proposal_id = _submit_unmatched(srv, "TAISHAN", "X", 1110, "TAISHAN на сканировании")
+    s = session(srv)
+    assert s.post(srv.url + f"/api/ko/proposals/{proposal_id}/apply", json={}, timeout=10).status_code == 200
+    resolved = s.get(srv.url + "/api/ko/proposals?status=all", timeout=10).json()["proposals"]
+    item = [x for x in resolved if x["id"] == proposal_id][0]
+    assert item["resolved"] and item["resolution"] == "acknowledged" and "project_created_later" not in item["payload"]
+
+    fields = {"manufacturer": "TAISHAN", "vehicle_model": "X", "product_type": "Защита картера", "status": "scanning"}
+    r = s.post(srv.url + f"/api/ko/proposals/{proposal_id}/create-project", json=fields, timeout=10)
+    assert r.status_code == 201, r.text
+    project_id = r.json()["result"]["project_id"]
+    assert r.json()["late"] is True
+    created = project(srv, s, project_id)
+    assert created["record_category"] == "main_project" and created["manufacturer"] == "TAISHAN"
+
+
+def test_check3_late_creation_never_rewrites_the_original_decision(env):
+    srv = env()
+    proposal_id = _submit_unmatched(srv, "TAISHAN", "X", 1120, "TAISHAN на сканировании")
+    s = session(srv)
+    s.post(srv.url + f"/api/ko/proposals/{proposal_id}/apply", json={}, timeout=10)
+    before = [x for x in s.get(srv.url + "/api/ko/proposals?status=all", timeout=10).json()["proposals"] if x["id"] == proposal_id][0]
+
+    s.post(srv.url + f"/api/ko/proposals/{proposal_id}/create-project",
+           json={"manufacturer": "TAISHAN", "vehicle_model": "X", "product_type": "Защита картера", "status": "scanning"}, timeout=10)
+    after = [x for x in s.get(srv.url + "/api/ko/proposals?status=all", timeout=10).json()["proposals"] if x["id"] == proposal_id][0]
+
+    assert after["resolved_at"] == before["resolved_at"], "the original acknowledgement's timestamp must not move"
+    assert after["resolution"] == before["resolution"] == "acknowledged"
+    assert after["payload"]["decision"] == before["payload"]["decision"], "the original decision record is untouched"
+    assert after["payload"]["project_created_later"]["result"]["project_id"]
+    assert "project_created_later" not in before["payload"]
+
+
+def test_check4_late_creation_is_protected_against_double_click_repeat_and_restart(env):
+    srv = env()
+    proposal_id = _submit_unmatched(srv, "TAISHAN", "X", 1130, "TAISHAN на сканировании")
+    s = session(srv)
+    s.post(srv.url + f"/api/ko/proposals/{proposal_id}/apply", json={}, timeout=10)
+    fields = {"manufacturer": "TAISHAN", "vehicle_model": "X", "product_type": "Защита картера", "status": "scanning"}
+
+    first = s.post(srv.url + f"/api/ko/proposals/{proposal_id}/create-project", json=fields, timeout=10)
+    assert first.status_code == 201
+    project_id = first.json()["result"]["project_id"]
+
+    # double click / repeat request on the same already-late-created proposal
+    second = s.post(srv.url + f"/api/ko/proposals/{proposal_id}/create-project", json=fields, timeout=10)
+    assert second.status_code == 409
+    assert second.json()["existing_ids"] == [project_id]
+
+    srv.restart()
+    s2 = session(srv)
+    third = s2.post(srv.url + f"/api/ko/proposals/{proposal_id}/create-project", json=fields, timeout=10)
+    assert third.status_code == 409
+    taishan_projects = [p for p in ko(srv, "/projects").json()["projects"] if p["manufacturer"] == "TAISHAN"]
+    assert len(taishan_projects) == 1, "exactly one TAISHAN project must exist after all of this"
+
+
+def test_check5_make_model_product_category_and_stage_are_all_required(env):
+    srv = env()
+    proposal_id = _submit_unmatched(srv, "TAISHAN", "X", 1140, "TAISHAN на сканировании")
+    s = session(srv)
+    url = srv.url + f"/api/ko/proposals/{proposal_id}/create-project"
+    full = {"manufacturer": "TAISHAN", "vehicle_model": "X", "product_type": "Защита картера", "status": "scanning"}
+
+    for missing in ("manufacturer", "vehicle_model", "product_type", "status"):
+        body = dict(full)
+        del body[missing]
+        r = s.post(url, json=body, timeout=10)
+        assert r.status_code == 400, f"missing {missing} must be refused, got {r.status_code}"
+
+    # record_category is a fixed, always-present "main_project" - not a client-settable field at all
+    r = s.post(url, json=dict(full, record_category="backlog"), timeout=10)
+    assert r.status_code == 201, r.text
+    created = project(srv, s, r.json()["result"]["project_id"])
+    assert created["record_category"] == "main_project", "record_category must stay locked to main_project regardless of what the client sends"
+
+
+def test_check6_created_project_lands_in_the_correct_kanban_section(env):
+    srv = env()
+    proposal_id = _submit_unmatched(srv, "TAISHAN", "X", 1150, "TAISHAN на сканировании")
+    s = session(srv)
+    r = s.post(srv.url + f"/api/ko/proposals/{proposal_id}/create-project",
+                json={"manufacturer": "TAISHAN", "vehicle_model": "X", "product_type": "Защита картера", "status": "scanning"}, timeout=10)
+    project_id = r.json()["result"]["project_id"]
+    board = s.get(srv.url + "/api/projects", timeout=10).json()
+    taishan = [p for p in board if p["id"] == project_id][0]
+    assert taishan["record_category"] == "main_project" and taishan["status"] == "scanning"
+    assert not taishan.get("is_completed")
+    # this is exactly the predicate public/index.html's loadEngProjects() uses for the Kanban's
+    # "Активные проекты": record_category === "main_project" && !is_completed
+    assert taishan["record_category"] == "main_project" and not taishan.get("is_completed")
+
+
 # ------------------------------------------------------------------ message types (archive v2)
 
 def _media_msg(message_id, **fields):

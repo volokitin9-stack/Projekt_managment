@@ -192,6 +192,26 @@ function close(id, resolution, actor, result) {
 }
 
 /**
+ * Критическое требование: "Подтверди, что для ранее принятого предложения можно вручную создать
+ * новый проект" + "создание проекта не изменяет задним числом историю первоначального решения" -
+ * records a project created *after* an already-resolved acknowledgement in its own field, never
+ * touching `resolved`/`resolved_at`/`resolution`/`decision` (the exact snapshot of the original
+ * "Принять к сведению" decision). Only ever written once per item - the guard in
+ * createProjectFromProposal below reads `payload.project_created_later` before this runs, and this
+ * is itself the one and only writer of that field, so a double click (or a repeat request after
+ * the first one already completed, including across a restart) finds it already set and is
+ * refused before this is called again.
+ */
+function recordLaterProjectCreation(id, actor, result) {
+  return store.tx((s) => {
+    const r = s.review_queue.find((x) => x.id === id && x.kind === KIND);
+    if (!r || !r.resolved || r.payload.project_created_later) return false;
+    r.payload = Object.assign({}, r.payload, { project_created_later: { by: actor, at: nowIso(), result } });
+    return true;
+  });
+}
+
+/**
  * Apply an open proposal on behalf of the person `actor`. opts.version = the project version the
  * person was looking at (required for field/stage changes - the same optimistic-concurrency rule as
  * the dashboard's own PATCH). Synchronous end to end, so two concurrent clicks cannot both apply.
@@ -285,19 +305,39 @@ const NEW_PROJECT_FIELDS = ["manufacturer", "vehicle_model", "product_type", "st
   "assigned_engineer", "priority", "description"];
 
 /**
- * Create a brand-new engineering project from an open proposal's evidence. `fields` is whatever the
+ * Create a brand-new engineering project from a proposal's evidence. `fields` is whatever the
  * person confirmed in the dialog (pre-filled from the proposal, but never trusted unedited) -
- * marka/model/izdeliye and a confirmed stage are mandatory; the rest optional. Synchronous end to
- * end like apply()/reject(), so a repeated click (or two concurrent ones) cannot create two
- * projects or resolve the same proposal twice: the very first thing this does is the same
- * `item.resolved` check apply()/reject() make, and it is the last thing this does before handing
- * back to the caller - nothing in between yields to another request.
+ * marka/model/izdeliye and a confirmed stage are mandatory; the rest optional.
+ *
+ * Works in two cases:
+ *   - the proposal is still open (the normal path - closes it as "applied", exactly as before);
+ *   - the proposal was already resolved as "acknowledged" (project_match/needs_clarification,
+ *     accepted with zero side effect at the time) and no project has been created from it since -
+ *     критическое требование "для ранее принятого предложения можно вручную создать новый
+ *     проект". The original decision (resolved_at/resolution/payload.decision) is never touched in
+ *     this case - recordLaterProjectCreation() writes to its own separate field.
+ * Any other already-resolved state (applied to a real change, or rejected) is refused - creating a
+ * project is not a way to undo or redo a decision that already did something else.
+ *
+ * Synchronous end to end like apply()/reject(), so a repeated click (or two concurrent ones, or a
+ * repeat request after a restart) cannot create two projects: the very first thing this does is
+ * read the current resolved/project_created_later state, and the one write that can change it
+ * (close() or recordLaterProjectCreation()) is the last thing this does before handing back to the
+ * caller - nothing in between yields to another request.
  */
 function createProjectFromProposal(id, { actor, fields = {} } = {}) {
   const item = getItem(id);
   if (!item) return fail(404, "Предложение не найдено");
-  if (item.resolved) return fail(409, `Предложение уже обработано (${item.resolution})`);
   const p = item.payload || {};
+  let isLate = false;
+  if (item.resolved) {
+    if (item.resolution !== "acknowledged") return fail(409, `Предложение уже обработано (${item.resolution})`);
+    if (p.project_created_later) {
+      return fail(409, "Проект по этому предложению уже создан ранее",
+        { existing_ids: [p.project_created_later.result.project_id] });
+    }
+    isLate = true;
+  }
   const input = Object.assign({ record_category: "main_project" }, pick(fields, NEW_PROJECT_FIELDS));
   if (!input.status) return fail(400, "Для нового проекта обязательна подтверждённая стадия", { details: ['"status" обязателен'] });
   const v = projectsModel.validateProjectInput(input, { partial: false, allowed: NEW_PROJECT_FIELDS.concat(["record_category"]) });
@@ -311,12 +351,13 @@ function createProjectFromProposal(id, { actor, fields = {} } = {}) {
   const project = projectsModel.createProject(input, { source: SOURCE, actor, needsReview: false });
   const note = `Проект создан по предложению агента КО (${p.kind}):\n${p.summary}\n${evidenceNote(p)}`;
   projectsModel.recordActivity(project.id, "ko_proposal_applied", "manual", actor, null,
-    { proposal_id: id, kind: p.kind, created: true, links: (p.evidence || []).map((e) => e.link) });
+    { proposal_id: id, kind: p.kind, created: true, late: isLate, links: (p.evidence || []).map((e) => e.link) });
   projectsModel.safeUpdate(project.id, { comments: [{ id: require("uuid").v4(), text: note, source: "manual", author: actor,
     at: nowIso(), ko_proposal_id: id }] }, { source: "manual", actor });
   const result = { project_id: project.id, created: true };
-  close(id, "applied", actor, result);
-  return { status: 201, body: { id, applied: true, result } };
+  const ok = isLate ? recordLaterProjectCreation(id, actor, result) : close(id, "applied", actor, result);
+  if (!ok) return fail(409, "Предложение изменилось параллельно — обновите страницу и повторите");
+  return { status: 201, body: { id, applied: true, result, late: isLate } };
 }
 
 function reject(id, { actor, reason = null } = {}) {
