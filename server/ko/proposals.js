@@ -274,6 +274,51 @@ function apply(id, { actor, version = null } = {}) {
   return { status: 200, body: { id, applied: true, result } };
 }
 
+// Критическое требование: "Не превращать любое needs_clarification или project_match
+// автоматически в новый проект" - apply() above never creates a project for any kind; this is a
+// separate, explicit action a person must deliberately choose, with its own validated field set
+// (never the full PROJECT_FIELDS an agent plan-sync can write) and its own duplicate check, reusing
+// the exact same identity match the dashboard/agent project-creation paths already use
+// (projectsModel.matchByIdentifiers). Always record_category "main_project" - "main_project только
+// после подтверждения администратора" is this action itself, there is no other path into it.
+const NEW_PROJECT_FIELDS = ["manufacturer", "vehicle_model", "product_type", "status", "article_number",
+  "assigned_engineer", "priority", "description"];
+
+/**
+ * Create a brand-new engineering project from an open proposal's evidence. `fields` is whatever the
+ * person confirmed in the dialog (pre-filled from the proposal, but never trusted unedited) -
+ * marka/model/izdeliye and a confirmed stage are mandatory; the rest optional. Synchronous end to
+ * end like apply()/reject(), so a repeated click (or two concurrent ones) cannot create two
+ * projects or resolve the same proposal twice: the very first thing this does is the same
+ * `item.resolved` check apply()/reject() make, and it is the last thing this does before handing
+ * back to the caller - nothing in between yields to another request.
+ */
+function createProjectFromProposal(id, { actor, fields = {} } = {}) {
+  const item = getItem(id);
+  if (!item) return fail(404, "Предложение не найдено");
+  if (item.resolved) return fail(409, `Предложение уже обработано (${item.resolution})`);
+  const p = item.payload || {};
+  const input = Object.assign({ record_category: "main_project" }, pick(fields, NEW_PROJECT_FIELDS));
+  if (!input.status) return fail(400, "Для нового проекта обязательна подтверждённая стадия", { details: ['"status" обязателен'] });
+  const v = projectsModel.validateProjectInput(input, { partial: false, allowed: NEW_PROJECT_FIELDS.concat(["record_category"]) });
+  if (v.errors.length) return fail(400, "Validation failed", { details: v.errors });
+  const dup = projectsModel.matchByIdentifiers({ manufacturer: input.manufacturer, vehicle_model: input.vehicle_model,
+    product_type: input.product_type });
+  if (dup.matches.length) {
+    return fail(409, "Проект с такой маркой/моделью/изделием уже существует — используйте «Применить» на найденном проекте",
+      { existing_ids: dup.matches.map((m) => m.id) });
+  }
+  const project = projectsModel.createProject(input, { source: SOURCE, actor, needsReview: false });
+  const note = `Проект создан по предложению агента КО (${p.kind}):\n${p.summary}\n${evidenceNote(p)}`;
+  projectsModel.recordActivity(project.id, "ko_proposal_applied", "manual", actor, null,
+    { proposal_id: id, kind: p.kind, created: true, links: (p.evidence || []).map((e) => e.link) });
+  projectsModel.safeUpdate(project.id, { comments: [{ id: require("uuid").v4(), text: note, source: "manual", author: actor,
+    at: nowIso(), ko_proposal_id: id }] }, { source: "manual", actor });
+  const result = { project_id: project.id, created: true };
+  close(id, "applied", actor, result);
+  return { status: 201, body: { id, applied: true, result } };
+}
+
 function reject(id, { actor, reason = null } = {}) {
   const item = getItem(id);
   if (!item) return fail(404, "Предложение не найдено");
@@ -282,4 +327,4 @@ function reject(id, { actor, reason = null } = {}) {
   return { status: 200, body: { id, rejected: true } };
 }
 
-module.exports = { submit, list, apply, reject, resolveProject, KIND, SOURCE, MAX_BATCH };
+module.exports = { submit, list, apply, reject, createProjectFromProposal, resolveProject, KIND, SOURCE, MAX_BATCH };

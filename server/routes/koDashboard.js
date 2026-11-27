@@ -57,6 +57,15 @@ router.post("/proposals/:id/apply", dashboardAuth.requireCsrfToken, (req, res) =
   res.status(r.status).json(r.body);
 });
 
+// Explicit, separate action from "apply" (критическое требование: never an automatic side effect
+// of acknowledging project_match/needs_clarification) - a person fills in and confirms the
+// identity/stage fields themselves; server/ko/proposals.js#createProjectFromProposal validates,
+// de-duplicates and creates record_category "main_project" only here.
+router.post("/proposals/:id/create-project", dashboardAuth.requireCsrfToken, (req, res) => {
+  const r = proposals.createProjectFromProposal(req.params.id, { actor: actorOf(req), fields: req.body || {} });
+  res.status(r.status).json(r.body);
+});
+
 router.post("/proposals/:id/reject", dashboardAuth.requireCsrfToken, (req, res) => {
   const r = proposals.reject(req.params.id, { actor: actorOf(req), reason: (req.body || {}).reason || null });
   res.status(r.status).json(r.body);

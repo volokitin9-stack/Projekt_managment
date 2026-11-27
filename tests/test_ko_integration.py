@@ -480,6 +480,149 @@ def test_reject_is_final_and_unresolved_project_cannot_be_applied(env):
     assert project(srv, s, p["id"])["status"] == p["status"]
 
 
+# ------------------------------------------------------------------ explicit project creation
+#
+# TAISHAN/HGH regression: a proposal about a vehicle not yet in the system cannot resolve to any
+# project (projectsModel.matchByIdentifiers finds nothing), so it is submitted as
+# needs_clarification/project_match - applying those has always been (and must stay) a pure
+# acknowledgement with zero side effect. Before this feature there was no other way for a person to
+# turn such a proposal into a real project: "Принять" silently closed it and nothing ever appeared
+# on the Kanban. createProjectFromProposal is the new, explicit, separate action for exactly this
+# case - never triggered automatically by apply().
+
+
+def test_needs_clarification_apply_still_creates_nothing_the_taishan_symptom(env):
+    """Reproduces the reported symptom end to end: a brand-new vehicle mentioned in the КО chat,
+    with no existing project to resolve to, applied via the ordinary "Принять к сведению" action.
+    The proposal must still disappear from the open list (resolved) while genuinely creating or
+    changing nothing - proving this is the acknowledge path's by-design behaviour, not a bug to
+    "fix" in apply() itself; the fix is the separate action tested below."""
+    srv = env()
+    hook(srv, msg(950, "В чате написали, что TAISHAN встал на сканирование"))
+    before_projects = {p["id"] for p in ko(srv, "/projects").json()["projects"]}
+    p = {"kind": "needs_clarification", "project_ref": {"manufacturer": "TAISHAN", "vehicle_model": "X", "product_type": "Защита картера"},
+         "summary": "TAISHAN на сканировании", "rationale": "сообщение в чате КО, проект не найден в системе",
+         "confidence": "low", "evidence": [ev(950, "TAISHAN встал на сканирование")]}
+    r = submit(srv, [p])
+    assert r.status_code == 201
+    proposal_id = r.json()["results"][0]["id"]
+    assert r.json()["results"][0]["resolved_project_id"] is None
+    s = session(srv)
+    res = s.post(srv.url + f"/api/ko/proposals/{proposal_id}/apply", json={}, timeout=10)
+    assert res.status_code == 200 and res.json()["result"] == {"acknowledged": True}
+    after_projects = {p["id"] for p in ko(srv, "/projects").json()["projects"]}
+    assert after_projects == before_projects, "acknowledging must never create a project"
+    resolved = [x for x in s.get(srv.url + "/api/ko/proposals?status=all", timeout=10).json()["proposals"] if x["id"] == proposal_id][0]
+    assert resolved["resolved"] is True and resolved["resolution"] == "acknowledged"
+
+
+def test_create_project_from_proposal_requires_fields_dedupes_and_is_not_double_clickable(env):
+    srv = env()
+    hook(srv, msg(960, "В чате написали, что TAISHAN встал на сканирование"))
+    p = {"kind": "needs_clarification", "project_ref": {"manufacturer": "TAISHAN", "vehicle_model": "X", "product_type": "Защита картера"},
+         "summary": "TAISHAN на сканировании", "rationale": "новая модель, проекта пока нет",
+         "confidence": "low", "evidence": [ev(960, "TAISHAN встал на сканирование")]}
+    proposal_id = submit(srv, [p]).json()["results"][0]["id"]
+    s = session(srv)
+    url = srv.url + f"/api/ko/proposals/{proposal_id}/create-project"
+
+    # auth/CSRF gates match every other mutating /api/ko route
+    assert requests.post(url, json={}, timeout=10).status_code == 401
+    no_csrf = requests.Session()
+    no_csrf.post(srv.url + "/api/login", json={"username": USER, "password": PASSWORD}, timeout=10)
+    assert no_csrf.post(url, json={}, timeout=10).status_code == 403
+
+    # validation: a confirmed stage and the identity triple are mandatory
+    assert s.post(url, json={"manufacturer": "TAISHAN", "vehicle_model": "X", "product_type": "Защита картера"}, timeout=10).status_code == 400
+    assert s.post(url, json={"status": "scanning"}, timeout=10).status_code == 400
+
+    fields = {"manufacturer": "TAISHAN", "vehicle_model": "X", "product_type": "Защита картера", "status": "scanning"}
+    r = s.post(url, json=fields, timeout=10)
+    assert r.status_code == 201, r.text
+    project_id = r.json()["result"]["project_id"]
+    created = project(srv, s, project_id)
+    assert created["record_category"] == "main_project" and created["status"] == "scanning"
+    assert created["manufacturer"] == "TAISHAN" and created["vehicle_model"] == "X"
+    assert any(h["action"] == "ko_proposal_applied" for h in created["history"])
+    assert any(c.get("ko_proposal_id") == proposal_id for c in created["comments"])
+
+    # the proposal itself is now resolved, with the created project's id recorded as the result
+    resolved = [x for x in s.get(srv.url + "/api/ko/proposals?status=all", timeout=10).json()["proposals"] if x["id"] == proposal_id][0]
+    assert resolved["resolved"] and resolved["resolution"] == "applied"
+    assert resolved["payload"]["decision"]["result"] == {"project_id": project_id, "created": True}
+
+    # a second click on the same (now resolved) proposal must not create a second project
+    again = s.post(url, json=fields, timeout=10)
+    assert again.status_code == 409
+    assert len([pr for pr in ko(srv, "/projects").json()["projects"] if pr["manufacturer"] == "TAISHAN"]) == 1
+
+    # a different, later proposal for the identical identity must be refused as a duplicate, not create a second project
+    hook(srv, msg(961, "Ещё раз про TAISHAN, тот же сканирование"))
+    p2 = dict(p, summary="TAISHAN снова упомянут", evidence=[ev(961, "Ещё раз про TAISHAN")])
+    proposal_id2 = submit(srv, [p2]).json()["results"][0]["id"]
+    dup = s.post(srv.url + f"/api/ko/proposals/{proposal_id2}/create-project", json=fields, timeout=10)
+    assert dup.status_code == 409
+    assert dup.json()["existing_ids"] == [project_id]
+    assert len([pr for pr in ko(srv, "/projects").json()["projects"] if pr["manufacturer"] == "TAISHAN"]) == 1
+
+
+def test_create_project_action_is_admin_only_like_the_rest_of_the_ko_router(env):
+    srv = env()
+    hook(srv, msg(970, "HGH на сканировании, новая модель"))
+    p = {"kind": "needs_clarification", "project_ref": {"manufacturer": "HGH", "vehicle_model": "Y", "product_type": "Защита картера"},
+         "summary": "HGH на сканировании", "rationale": "новая модель", "confidence": "low", "evidence": [ev(970, "HGH на сканировании")]}
+    proposal_id = submit(srv, [p]).json()["results"][0]["id"]
+    admin = session(srv)
+    created = admin.post(srv.url + "/api/users", json={"full_name": "Просмотр", "username": "viewer_ko"}, timeout=10)
+    assert created.status_code == 201, created.text
+    manager = requests.Session()
+    manager.post(srv.url + "/api/login", json={"username": "viewer_ko", "password": created.json()["generated_password"]}, timeout=10)
+    r = manager.post(srv.url + f"/api/ko/proposals/{proposal_id}/create-project",
+                      json={"manufacturer": "HGH", "vehicle_model": "Y", "product_type": "Защита картера", "status": "scanning"}, timeout=10)
+    assert r.status_code == 403
+    assert len([pr for pr in ko(srv, "/projects").json()["projects"] if pr["manufacturer"] == "HGH"]) == 0
+
+
+def test_ko_proposal_history_survives_a_server_restart(env):
+    """История принятых/отклонённых/ожидающих предложений не теряется после перезапуска - review_queue
+    is the same persistent on-disk store every other collection already uses, never a new one."""
+    srv = env()
+    hook(srv, msg(980, "Поставили образец защиты радиатора на Jolion"))
+    hook(srv, msg(981, "По Tiggo 4 всё остановили, неверно"))
+    hook(srv, msg(982, "TAISHAN на сканировании, новая модель"))
+    radiator = find_project(srv, "HAVAL", "Защита радиатора")
+    chery = find_project(srv, "CHERY", "Брызговики")
+    applied_id = submit(srv, [stage_proposal(radiator["id"], "prototype", radiator["status"], 980, "поставили образец")]).json()["results"][0]["id"]
+    rejected_id = submit(srv, [{"kind": "problem", "project_ref": {"project_id": chery["id"]}, "summary": "Остановили",
+        "rationale": "для теста", "confidence": "medium", "evidence": [ev(981, "всё остановили")]}]).json()["results"][0]["id"]
+    pending_id = submit(srv, [{"kind": "needs_clarification", "project_ref": {"manufacturer": "TAISHAN", "vehicle_model": "X", "product_type": "Защита картера"},
+        "summary": "TAISHAN на сканировании", "rationale": "новая модель", "confidence": "low",
+        "evidence": [ev(982, "TAISHAN на сканировании")]}]).json()["results"][0]["id"]
+    s = session(srv)
+    s.post(srv.url + f"/api/ko/proposals/{applied_id}/apply", json={"version": radiator["version"]}, timeout=10)
+    s.post(srv.url + f"/api/ko/proposals/{rejected_id}/reject", json={"reason": "неверно"}, timeout=10)
+
+    srv.restart()
+    s2 = session(srv)
+    all_after = {x["id"]: x for x in s2.get(srv.url + "/api/ko/proposals?status=all", timeout=10).json()["proposals"]}
+
+    applied = all_after[applied_id]
+    assert applied["resolved"] is True and applied["resolution"] == "applied"
+    assert applied["payload"]["decision"]["result"]["stage"] == "prototype"
+
+    rejected = all_after[rejected_id]
+    assert rejected["resolved"] is True and rejected["resolution"] == "rejected"
+    assert rejected["payload"]["decision"]["result"]["reason"] == "неверно"
+
+    pending = all_after[pending_id]
+    assert pending["resolved"] is False
+
+    # the still-open one can still be turned into a project after the restart
+    cr = s2.post(srv.url + f"/api/ko/proposals/{pending_id}/create-project",
+                 json={"manufacturer": "TAISHAN", "vehicle_model": "X", "product_type": "Защита картера", "status": "scanning"}, timeout=10)
+    assert cr.status_code == 201, cr.text
+
+
 # ------------------------------------------------------------------ message types (archive v2)
 
 def _media_msg(message_id, **fields):

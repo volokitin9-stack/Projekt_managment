@@ -706,6 +706,7 @@
   .eng-card-source.actual{ background:var(--accent-soft); color:var(--accent-ink); }
   .eng-card-source.planned{ background:var(--surface-3); color:var(--ink-soft); }
   .eng-card-source.unconfirmed{ background:var(--warn-soft); color:var(--warn-ink); }
+  .eng-card-source.rejected{ background:var(--crit-soft); color:var(--crit-ink); }
   .eng-card-next{ font-size:10.5px; color:var(--ink); background:var(--surface-3); border-radius:6px; padding:3px 7px; margin-top:2px; }
   .eng-card-next b{ font-weight:600; }
   .eng-card-next.none{ color:var(--ink-faint); font-style:italic; background:none; padding:0; }
@@ -1263,6 +1264,46 @@
   </div>
 </div>
 
+<!-- Критическое требование: "безопасный механизм создания инженерного проекта по предложению
+     агента" - explicit action, validated fields, never automatic. -->
+<div class="modal-overlay" id="koCreateModalOverlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="koCreateModalTitle">
+    <h2 id="koCreateModalTitle">Новый проект по предложению агента</h2>
+    <div class="form-error" id="koCreateFormError"></div>
+    <form id="koCreateForm">
+      <div class="field">
+        <label for="koc-make">Марка</label>
+        <input id="koc-make" type="text" required>
+      </div>
+      <div class="field">
+        <label for="koc-model">Модель</label>
+        <input id="koc-model" type="text" required>
+      </div>
+      <div class="field">
+        <label for="koc-product">Изделие</label>
+        <input id="koc-product" type="text" required>
+      </div>
+      <div class="field">
+        <label for="koc-stage">Подтверждённый этап</label>
+        <select id="koc-stage" required></select>
+        <span class="help">Проект сразу создаётся с этим этапом как подтверждённым - так же, как «Подтвердить этап» на карточке.</span>
+      </div>
+      <div class="field">
+        <label for="koc-article">Артикул (необязательно)</label>
+        <input id="koc-article" type="text">
+      </div>
+      <div class="field">
+        <label for="koc-engineer">Ответственный (необязательно)</label>
+        <input id="koc-engineer" type="text">
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="koCreateCancelBtn">Отмена</button>
+        <button type="submit" class="btn primary" id="koCreateSubmitBtn">Создать проект</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 (function(){
   "use strict";
@@ -1805,6 +1846,13 @@
   var engAllRecords = [];    // every record incl. additional work and backlog
   var engReview = [];
   var engKo = [];
+  // Критическое требование: "История предложений" - открытые/принятые/отклонённые вместе в одном
+  // уже существующем хранилище (review_queue), просто разные срезы одного и того же списка.
+  var engKoFilter = "pending";
+  var ENG_KO_FILTERS = [
+    { id:"pending", label:"Ожидают решения" }, { id:"applied", label:"Принятые" },
+    { id:"rejected", label:"Отклонённые" }, { id:"all", label:"Все" }
+  ];
   var engStagesLoaded = false;
   var engSubview = "board";
   // Persists across renderEngBoard() calls (unlike a function-local var) - a render that happens
@@ -1894,7 +1942,7 @@
     var ready = engStagesLoaded ? Promise.resolve() : loadStages().then(function(){ engStagesLoaded = true; });
     return ready.then(function(){
       return Promise.all([apiFetch("/api/projects"), apiFetch("/api/review-queue").catch(function(){ return []; }),
-        apiFetch("/api/ko/proposals").catch(function(){ return { proposals: [] }; })]);
+        apiFetch("/api/ko/proposals?status=all").catch(function(){ return { proposals: [] }; })]);
     }).then(function(res){
       engAllRecords = (res[0] || []).map(engNormalize);
       engProjects = engAllRecords.filter(function(p){ return p.record_category === "main_project" && !p.is_completed; });
@@ -2754,10 +2802,60 @@
     if(pl.kind === "new_task") return c.title + (c.responsible ? " · "+c.responsible : "") + (c.due ? " · до "+c.due : "");
     return "";
   }
+  // Критическое требование: "ID созданного/обновлённого объекта и ссылка на него" - every kind's
+  // apply() result (server/ko/proposals.js) is read here, never re-derived or guessed; a null/
+  // missing result (still pending) renders nothing.
+  function koResultInfo(result){
+    if(!result) return null;
+    if(result.acknowledged) return { text:"Принято к сведению — проект не создан и не изменён", id:null, kind:null };
+    if(result.task_id) return { text:"Задача создана", id:result.task_id, kind:"task" };
+    if(result.project_id){
+      var proj = engAllRecords.filter(function(x){ return x.id === result.project_id; })[0];
+      var name = proj ? [proj.make, proj.model, proj.product].filter(Boolean).join(" ") : result.project_id;
+      var where = "";
+      if(proj && proj.is_completed) where = " · раздел «Сданные проекты», не на Канбане";
+      else if(proj && proj.record_category && proj.record_category !== "main_project") where = " · раздел «"+(ENG_CATEGORY_LABELS[proj.record_category]||proj.record_category)+"», не на Канбане";
+      else if(!proj) where = " · проект не найден в текущем списке";
+      var text;
+      if(result.created) text = "Проект создан";
+      else if(result.stage) text = "Проект обновлён: этап → "+(ENG_STAGE_LABELS[result.stage]||result.stage)+(result.unchanged?" (этап уже был таким)":"");
+      else if(result.attached) text = "Фото прикреплено к проекту ("+result.attached.length+")";
+      else if(result.comment_id) text = "Комментарий добавлен в проект";
+      else text = "Проект обновлён";
+      return { text:text+": "+name+where, id:result.project_id, kind:"project" };
+    }
+    return null;
+  }
+  function koStatusBadgeHtml(r){
+    if(!r.resolved) return '<span class="eng-card-source unconfirmed">Ожидает решения</span>';
+    if(r.resolution === "rejected") return '<span class="eng-card-source rejected">Отклонено</span>';
+    if(r.resolution === "acknowledged") return '<span class="eng-card-source actual">Принято к сведению</span>';
+    return '<span class="eng-card-source confirmed">Применено</span>';
+  }
+  function engKoTabsHtml(){
+    var counts = { pending:0, applied:0, rejected:0, all: engKo.length };
+    engKo.forEach(function(r){
+      if(!r.resolved) counts.pending++;
+      else if(r.resolution === "rejected") counts.rejected++;
+      else counts.applied++;
+    });
+    return '<div class="eng-detail-tabs" role="tablist" style="max-width:560px;">' + ENG_KO_FILTERS.map(function(f){
+      return '<button type="button" class="eng-detail-tab'+(engKoFilter===f.id?' active':'')+'" role="tab" data-action="ko-filter" data-filter="'+f.id+'">'+f.label+' ('+counts[f.id]+')</button>';
+    }).join("") + '</div>';
+  }
   function engKoHtml(){
-    if(!engKo.length) return '<div class="eng-empty">Предложений агента нет. Агент shturman-ko-analyst только предлагает изменения — проекты меняются лишь после «Применить».</div>';
-    var rows = engKo.map(function(r){
+    var filtered = engKo.filter(function(r){
+      if(engKoFilter === "all") return true;
+      if(engKoFilter === "pending") return !r.resolved;
+      if(engKoFilter === "rejected") return r.resolved && r.resolution === "rejected";
+      return r.resolved && r.resolution !== "rejected"; // applied (incl. acknowledged/created)
+    });
+    var tabs = engKoTabsHtml();
+    if(!engKo.length) return '<div class="eng-panel"><h3>Предложения агента КО</h3>'+tabs+'<div class="eng-empty">Предложений агента нет. Агент shturman-ko-analyst только предлагает изменения — проекты меняются лишь после «Применить».</div></div>';
+    if(!filtered.length) return '<div class="eng-panel"><h3>Предложения агента КО</h3>'+tabs+'<div class="eng-empty">Нет предложений в этом разделе.</div></div>';
+    var rows = filtered.map(function(r){
       var pl = r.payload || {};
+      var decision = pl.decision || null;
       var ev = (pl.evidence || []).map(function(e){
         var link = /^https:\/\/t\.me\//.test(e.link||"") ? ' <a href="'+escapeHtml(e.link)+'" target="_blank" rel="noopener noreferrer" style="color:var(--accent-ink);">сообщение</a>' : '';
         return '<div style="font-size:11.5px;margin-top:3px;"><b>'+escapeHtml(e.author||"?")+'</b> '+escapeHtml((e.date||"").slice(0,16).replace("T"," "))+': «'+escapeHtml(e.quote||"")+'»'+link+'</div>';
@@ -2765,17 +2863,32 @@
       var ph = (pl.photos || []).map(function(f){
         return '<img src="/api/ko/files/'+encodeURIComponent(f.file_id)+'" alt="" loading="lazy" style="width:64px;height:64px;object-fit:cover;border-radius:4px;margin:3px 3px 0 0;" title="'+escapeHtml(f.observation||"")+'">';
       }).join("");
-      var unresolved = !pl.resolved_project_id && ["new_task","needs_clarification"].indexOf(pl.kind) === -1;
-      var applyLabel = (pl.kind === "project_match" || pl.kind === "needs_clarification") ? "Принять к сведению" : "Применить";
-      return '<tr id="ko-row-'+escapeHtml(r.id)+'"><td>'+escapeHtml(KO_KIND[pl.kind]||pl.kind)+'<div style="font-size:11px;color:var(--ink-faint);">уверенность: '+escapeHtml(KO_CONF[pl.confidence]||pl.confidence||"—")+'</div></td>' +
-        '<td>'+escapeHtml(koProjectLabel(pl))+(unresolved ? '<div style="font-size:11px;color:var(--crit-ink);">'+escapeHtml(pl.resolution_note||"проект не определён")+'</div>' : '')+'</td>' +
-        '<td style="max-width:420px;"><div>'+escapeHtml(pl.summary||"")+'</div>'+(koChangeLabel(pl)?'<div style="font-weight:600;margin-top:3px;">'+escapeHtml(koChangeLabel(pl))+'</div>':'') +
+      var unresolved = !pl.resolved_project_id && pl.kind !== "new_task";
+      var applyLabel = (pl.kind === "project_match" || pl.kind === "needs_clarification") ? "Принять к сведению" : "Применить изменение";
+      var canCreateProject = !r.resolved && !pl.resolved_project_id && pl.kind !== "new_task";
+      var actionsHtml;
+      if(r.resolved){
+        var info = decision ? koResultInfo(decision.result) : null;
+        var when = r.resolved_at ? escapeHtml((r.resolved_at||"").slice(0,16).replace("T"," ")) : "";
+        var by = decision && decision.by ? escapeHtml(decision.by) : "";
+        actionsHtml = '<div style="font-size:11.5px;">'+(info ? escapeHtml(info.text) : (r.resolution === "rejected" ? "Предложение отклонено" : "—"))+
+          (info && info.id ? ' <button type="button" class="eng-mini-btn" data-action="ko-open-result" data-kind="'+info.kind+'" data-id="'+escapeHtml(info.id)+'">Открыть</button>' : '') +
+          '</div><div style="font-size:10.5px;color:var(--ink-faint);margin-top:3px;">'+when+(by?' · '+by:'')+'</div>';
+      } else {
+        actionsHtml = '<button type="button" class="eng-mini-btn" data-action="ko-apply" data-id="'+escapeHtml(r.id)+'"'+(unresolved&&!canCreateProject?' disabled title="Проект не определён однозначно"':'')+'>'+applyLabel+'</button> ' +
+          '<button type="button" class="eng-mini-btn" data-action="ko-reject" data-id="'+escapeHtml(r.id)+'">Отклонить</button>' +
+          (canCreateProject ? ' <button type="button" class="eng-mini-btn" data-action="ko-open-create" data-id="'+escapeHtml(r.id)+'">Создать проект</button>' : '');
+      }
+      return '<tr id="ko-row-'+escapeHtml(r.id)+'"><td>'+koStatusBadgeHtml(r)+'</td>' +
+        '<td>'+escapeHtml(KO_KIND[pl.kind]||pl.kind)+'<div style="font-size:11px;color:var(--ink-faint);">уверенность: '+escapeHtml(KO_CONF[pl.confidence]||pl.confidence||"—")+'</div>' +
+        '<div style="font-size:10.5px;color:var(--ink-faint);">создано: '+escapeHtml((r.created_at||"").slice(0,16).replace("T"," "))+'</div></td>' +
+        '<td>'+escapeHtml(koProjectLabel(pl))+(!r.resolved && unresolved ? '<div style="font-size:11px;color:var(--crit-ink);">'+escapeHtml(pl.resolution_note||"проект не определён")+'</div>' : '')+'</td>' +
+        '<td style="max-width:380px;"><div>'+escapeHtml(pl.summary||"")+'</div>'+(koChangeLabel(pl)?'<div style="font-weight:600;margin-top:3px;">'+escapeHtml(koChangeLabel(pl))+'</div>':'') +
         '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:3px;">'+escapeHtml(pl.rationale||"")+'</div>'+ev+(ph?'<div>'+ph+'</div>':'')+'</td>' +
-        '<td><button type="button" class="eng-mini-btn" data-action="ko-apply" data-id="'+escapeHtml(r.id)+'"'+(unresolved?' disabled title="Проект не определён однозначно"':'')+'>'+applyLabel+'</button> ' +
-        '<button type="button" class="eng-mini-btn" data-action="ko-reject" data-id="'+escapeHtml(r.id)+'">Отклонить</button></td></tr>';
+        '<td style="min-width:150px;">'+actionsHtml+'</td></tr>';
     }).join("");
     return '<div class="eng-panel"><h3>Предложения агента КО</h3><div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Выводы агента по сообщениям и фото чата КО. Каждое изменение применяется теми же проверками, что и ручное редактирование, и записывается в историю проекта со ссылками на сообщения.</div>' +
-      '<table class="eng-table"><tr><th>Тип</th><th>Проект</th><th>Суть, обоснование, источники</th><th></th></tr>'+rows+'</table></div>';
+      tabs + '<table class="eng-table" style="margin-top:10px;"><tr><th>Статус</th><th>Тип</th><th>Проект</th><th>Суть, обоснование, источники</th><th>Результат</th></tr>'+rows+'</table></div>';
   }
   function koAction(id, action){
     var item = engKo.filter(function(r){ return r.id === id; })[0];
@@ -2794,8 +2907,74 @@
     apiFetch("/api/whoami").then(function(who){
       var headers = (who && who.csrf_token) ? { "X-CSRF-Token": who.csrf_token } : {};
       return apiFetch("/api/ko/proposals/"+encodeURIComponent(id)+"/"+action, { method:"POST", headers: headers, body: body });
-    }).then(loadEngProjects).catch(function(err){ showSyncNote((action === "apply" ? "Не применено: " : "Не отклонено: ")+err.message); loadEngProjects(); });
+    }).then(function(res){
+      return loadEngProjects().then(function(){
+        // Критическое требование: "после каждого действия отображать подтверждение результата, а
+        // не просто удалять строку из списка" - res.result is exactly what apply() recorded.
+        if(action === "apply"){
+          var info = koResultInfo(res.result);
+          showSyncNote(info ? info.text : "Применено");
+        } else {
+          showSyncNote("Предложение отклонено");
+        }
+      });
+    }).catch(function(err){ showSyncNote((action === "apply" ? "Не применено: " : "Не отклонено: ")+err.message); loadEngProjects(); });
   }
+  function openKoResultObject(kind, id){
+    if(kind === "task"){ setTab("board"); return; }
+    setTab("eng");
+    setEngSubview("board");
+    loadEngProjects().then(function(){ openEngDetail(id); });
+  }
+
+  // ---- "Создать проект" from an unresolved proposal: explicit action, never automatic ----
+  var koCreateProposalId = null;
+  function openKoCreateModal(proposalId){
+    var item = engKo.filter(function(r){ return r.id === proposalId; })[0];
+    if(!item) return;
+    koCreateProposalId = proposalId;
+    var ref = (item.payload || {}).project_ref || {};
+    var change = (item.payload || {}).change || {};
+    document.getElementById("koc-make").value = ref.manufacturer || "";
+    document.getElementById("koc-model").value = ref.vehicle_model || "";
+    document.getElementById("koc-product").value = ref.product_type || "";
+    document.getElementById("koc-article").value = ref.article_number || "";
+    document.getElementById("koc-engineer").value = "";
+    var stageSelect = document.getElementById("koc-stage");
+    stageSelect.innerHTML = ENG_STAGES.map(function(s){ return '<option value="'+s+'">'+escapeHtml(ENG_STAGE_LABELS[s])+'</option>'; }).join("");
+    if(item.payload && item.payload.kind === "stage_change" && change.to) stageSelect.value = change.to;
+    document.getElementById("koCreateFormError").textContent = "";
+    document.getElementById("koCreateModalOverlay").classList.add("open");
+    document.getElementById("koc-make").focus();
+  }
+  function closeKoCreateModal(){ document.getElementById("koCreateModalOverlay").classList.remove("open"); koCreateProposalId = null; }
+  document.getElementById("koCreateCancelBtn").addEventListener("click", closeKoCreateModal);
+  document.getElementById("koCreateModalOverlay").addEventListener("click", function(e){ if(e.target === this) closeKoCreateModal(); });
+  document.getElementById("koCreateForm").addEventListener("submit", function(e){
+    e.preventDefault();
+    if(!koCreateProposalId) return;
+    var errEl = document.getElementById("koCreateFormError");
+    errEl.textContent = "";
+    var fields = {
+      manufacturer: document.getElementById("koc-make").value.trim(),
+      vehicle_model: document.getElementById("koc-model").value.trim(),
+      product_type: document.getElementById("koc-product").value.trim(),
+      status: document.getElementById("koc-stage").value,
+      article_number: document.getElementById("koc-article").value.trim() || undefined,
+      assigned_engineer: document.getElementById("koc-engineer").value.trim() || undefined
+    };
+    if(!window.confirm("Создать новый проект?\n\n"+fields.manufacturer+" "+fields.vehicle_model+" · "+fields.product_type+"\nЭтап: "+(ENG_STAGE_LABELS[fields.status]||fields.status))) return;
+    var proposalId = koCreateProposalId;
+    apiFetch("/api/ko/proposals/"+encodeURIComponent(proposalId)+"/create-project", { method:"POST", body: fields })
+      .then(function(res){
+        closeKoCreateModal();
+        return loadEngProjects().then(function(){
+          var info = koResultInfo(res.result);
+          showSyncNote(info ? info.text : "Проект создан");
+          if(res.result && res.result.project_id) openEngDetail(res.result.project_id);
+        });
+      }).catch(function(err){ errEl.textContent = err.message; });
+  });
 
   // ---- completed projects: a lifecycle status independent of the Kanban stage (section 10) ----
   var engCompletedSearch = "";
@@ -3034,6 +3213,17 @@
     if(act === "ko-apply" || act === "ko-reject"){
       e.stopPropagation();
       koAction(btn.getAttribute("data-id"), act === "ko-apply" ? "apply" : "reject");
+      return;
+    }
+    if(act === "ko-filter"){ engKoFilter = btn.getAttribute("data-filter"); renderEngSubviewLists(); return; }
+    if(act === "ko-open-result"){
+      e.stopPropagation();
+      openKoResultObject(btn.getAttribute("data-kind"), btn.getAttribute("data-id"));
+      return;
+    }
+    if(act === "ko-open-create"){
+      e.stopPropagation();
+      openKoCreateModal(btn.getAttribute("data-id"));
       return;
     }
     if(act === "eng-resolve-review"){
@@ -4542,6 +4732,10 @@
       .then(loadKoNotifications).catch(function(){});
     setTab("eng");
     setEngSubview("ko");
+    // The notified proposal may already be resolved (applied/rejected) by the time it's clicked -
+    // "all" guarantees the row is always rendered, whichever of the four history tabs it would
+    // otherwise sit under.
+    engKoFilter = "all";
     loadEngProjects().then(function(){ flashKoRow(proposalId); });
   }
   document.getElementById("notifBellBtn").addEventListener("click", function(e){
