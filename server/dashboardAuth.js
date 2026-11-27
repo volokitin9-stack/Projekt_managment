@@ -208,8 +208,13 @@ function whoAmI(req, res) {
   const cookies = parseCookies(req.get("cookie"));
   const session = verify(cookies[COOKIE_NAME]);
   const live = session && (!session.uid || usersModel.isSessionLive(session.uid, session.tv));
+  // full_name is only ever a real, stored manager name (server/usersModel.js, set at account
+  // creation) - the administrator identity has no such field, so the UI falls back to the
+  // username rather than ever inventing a display name for it.
+  const managerRecord = live && session.uid ? usersModel.getById(session.uid) : null;
   res.json({
     auth_required: true, authenticated: !!live, username: live ? session.u : null,
+    full_name: managerRecord ? managerRecord.full_name : null,
     role: live ? (session.role || "admin") : null,
     csrf_token: live ? csrfToken(req) : null
   });

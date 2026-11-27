@@ -125,6 +125,58 @@ def test_journal_hides_technical_fields_from_everyone_but_shows_the_rest(tmp_pat
         srv.stop()
 
 
+def test_history_endpoint_gates_raw_technical_data_by_role(tmp_path):
+    """GET /api/projects/:id/history had no role check at all - any authenticated session, ko_viewer
+    included, got the raw project.history rows (the same technical/diagnostic fields
+    presentHistoryEvents/redactTechnicalForRole exist specifically to keep out of a manager's
+    hands on every other endpoint). The administrator must keep full raw access; a manager must
+    get the same readable, technical-field-free journal the "История" tab already shows via
+    GET /:id; and a request with no session at all must be refused before it ever reaches the
+    route (dashboardAuth.requireDashboardSession, mounted ahead of every /api/projects route)."""
+    srv = make_server(tmp_path)
+    try:
+        admin = admin_session(srv)
+        pid = create_project(srv)
+        activity = {"activity_key": "a1", "plan_month": "2026-11", "name": "Разработка защиты",
+                    "planned_hours": 10, "actual_hours": 5, "details": {"mapping_rule": "v1"}}
+        sync_activity(srv, pid, activity, run_id="run-1")
+        changed = dict(activity, actual_hours=7, details={
+            "delivery_chance": "высокий", "probability_note": "90%", "sales_channel": "OEM",
+            "mapping_rule": "v2", "unmapped_columns": {"X": 1}, "actual_hours_source": "day columns"})
+        sync_activity(srv, pid, changed, run_id="run-2")
+
+        # administrator: unchanged, full raw rows (same array GET /:id/history always returned)
+        r_admin = admin.get(srv.url + f"/api/projects/{pid}/history", timeout=10)
+        assert r_admin.status_code == 200
+        admin_rows = r_admin.json()
+        assert isinstance(admin_rows, list) and len(admin_rows) >= 2
+        assert any("actual_hours" in row.get("action", "") for row in admin_rows), "raw rows, not a readable journal"
+        admin_text = json.dumps(admin_rows)
+        assert "mapping_rule" in admin_text, "admin must keep full technical detail here, same as before"
+
+        # ko_viewer manager: readable journal (same shape/content as GET /:id's history_events),
+        # never the raw technical rows
+        manager = create_manager(admin, srv)
+        r_mgr = manager.get(srv.url + f"/api/projects/{pid}/history", timeout=10)
+        assert r_mgr.status_code == 200
+        mgr_events = r_mgr.json()
+        assert isinstance(mgr_events, list) and mgr_events, "still gets a readable journal, not a 403/empty body"
+        assert all("raw" not in e for e in mgr_events), "no raw diagnostic rows leaked to a manager"
+        mgr_text = json.dumps(mgr_events)
+        for leak in ("delivery_chance", "probability_note", "sales_channel", "mapping_rule",
+                     "unmapped_columns", "actual_hours_source"):
+            assert leak not in mgr_text, f"leaked technical field into manager's /history response: {leak}"
+        # same readable content the manager already sees on the card's own История tab via GET /:id
+        pview = manager.get(srv.url + f"/api/projects/{pid}", timeout=10).json()
+        assert [e["changes"] for e in mgr_events] == [e["changes"] for e in pview["history_events"]]
+
+        # no session at all: refused before reaching the route, same as every other /api/projects GET
+        r_anon = requests.get(srv.url + f"/api/projects/{pid}/history", timeout=10)
+        assert r_anon.status_code == 401
+    finally:
+        srv.stop()
+
+
 def test_journal_groups_one_sync_into_one_expandable_event(tmp_path):
     srv = make_server(tmp_path)
     try:

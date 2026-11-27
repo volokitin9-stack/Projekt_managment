@@ -124,8 +124,8 @@ const proposalId = process.argv[6] || "";
   await page.click("#notifBellBtn");
   await page.waitForSelector("#notifPanel.open", { timeout: 5000 });
   result.badge_after_click = await page.evaluate(() => {
-    const b = document.getElementById("notifBadge");
-    return getComputedStyle(b).display === "none" ? "0" : b.textContent;
+    const wrap = document.getElementById("notifBadgeWrap");
+    return getComputedStyle(wrap).display === "none" ? "0" : document.getElementById("notifBadge").textContent;
   });
   result.clicked_item_unread_class_after = await page.evaluate((pid) => {
     const el = document.querySelector('#notifPanelList [data-proposal-id="' + pid + '"]');
@@ -135,8 +135,8 @@ const proposalId = process.argv[6] || "";
   await page.click("#notifMarkAllBtn");
   await page.waitForTimeout(300);
   result.badge_after_mark_all = await page.evaluate(() => {
-    const b = document.getElementById("notifBadge");
-    return getComputedStyle(b).display === "none" ? "0" : b.textContent;
+    const wrap = document.getElementById("notifBadgeWrap");
+    return getComputedStyle(wrap).display === "none" ? "0" : document.getElementById("notifBadge").textContent;
   });
   result.scroll_final = await page.evaluate((sel) => document.querySelector(sel).scrollTop, colSel);
 

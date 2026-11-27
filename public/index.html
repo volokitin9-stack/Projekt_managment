@@ -11,33 +11,44 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 <style>
   :root{
-    --bg:#0D1722;
-    --surface:#142230;
-    --surface-2:#192A3A;
-    --surface-3:#1F3245;
-    --ink:#E7EFF8;
-    --ink-soft:#91A9BC;
-    --ink-faint:#5E7788;
-    --line:#293B4B;
-    --accent:#5296FF;
-    --accent-ink:#8FC1FF;
-    --accent-soft:#17304F;
-    --good:#30CE98;
-    --good-soft:#103626;
-    --crit:#F2545B;
-    --crit-soft:#3A1A1E;
-    --warn:#D8A44E;
-    --warn-soft:#3A2E14;
-    --q-urgent:#5296FF;
-    --q-inbox:#95ABBA;
-    --q-others:#27D1C1;
-    --q-give:#30CE98;
-    --q-drop:#758B9A;
-    --root-fill:#CBD8E2;
-    --root-ink:#13202B;
-    --grid-line: rgba(145,169,188,.06);
-    --shadow: 0 4px 18px rgba(2,8,16,.4);
-    --radius:10px;
+    /* Approved Design Concept #4 - light engineering workspace. Token names are unchanged from
+       the previous dark theme (every rule below already references them via var()), so this is a
+       value swap, not a rule-by-rule rewrite - see docs/LIGHT_REDESIGN.md for the handful of
+       exceptions (inline literal colors) that needed a matching fix alongside this block. */
+    --bg:#F5F8FD;
+    --bg-2:#EDF3FC;
+    --sidebar-bg:#F8FAFF;
+    --surface:#FFFFFF;
+    --surface-2:#F3F7FC;
+    --surface-3:#EDF3FC;
+    --ink:#17253D;
+    --ink-soft:#64748B;
+    --ink-faint:#94A3B8;
+    --line:#DFE7F2;
+    --accent:#2463EB;
+    --accent-hover:#174BCB;
+    --accent-ink:#174BCB;
+    --accent-soft:#E5EEFF;
+    --good:#16A36A;
+    --good-soft:#E3F6EC;
+    --good-ink:#0E7A4F;
+    --crit:#E45160;
+    --crit-soft:#FBE8EA;
+    --crit-ink:#B42318;
+    --warn:#E59A22;
+    --warn-soft:#FBF0DD;
+    --warn-ink:#8A5A0A;
+    --info:#347DEB;
+    --q-urgent:#2463EB;
+    --q-inbox:#7C93AE;
+    --q-others:#0EA5A3;
+    --q-give:#16A36A;
+    --q-drop:#AAB8C7;
+    --root-fill:#E5EEFF;
+    --root-ink:#17253D;
+    --grid-line: rgba(23,37,61,.05);
+    --shadow: 0 1px 2px rgba(23,37,61,.06), 0 6px 16px rgba(23,37,61,.08);
+    --radius:12px;
   }
 
   *{box-sizing:border-box;}
@@ -56,14 +67,17 @@
   @media (prefers-reduced-motion: reduce){ *{ transition:none !important; animation:none !important; } }
   button{ font-family:inherit; }
 
-  .shell{ max-width:1440px; margin:0 auto; padding-bottom:0; }
+  /* No max-width: the redesign calls for using the full available workspace width (sidebar
+     already bounds the content on the left) - a centered 1440px column left real screen space
+     unused on anything wider, the personal task tree included. */
+  .shell{ padding-bottom:0; }
 
   svg.icon{ display:block; flex-shrink:0; }
 
   /* ---- app shell: persistent left sidebar + main workspace ---- */
   .app-shell{ display:flex; min-height:100vh; align-items:stretch; }
   .sidebar{
-    flex-shrink:0; width:198px; background:#101C2A; border-right:1px solid var(--line);
+    flex-shrink:0; width:198px; background:var(--sidebar-bg); border-right:1px solid var(--line);
     display:flex; flex-direction:column; position:sticky; top:0; height:100vh; z-index:25;
     transition:width .16s ease;
   }
@@ -104,22 +118,73 @@
     .mobile-menu-btn{ display:inline-flex !important; }
   }
 
-  /* ---- header (compact: the board/graph is the main surface, not the chrome) ---- */
+  /* ---- header (compact, but tall enough for the section breadcrumb + messages + profile) ---- */
   .app-header{
     position:sticky; top:0; z-index:20;
-    height:40px;
+    height:60px;
     background:var(--surface);
     border-bottom:1px solid var(--line);
-    display:flex; align-items:center; justify-content:space-between;
-    padding:0 14px; gap:12px;
+    display:flex; align-items:center; justify-content:flex-start;
+    padding:0 18px; gap:10px;
   }
+  .header-spacer{ flex:1 1 auto; }
   .mobile-menu-btn{
     display:none; align-items:center; justify-content:center; width:28px; height:28px; flex-shrink:0;
     background:none; border:1px solid var(--line); border-radius:7px; color:var(--ink-soft); cursor:pointer;
   }
-  .brand{ display:flex; flex-direction:row; align-items:baseline; gap:6px; min-width:90px; }
-  .brand .name{ font-weight:700; font-size:13px; letter-spacing:.05em; color:var(--ink); }
-  .brand .sub{ font-size:9.5px; color:var(--ink-soft); letter-spacing:.02em; }
+  /* The sidebar's own .sidebar-brand already shows "Д ДОСКА ПРОЕКТОВ" at the top-left of the whole
+     app shell (same row as this header) - repeating it here too would be the exact duplication
+     the redesign spec calls out ("Avoid duplicating the same application title in multiple
+     prominent locations"). This copy exists only for the narrow/mobile layout, where the sidebar
+     collapses off-canvas and nothing else carries the brand - see the max-width:767px override. */
+  .brand{ display:none; flex-direction:row; align-items:center; gap:7px; min-width:0; }
+  .brand .mark{
+    width:24px; height:24px; border-radius:6px; background:var(--accent-soft); color:var(--accent-ink);
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px; flex-shrink:0;
+  }
+  .brand .name{ font-weight:700; font-size:13px; letter-spacing:.05em; color:var(--ink); white-space:nowrap; }
+  .header-section-wrap{ position:relative; flex-shrink:0; }
+  .header-section-btn{
+    display:inline-flex; align-items:center; gap:5px; background:none; border:none; cursor:pointer;
+    font-size:15px; font-weight:600; color:var(--ink-soft); padding:6px 4px; border-radius:6px;
+  }
+  .header-section-btn:hover{ color:var(--ink); background:var(--surface-2); }
+  .header-section-btn .icon{ width:15px; height:15px; color:var(--ink-faint); }
+  .header-section-menu{
+    display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:200px; background:var(--surface);
+    border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); z-index:40; padding:6px; flex-direction:column; gap:1px;
+  }
+  .header-section-menu.open{ display:flex; }
+  .header-section-item{
+    display:block; width:100%; text-align:left; background:none; border:none; cursor:pointer; padding:7px 10px;
+    border-radius:7px; font-size:13px; color:var(--ink); font-weight:500;
+  }
+  .header-section-item:hover{ background:var(--surface-2); }
+  .header-section-item.active{ background:var(--accent-soft); color:var(--accent-ink); }
+  .user-chip-wrap{ position:relative; flex-shrink:0; }
+  .user-chip{
+    display:inline-flex; align-items:center; gap:9px; background:none; border:none; cursor:pointer;
+    padding:5px 6px; border-radius:9px;
+  }
+  .user-chip:hover{ background:var(--surface-2); }
+  .user-avatar{
+    width:32px; height:32px; border-radius:50%; background:var(--accent); color:#fff; font-weight:700;
+    font-size:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .user-meta{ display:flex; flex-direction:column; align-items:flex-start; line-height:1.3; }
+  .user-name{ font-size:12.5px; font-weight:600; color:var(--ink); white-space:nowrap; }
+  .user-role{ font-size:10.5px; color:var(--ink-soft); white-space:nowrap; }
+  .user-chip .icon{ width:14px; height:14px; color:var(--ink-faint); }
+  .user-menu{
+    display:none; position:absolute; top:calc(100% + 4px); right:0; min-width:140px; background:var(--surface);
+    border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); z-index:40; padding:6px;
+  }
+  .user-menu.open{ display:block; }
+  .user-menu-item{
+    display:block; width:100%; text-align:left; background:none; border:none; cursor:pointer; padding:7px 10px;
+    border-radius:7px; font-size:13px; color:var(--ink);
+  }
+  .user-menu-item:hover{ background:var(--crit-soft); color:var(--crit-ink); }
   .header-tabs{ display:flex; gap:3px; background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:2px; }
   .tab-btn{
     padding:4px 13px; background:none; border:none; cursor:pointer; border-radius:6px;
@@ -134,70 +199,81 @@
   }
   .header-clock .clock-date{ font-size:9px; color:var(--ink-soft); margin-top:1px; }
 
-  /* ---- КО notification bell (administrator only) ---- */
+  /* ---- Сообщения: the КО notification bell, relabelled per the redesign spec (administrator
+     only). Same #notifBellWrap/#notifBellBtn/#notifPanel/#notifPanelList/#notifBadge ids and the
+     same ko_notifications-backed data underneath - only the presentation changed. ---- */
   .notif-bell-wrap{ position:relative; flex-shrink:0; }
-  .notif-bell-btn{
-    position:relative; display:inline-flex; align-items:center; justify-content:center;
-    width:28px; height:28px; background:none; border:1px solid var(--line); border-radius:7px;
-    color:var(--ink-soft); cursor:pointer;
+  .messages-btn{
+    display:inline-flex; align-items:center; gap:7px; height:34px; padding:0 12px;
+    background:var(--surface); border:1px solid var(--line); border-radius:9px;
+    color:var(--ink-soft); cursor:pointer; font-size:13px; font-weight:600;
   }
-  .notif-bell-btn:hover{ color:var(--ink); border-color:var(--accent); }
-  .notif-bell-btn.has-unread{ color:var(--accent-ink); }
-  .notif-badge{
-    position:absolute; top:-6px; right:-6px; min-width:16px; height:16px; padding:0 3px;
-    background:var(--crit); color:#fff; border-radius:9px; font-size:10px; font-weight:700;
-    line-height:16px; text-align:center; font-variant-numeric:tabular-nums;
+  .messages-btn:hover{ border-color:var(--accent); color:var(--ink); }
+  .messages-btn .icon{ width:16px; height:16px; flex-shrink:0; }
+  .messages-btn.has-unread{ color:var(--ink); }
+  .messages-badge{
+    display:inline-flex; align-items:baseline; gap:3px; background:var(--accent-soft); color:var(--accent-ink);
+    border-radius:20px; padding:2px 8px; font-size:11.5px; font-weight:700; font-variant-numeric:tabular-nums;
   }
+  #notifChevron{ color:var(--ink-faint); width:13px; height:13px; }
   .notif-panel{
-    display:none; position:absolute; top:calc(100% + 8px); right:0; width:360px; max-width:92vw;
-    max-height:70vh; background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    display:none; position:absolute; top:calc(100% + 8px); right:0; width:380px; max-width:92vw;
+    max-height:70vh; background:var(--surface); border:1px solid var(--line); border-radius:12px;
     box-shadow:var(--shadow); z-index:40; flex-direction:column; overflow:hidden;
   }
   .notif-panel.open{ display:flex; }
-  .notif-panel-head{
-    display:flex; align-items:center; justify-content:space-between; padding:10px 12px;
-    border-bottom:1px solid var(--line); font-weight:700; font-size:12.5px;
-  }
-  .notif-panel-close{ background:none; border:none; color:var(--ink-soft); cursor:pointer; padding:2px; display:inline-flex; }
-  .notif-panel-close:hover{ color:var(--ink); }
-  .notif-panel-sub{ padding:6px 12px 0; font-size:11px; color:var(--ink-soft); }
-  .notif-panel-actions{ padding:6px 12px; }
+  .notif-panel-sub{ padding:9px 12px 0; font-size:11px; color:var(--ink-faint); }
+  .notif-panel-actions{ padding:8px 10px 0; }
   .notif-mark-all-btn{
     width:100%; padding:6px 8px; font-size:11.5px; font-weight:600; background:var(--surface-2);
     border:1px solid var(--line); border-radius:6px; color:var(--ink); cursor:pointer;
   }
   .notif-mark-all-btn:hover{ background:var(--surface-3); }
   .notif-mark-all-btn:disabled{ opacity:.5; cursor:default; }
-  .notif-panel-list{ overflow-y:auto; flex:1 1 auto; padding:0 6px 8px; }
-  .notif-empty{ padding:18px 12px; text-align:center; color:var(--ink-faint); font-size:12px; }
+  .notif-panel-list{ overflow-y:auto; flex:1 1 auto; padding:6px 6px 2px; }
+  .notif-empty{ padding:22px 12px; text-align:center; color:var(--ink-faint); font-size:12.5px; }
   .notif-item{
-    display:block; width:100%; text-align:left; background:none; border:none; cursor:pointer;
-    padding:8px 8px; margin:2px 0; border-radius:8px; color:var(--ink);
+    display:flex; align-items:flex-start; gap:9px; width:100%; text-align:left; background:none;
+    border:none; cursor:pointer; padding:8px; margin:1px 0; border-radius:9px; color:var(--ink);
   }
   .notif-item:hover{ background:var(--surface-2); }
   .notif-item.unread{ background:var(--accent-soft); }
+  .notif-item-icon{
+    width:28px; height:28px; border-radius:50%; flex-shrink:0; display:flex; align-items:center;
+    justify-content:center; background:var(--surface-3); color:var(--ink-faint); margin-top:1px;
+  }
+  .notif-item.unread .notif-item-icon{ background:var(--accent); color:#fff; }
+  .notif-item.unread .notif-item-icon.rejected{ background:var(--crit); }
+  .notif-item.unread .notif-item-icon.applied{ background:var(--good); }
+  .notif-item-icon .icon{ width:14px; height:14px; }
+  .notif-item-body{ min-width:0; flex:1 1 auto; }
   .notif-item-row{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
-  .notif-item-project{ font-weight:700; font-size:12.5px; }
-  .notif-item-time{ font-size:10.5px; color:var(--ink-faint); white-space:nowrap; }
-  .notif-item-kind{ font-size:11px; color:var(--accent-ink); margin-top:1px; }
-  .notif-item-summary{ font-size:12px; color:var(--ink-soft); margin-top:3px; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
-  .notif-item-status{ display:inline-flex; margin-top:5px; font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:20px; }
-  .notif-item-status.pending{ background:var(--warn-soft); color:var(--warn); }
-  .notif-item-status.applied{ background:var(--good-soft); color:var(--good); }
-  .notif-item-status.rejected{ background:var(--crit-soft); color:var(--crit); }
+  .notif-item-line{ font-size:12.5px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .notif-item-time{ font-size:10.5px; color:var(--ink-faint); white-space:nowrap; flex-shrink:0; }
+  .notif-item-sub{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .notif-item-sub.pending{ color:var(--warn-ink); }
+  .notif-item-sub.applied{ color:var(--good-ink); }
+  .notif-item-sub.rejected{ color:var(--crit-ink); }
+  .notif-panel-footer{
+    display:flex; align-items:center; justify-content:center; gap:5px; padding:10px; margin-top:2px;
+    border-top:1px solid var(--line); font-size:12px; font-weight:600; color:var(--accent-ink);
+    text-decoration:none; cursor:pointer;
+  }
+  .notif-panel-footer:hover{ background:var(--surface-2); }
+  .notif-panel-footer .icon{ width:13px; height:13px; }
   .ko-row-flash{ animation:koRowFlash 2.2s ease-out 1; }
   @keyframes koRowFlash{ 0%{ background:var(--accent-soft); } 100%{ background:transparent; } }
   @media (max-width:520px){
-    .notif-panel{ position:fixed; top:46px; right:8px; left:8px; width:auto; max-width:none; }
+    .notif-panel{ position:fixed; top:64px; right:8px; left:8px; width:auto; max-width:none; }
   }
 
   /* ---- integrations panel ---- */
   .integrations-panel{
     display:grid; grid-template-columns:repeat(4,1fr);
     background:var(--surface); border-bottom:1px solid var(--line);
-    min-height:60px;
+    min-height:46px;
   }
-  .integ-group{ padding:7px 14px; display:flex; flex-direction:column; gap:4px; border-right:1px solid var(--line); justify-content:center; }
+  .integ-group{ padding:5px 14px; display:flex; flex-direction:column; gap:3px; border-right:1px solid var(--line); justify-content:center; }
   .integ-group:last-child{ border-right:none; }
   .integ-label{ font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-soft); font-weight:600; }
   .integ-row{ display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--ink); }
@@ -213,9 +289,9 @@
   .status-dot.bad{ background:var(--crit); box-shadow:0 0 0 2px var(--crit-soft); }
 
   /* ---- quick actions row ---- */
-  .actions-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:7px 14px; border-bottom:1px solid var(--line); background:var(--bg); }
+  .actions-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 14px; border-bottom:1px solid var(--line); background:var(--bg); }
   .action-btn{
-    height:30px; padding:0 12px; display:inline-flex; align-items:center; gap:6px;
+    height:28px; padding:0 12px; display:inline-flex; align-items:center; gap:6px;
     background:var(--surface-2); border:1px solid var(--line); border-radius:8px;
     color:var(--ink); font-weight:600; font-size:11.5px; cursor:pointer; transition:all .18s ease;
   }
@@ -226,14 +302,14 @@
   .action-feedback{ font-size:11px; color:var(--ink-soft); }
 
   /* ---- filter chips ---- */
-  .filters-row{ display:flex; gap:6px; flex-wrap:wrap; padding:7px 14px; border-bottom:1px solid var(--line); background:var(--bg); overflow-x:auto; }
+  .filters-row{ display:flex; gap:6px; flex-wrap:wrap; padding:6px 14px; border-bottom:1px solid var(--line); background:var(--bg); overflow-x:auto; }
   .filter-chip{
     display:flex; align-items:center; gap:6px; padding:4px 10px; border-radius:20px;
     background:var(--surface-2); border:1px solid transparent; cursor:pointer; flex-shrink:0;
     font-size:11px; color:var(--ink-soft); font-weight:500; transition:all .18s ease;
   }
   .filter-chip:hover{ background:var(--surface-3); }
-  .filter-chip.active{ border-color:var(--accent); background:var(--surface-3); color:var(--ink); }
+  .filter-chip.active{ border-color:var(--accent); background:var(--accent-soft); color:var(--accent-ink); }
   .filter-dot{ width:7px; height:7px; border-radius:50%; flex-shrink:0; }
   .filter-count{ font-family:"JetBrains Mono", monospace; color:var(--ink-faint); font-variant-numeric:tabular-nums; }
 
@@ -242,7 +318,7 @@
 
   /* ---- tree (graph) area ---- */
   .tree-wrap{
-    position:relative; width:100%; height:calc(100vh - 40px - 60px - 44px - 38px);
+    position:relative; width:100%; height:calc(100vh - 60px - 46px - 40px - 36px);
     min-height:460px;
     background-color:var(--bg);
     background-image:
@@ -271,11 +347,11 @@
 
   .task-card-fo{ overflow:visible; }
   .task-card{
-    width:220px; min-height:54px; background:var(--surface-2); border:1px solid var(--line);
+    width:220px; min-height:54px; background:var(--surface); border:1px solid var(--line);
     border-radius:10px; display:flex; align-items:center; gap:10px; padding:10px 12px;
     cursor:pointer; box-shadow:var(--shadow); transition:border-color .15s ease, background .15s ease;
   }
-  .task-card:hover{ border-color:var(--accent); background:var(--surface-3); }
+  .task-card:hover{ border-color:var(--accent); background:var(--accent-soft); }
   .task-card .dot{ width:9px; height:9px; border-radius:50%; flex-shrink:0; }
   .task-card .body{ min-width:0; flex:1; display:flex; flex-direction:column; gap:3px; }
   .task-card .title{ font-size:12.5px; font-weight:600; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -291,10 +367,10 @@
   /* ---- global tab: branch root card + subtask cards (horizontal tree) ---- */
   .branch-root{
     width:100%; height:100%; box-sizing:border-box; position:relative;
-    display:flex; align-items:center; gap:14px; background:var(--surface-2); border:1px solid var(--line);
+    display:flex; align-items:center; gap:14px; background:var(--surface); border:1px solid var(--line);
     border-radius:14px; padding:16px; cursor:pointer; box-shadow:var(--shadow); transition:border-color .15s ease, background .15s ease;
   }
-  .branch-root:hover{ border-color:var(--accent); background:var(--surface-3); }
+  .branch-root:hover{ border-color:var(--accent); background:var(--accent-soft); }
   .branch-root .icon-circle{ width:48px; height:48px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; color:#06121F; }
   .branch-root .body{ min-width:0; flex:1; display:flex; flex-direction:column; gap:7px; }
   .branch-root .title{ font-size:14.5px; font-weight:700; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -305,10 +381,10 @@
 
   .branch-card{
     width:100%; height:100%; box-sizing:border-box;
-    display:flex; align-items:center; gap:10px; background:var(--surface-2); border:1px solid var(--line);
+    display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--line);
     border-radius:10px; padding:0 14px; cursor:pointer; box-shadow:var(--shadow); transition:border-color .15s ease, background .15s ease;
   }
-  .branch-card:hover{ border-color:var(--accent); background:var(--surface-3); }
+  .branch-card:hover{ border-color:var(--accent); background:var(--accent-soft); }
   .branch-card .dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
   .branch-card .title{ flex:1; min-width:0; font-size:13px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .branch-card.done .title{ text-decoration:line-through; color:var(--ink-soft); }
@@ -372,7 +448,7 @@
     display:inline-flex; align-items:center; justify-content:center; gap:8px; transition:all .18s ease;
   }
   .btn:hover{ border-color:var(--accent); background:var(--surface-3); }
-  .btn.primary{ background:var(--accent); border-color:var(--accent); color:#06121F; }
+  .btn.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
   .btn.primary:hover{ filter:brightness(1.07); }
   .btn.danger{ border-color:var(--crit); color:var(--crit); }
   .btn.danger:hover{ background:var(--crit-soft); }
@@ -452,9 +528,9 @@
   .fab{
     position:fixed; right:24px; bottom:24px; z-index:20;
     width:64px; height:64px; border-radius:50%;
-    background:var(--accent); color:#06121F; border:none;
+    background:var(--accent); color:#fff; border:none;
     display:flex; align-items:center; justify-content:center;
-    box-shadow:0 8px 22px rgba(82,150,255,.35); cursor:pointer; transition:all .18s ease;
+    box-shadow:0 8px 22px rgba(36,99,235,.35); cursor:pointer; transition:all .18s ease;
   }
   .fab:hover{ filter:brightness(1.08); transform:scale(1.04); }
 
@@ -511,8 +587,8 @@
   }
   .eng-kpis{ display:flex; gap:10px; flex-wrap:wrap; padding:12px 20px 0; }
   .kpi-tile{
-    flex:1 1 130px; min-width:110px; background:var(--surface-2); border:1px solid var(--line);
-    border-radius:10px; padding:9px 13px;
+    flex:1 1 130px; min-width:110px; background:var(--surface); border:1px solid var(--line);
+    border-radius:var(--radius); padding:9px 13px; box-shadow:var(--shadow);
   }
   .kpi-tile .kpi-label{ font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-soft); font-weight:600; }
   .kpi-tile .kpi-value{ font-family:"JetBrains Mono",monospace; font-size:19px; font-weight:700; color:var(--ink); margin-top:2px; }
@@ -522,6 +598,16 @@
   .kpi-tile.clickable:hover{ border-color:var(--accent); background:var(--surface-3); }
   .kpi-tile.clickable.active{ border-color:var(--accent); background:var(--accent-soft); }
   .kpi-tile.clickable.active .kpi-value{ color:var(--accent-ink); }
+  /* main KPI strip only (not the reused .eng-sums mini-stats, which stay label-over-value) */
+  .eng-kpis .kpi-tile{ display:flex; align-items:center; gap:11px; }
+  .kpi-icon{
+    width:36px; height:36px; border-radius:10px; flex-shrink:0; display:flex; align-items:center;
+    justify-content:center; background:var(--accent-soft); color:var(--accent);
+  }
+  .eng-kpis .kpi-tile.warn .kpi-icon{ background:var(--warn-soft); color:var(--warn-ink); }
+  .eng-kpis .kpi-tile.crit .kpi-icon{ background:var(--crit-soft); color:var(--crit-ink); }
+  .kpi-icon .icon{ width:18px; height:18px; }
+  .kpi-body{ min-width:0; }
 
   .eng-density-toggle{ display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; flex-shrink:0; }
   .eng-density-btn{ height:34px; width:34px; display:flex; align-items:center; justify-content:center; background:var(--surface-2); border:none; border-right:1px solid var(--line); color:var(--ink-soft); cursor:pointer; }
@@ -575,6 +661,12 @@
     position:sticky; top:0; z-index:2; padding:11px 13px; border-bottom:1px solid var(--line);
     background:var(--surface-2); flex-shrink:0;
   }
+  .eng-col-title{ display:flex; align-items:center; gap:7px; }
+  .eng-col-icon{
+    width:24px; height:24px; border-radius:7px; flex-shrink:0; display:flex; align-items:center;
+    justify-content:center; background:var(--accent-soft); color:var(--accent);
+  }
+  .eng-col-icon .icon{ width:14px; height:14px; }
   .eng-col-name{ font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink); }
   .eng-col-meta{ display:flex; align-items:center; gap:7px; margin-top:3px; font-size:11px; color:var(--ink-soft); }
   .eng-col-crit-badge{
@@ -592,22 +684,28 @@
   .eng-card:hover{ border-color:var(--accent); background:var(--surface-3); }
   .eng-card.critical{ border-left:3px solid var(--crit); }
   .eng-card.high{ border-left:3px solid var(--warn); }
-  .eng-card-img{
-    width:100%; aspect-ratio:16/10; background:var(--surface-3); display:flex;
-    align-items:center; justify-content:center; color:var(--ink-faint); flex-shrink:0;
+  .eng-card-top{ display:flex; align-items:center; gap:10px; padding:11px 13px 0; }
+  .eng-card-thumb{
+    width:44px; height:44px; border-radius:9px; background:var(--surface-3); display:flex;
+    align-items:center; justify-content:center; color:var(--ink-faint); flex-shrink:0; overflow:hidden;
   }
-  .eng-card-body{ padding:11px 13px 13px; display:flex; flex-direction:column; gap:5px; }
+  .eng-card-thumb.has-photo{ background-size:cover; background-position:center; color:transparent; }
+  .eng-card-thumb .icon{ width:20px; height:20px; }
+  .eng-card-heading{ min-width:0; }
+  .eng-card-body{ padding:8px 13px 13px; display:flex; flex-direction:column; gap:5px; }
   .eng-card-make{ font-size:12.5px; font-weight:700; letter-spacing:.02em; color:var(--ink); }
-  .eng-card-model{ font-size:11px; color:var(--ink-soft); margin-top:-3px; }
+  .eng-card-model{ font-size:11px; color:var(--ink-soft); margin-top:-1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   /* density modes */
-  .eng-board.density-compact .eng-card-img{ display:none; }
-  .eng-board.density-compact .eng-card-body{ padding:8px 11px 10px; gap:3px; }
+  .eng-board.density-compact .eng-card-thumb{ display:none; }
+  .eng-board.density-compact .eng-card-top{ padding-top:9px; }
+  .eng-board.density-compact .eng-card-body{ padding:6px 11px 9px; gap:3px; }
   .eng-board.density-compact .eng-col{ width:252px; flex-basis:252px; }
-  .eng-board.density-images .eng-card-img{ aspect-ratio:16/9; }
+  .eng-board.density-images .eng-card-thumb{ width:52px; height:52px; }
   .eng-card-source{ font-size:9.5px; font-weight:600; letter-spacing:.02em; padding:1px 6px; border-radius:20px; white-space:nowrap; }
   .eng-card-source.confirmed{ background:var(--good-soft); color:var(--good); }
   .eng-card-source.actual{ background:var(--accent-soft); color:var(--accent-ink); }
   .eng-card-source.planned{ background:var(--surface-3); color:var(--ink-soft); }
+  .eng-card-source.unconfirmed{ background:var(--warn-soft); color:var(--warn-ink); }
   .eng-card-next{ font-size:10.5px; color:var(--ink); background:var(--surface-3); border-radius:6px; padding:3px 7px; margin-top:2px; }
   .eng-card-next b{ font-weight:600; }
   .eng-card-next.none{ color:var(--ink-faint); font-style:italic; background:none; padding:0; }
@@ -640,25 +738,37 @@
   .eng-subtab.active{ background:var(--accent-soft); color:var(--accent-ink); }
   .eng-subtab .n{ font-family:"JetBrains Mono",monospace; font-size:10.5px; margin-left:4px; opacity:.8; }
   .eng-card-article{ font-size:10.5px; font-family:"JetBrains Mono",monospace; color:var(--ink-faint); }
-  .eng-card-stage-row{ display:flex; align-items:center; justify-content:space-between; gap:6px; }
-  .eng-card-stage{ font-size:10.5px; color:var(--ink-soft); }
-  .eng-card-stage b{ font-family:"JetBrains Mono",monospace; color:var(--ink); font-weight:700; }
-  .eng-card-stage.unknown{ color:var(--ink-faint); font-style:italic; }
+  .eng-card-stage-row{ display:flex; align-items:center; justify-content:space-between; gap:6px; min-height:17px; }
+  .eng-card-days{ display:inline-flex; align-items:center; gap:4px; font-size:10.5px; color:var(--ink-soft); white-space:nowrap; }
+  .eng-card-days .icon{ width:11px; height:11px; color:var(--ink-faint); }
+  .eng-card-days.unknown{ color:var(--ink-faint); font-style:italic; }
   .eng-card-engineer.none{ color:var(--ink-faint); font-style:italic; }
-  .eng-card-img.has-photo{ background-size:cover; background-position:center; }
   .eng-priority-pill.none{ background:var(--surface-3); color:var(--ink-faint); }
   .eng-priority-pill.none .dot{ background:transparent; border:1px solid var(--ink-faint); }
   .eng-card[draggable="true"]{ cursor:grab; }
   .eng-card.dragging{ opacity:.45; }
   .eng-col.drop-target{ border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
-  .eng-unconfirmed{ margin:12px 20px 0; border:1px dashed var(--line); border-radius:12px; background:var(--surface); }
-  .eng-unconfirmed-head{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; padding:9px 13px;
-    border-bottom:1px dashed var(--line); font-size:11.5px; color:var(--ink-soft); }
+  .eng-unconfirmed{ margin:12px 20px 0; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); box-shadow:var(--shadow); }
+  .eng-unconfirmed-head{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; padding:11px 14px;
+    border-bottom:1px solid var(--line); font-size:11.5px; color:var(--ink-soft); }
+  .eng-unconfirmed-head-title{ display:flex; align-items:center; gap:7px; }
+  .eng-unconfirmed-head-title .icon{ width:14px; height:14px; color:var(--warn); flex-shrink:0; }
   .eng-unconfirmed-head b{ color:var(--ink); text-transform:uppercase; letter-spacing:.04em; font-size:11.5px; }
-  .eng-unconfirmed-body{ display:flex; gap:10px; overflow-x:auto; padding:10px; }
-  .eng-unconfirmed-body .eng-card{ flex:0 0 230px; }
+  .eng-unconfirmed-body{ display:flex; flex-direction:column; gap:1px; padding:4px; }
   .eng-unconfirmed.collapsed .eng-unconfirmed-body{ display:none; }
-  .eng-suggest{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:4px; }
+  .eng-unconfirmed-card{
+    display:flex; align-items:center; gap:12px; padding:9px 10px; border-radius:9px; cursor:pointer;
+    transition:background .15s ease;
+  }
+  .eng-unconfirmed-card:hover{ background:var(--surface-2); }
+  .eng-unconfirmed-main{ min-width:160px; flex:1 1 200px; }
+  .eng-unconfirmed-title{ font-size:12.5px; font-weight:700; color:var(--ink); }
+  .eng-unconfirmed-product{ font-size:11px; color:var(--ink-soft); margin-top:1px; }
+  .eng-unconfirmed-meta{ display:flex; flex-direction:column; gap:2px; min-width:150px; flex:1 1 180px; }
+  .eng-unconfirmed-reason{ font-size:11px; color:var(--ink-faint); font-style:italic; }
+  @media (max-width:900px){
+    .eng-unconfirmed-card{ flex-wrap:wrap; }
+  }
   .eng-mini-btn{ font-size:10.5px; font-weight:600; padding:3px 8px; border-radius:6px; border:1px solid var(--line); background:none;
     color:var(--accent-ink); cursor:pointer; }
   .eng-mini-btn:hover{ border-color:var(--accent); }
@@ -682,7 +792,7 @@
   .eng-pre{ white-space:pre-wrap; font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--ink-soft); background:var(--surface-2);
     border:1px solid var(--line); border-radius:8px; padding:10px; max-height:420px; overflow:auto; }
   .eng-status{ font-weight:700; }
-  .eng-status.ok{ color:var(--ok, #2FBF71); }
+  .eng-status.ok{ color:var(--good-ink); }
   .eng-status.warn{ color:var(--warn); }
   .eng-status.err{ color:var(--crit); }
   .detail-panel.wide{ width:var(--detail-wide-width, 600px); }
@@ -694,6 +804,20 @@
   .eng-sec{ border-top:1px dashed var(--line); padding-top:12px; margin-top:14px; }
   .eng-sec-head{ display:flex; justify-content:space-between; align-items:center; font-size:10.5px; text-transform:uppercase;
     letter-spacing:.04em; color:var(--ink-soft); font-weight:600; margin-bottom:8px; }
+
+  /* ---- project detail panel: Общее / Фото / История / Комментарии tabs ---- */
+  .eng-detail-tabs{
+    display:flex; gap:3px; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:9px; padding:3px; margin-top:12px;
+  }
+  .eng-detail-tab{
+    flex:1 1 0; background:none; border:none; padding:7px 6px; border-radius:7px;
+    font-size:12px; font-weight:600; color:var(--ink-soft); cursor:pointer; transition:all .15s ease;
+  }
+  .eng-detail-tab:hover{ color:var(--ink); }
+  .eng-detail-tab.active{ background:var(--accent-soft); color:var(--accent-ink); }
+  .eng-detail-tab-body{ margin-top:4px; }
+  .eng-detail-tab-body .eng-sec:first-child{ border-top:none; margin-top:10px; padding-top:0; }
   .eng-sums{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
   .eng-sums .kpi-tile{ flex:1 1 110px; padding:7px 10px; }
   .eng-sums .kpi-value{ font-size:16px; }
@@ -728,6 +852,10 @@
   @media (min-width:1024px){
     .tree-wrap.panel-open-width{ width:calc(100% - 390px); }
     .detail-scrim{ display:none !important; }
+    /* Panel sits beside the page here (no scrim), but shared z-index with the fixed header let
+       its head bar cover the header's right-side controls (messages bell etc). */
+    .detail-panel{ top:60px; height:calc(100% - 60px); }
+    .app-header{ z-index:41; }
   }
   @media (max-width:1023px){
     .integrations-panel{ grid-template-columns:repeat(2,1fr); }
@@ -736,8 +864,12 @@
   }
   @media (max-width:767px){
     .app-header{ height:auto; flex-wrap:wrap; padding:6px 14px; row-gap:5px; }
-    .brand{ min-width:0; }
+    .brand{ display:flex; min-width:0; }
+    .header-section-wrap{ display:none; }
     .header-clock{ min-width:0; }
+    .user-meta{ display:none; }
+    .messages-btn .messages-label, .messages-btn .icon#notifChevron{ display:none; }
+    .messages-btn{ padding:6px; }
     .integrations-panel{ grid-template-columns:1fr 1fr; }
     .integ-group{ padding:6px 14px; border-right:none; border-bottom:1px solid var(--line); }
     .actions-row{ padding:6px 14px; }
@@ -753,6 +885,9 @@
     .eng-subtabs{ margin:10px 14px 0; max-width:calc(100% - 28px); }
     .eng-unconfirmed{ margin:10px 14px 0; }
     .eng-list-wrap{ padding:12px 14px 16px; }
+    /* tree-wrap's height formula assumes the desktop header stack, so on mobile the canvas (and
+       its toolbar) can run past the initial viewport - pin the toolbar so it's reachable without scrolling first. */
+    .graph-controls{ position:fixed; left:16px; bottom:16px; z-index:15; }
   }
   .eng-stage-pager{ display:none; gap:4px; padding:0 14px; margin-top:8px; overflow-x:auto; }
   .eng-stage-pager button{
@@ -792,29 +927,49 @@
   <header class="app-header">
     <button type="button" class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Меню"><span class="icon" id="navIconMenu"></span></button>
     <div class="brand">
+      <span class="mark">Д</span>
       <span class="name">ДОСКА ПРОЕКТОВ</span>
-      <span class="sub">дерево задач</span>
     </div>
+    <div class="header-section-wrap" id="headerSectionWrap">
+      <button type="button" class="header-section-btn" id="headerSectionBtn" aria-haspopup="true" aria-expanded="false">
+        <span id="headerSectionLabel">Доска</span>
+        <span class="icon" id="headerSectionChevron"></span>
+      </button>
+      <div class="header-section-menu" id="headerSectionMenu"></div>
+    </div>
+    <div class="header-spacer"></div>
     <div class="notif-bell-wrap" id="notifBellWrap" style="display:none;">
-      <button type="button" class="notif-bell-btn" id="notifBellBtn" aria-haspopup="true" aria-expanded="false" title="Уведомления агента КО">
+      <button type="button" class="messages-btn" id="notifBellBtn" aria-haspopup="true" aria-expanded="false" title="Сообщения">
         <span class="icon" id="notifBellIcon"></span>
-        <span class="notif-badge" id="notifBadge" style="display:none;">0</span>
+        <span class="messages-label">Сообщения</span>
+        <span class="messages-badge" id="notifBadgeWrap" style="display:none;"><span id="notifBadge">0</span><span id="notifBadgeSuffix"></span></span>
+        <span class="icon" id="notifChevron"></span>
       </button>
       <div class="notif-panel" id="notifPanel">
-        <div class="notif-panel-head">
-          <span>Уведомления агента КО</span>
-          <button type="button" class="notif-panel-close" id="notifPanelCloseBtn" aria-label="Закрыть"><span class="icon" id="notifCloseIcon"></span></button>
-        </div>
         <div class="notif-panel-sub" id="notifPanelCounts"></div>
-        <div class="notif-panel-actions">
+        <div class="notif-panel-actions" id="notifPanelActions" style="display:none;">
           <button type="button" class="notif-mark-all-btn" id="notifMarkAllBtn">Отметить все как прочитанные</button>
         </div>
         <div class="notif-panel-list" id="notifPanelList"></div>
+        <a href="#" class="notif-panel-footer" id="notifOpenAllLink">Открыть все сообщения <span class="icon" id="notifOpenAllIcon"></span></a>
       </div>
     </div>
     <div class="header-clock">
       <div class="clock-time" id="clockTime">—:—:—</div>
       <div class="clock-date" id="clockDate">—</div>
+    </div>
+    <div class="user-chip-wrap" id="userChipWrap" style="display:none;">
+      <button type="button" class="user-chip" id="userChipBtn" aria-haspopup="true" aria-expanded="false">
+        <span class="user-avatar" id="userAvatar">—</span>
+        <span class="user-meta">
+          <span class="user-name" id="userNameLabel">—</span>
+          <span class="user-role" id="userRoleLabel">—</span>
+        </span>
+        <span class="icon" id="userChevron"></span>
+      </button>
+      <div class="user-menu" id="userMenu">
+        <button type="button" class="user-menu-item" id="userLogoutBtn">Выйти</button>
+      </div>
     </div>
   </header>
 
@@ -900,12 +1055,12 @@
 
   <div id="engBoardView">
     <div class="eng-kpis">
-      <div class="kpi-tile clickable" data-kpi="all"><div class="kpi-label">Всего проектов</div><div class="kpi-value" id="engKpiTotal">0</div></div>
-      <div class="kpi-tile clickable" data-kpi="active"><div class="kpi-label">В работе</div><div class="kpi-value" id="engKpiActive">0</div></div>
-      <div class="kpi-tile warn clickable" data-kpi="overdue"><div class="kpi-label">Просрочено</div><div class="kpi-value" id="engKpiOverdue">0</div></div>
-      <div class="kpi-tile clickable" data-kpi="noengineer"><div class="kpi-label">Без ответственного</div><div class="kpi-value" id="engKpiNoEngineer">0</div></div>
-      <div class="kpi-tile crit clickable" data-kpi="critical"><div class="kpi-label">Критические</div><div class="kpi-value" id="engKpiCrit">0</div></div>
-      <div class="kpi-tile"><div class="kpi-label">Среднее время на стадии</div><div class="kpi-value" id="engKpiAvgDays">—</div></div>
+      <div class="kpi-tile clickable" data-kpi="all"><span class="kpi-icon" id="kpiIconTotal"></span><div class="kpi-body"><div class="kpi-label">Всего проектов</div><div class="kpi-value" id="engKpiTotal">0</div></div></div>
+      <div class="kpi-tile clickable" data-kpi="active"><span class="kpi-icon" id="kpiIconActive"></span><div class="kpi-body"><div class="kpi-label">В работе</div><div class="kpi-value" id="engKpiActive">0</div></div></div>
+      <div class="kpi-tile warn clickable" data-kpi="overdue"><span class="kpi-icon" id="kpiIconOverdue"></span><div class="kpi-body"><div class="kpi-label">Просрочено</div><div class="kpi-value" id="engKpiOverdue">0</div></div></div>
+      <div class="kpi-tile clickable" data-kpi="noengineer"><span class="kpi-icon" id="kpiIconNoEngineer"></span><div class="kpi-body"><div class="kpi-label">Без ответственного</div><div class="kpi-value" id="engKpiNoEngineer">0</div></div></div>
+      <div class="kpi-tile crit clickable" data-kpi="critical"><span class="kpi-icon" id="kpiIconCrit"></span><div class="kpi-body"><div class="kpi-label">Критические</div><div class="kpi-value" id="engKpiCrit">0</div></div></div>
+      <div class="kpi-tile"><span class="kpi-icon" id="kpiIconAvgDays"></span><div class="kpi-body"><div class="kpi-label">Среднее время на стадии</div><div class="kpi-value" id="engKpiAvgDays">—</div></div></div>
     </div>
 
     <div class="eng-toolbar">
@@ -1151,7 +1306,17 @@
     "layout-grid": '<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>',
     table: '<path d="M3 3h18v18H3z"></path><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line><line x1="9" y1="3" x2="9" y2="21"></line>',
     "arrow-down-up": '<path d="m3 16 4 4 4-4"></path><path d="M7 20V4"></path><path d="m21 8-4-4-4 4"></path><path d="M17 4v16"></path>',
-    bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path>'
+    bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path>',
+    mail: '<rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect><path d="m22 6-10 7L2 6"></path>',
+    "chevron-down": '<polyline points="6 9 12 15 18 9"></polyline>',
+    flask: '<path d="M9 2v6.5L4.5 17a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L15 8.5V2"></path><path d="M9 2h6"></path><path d="M8.5 13h7"></path>',
+    ruler: '<path d="m3 17 14-14 4 4L7 21z"></path><path d="m14.5 6.5 2 2"></path><path d="m11.5 9.5 2 2"></path><path d="m8.5 12.5 2 2"></path><path d="m5.5 15.5 2 2"></path>',
+    "file-check": '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="m9 15 2 2 4-4"></path>',
+    play: '<polygon points="5 3 19 12 5 21 5 3"></polygon>',
+    user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle>',
+    "alert-triangle": '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>',
+    "bar-chart-2": '<line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line>',
+    car: '<path d="M19 17h2v-4.5a2 2 0 0 0-.4-1.2L18 7h-1.5l-1-2.5A2 2 0 0 0 13.6 3H8.4a2 2 0 0 0-1.9 1.5L5.5 7H4L1.4 11.3a2 2 0 0 0-.4 1.2V17h2"></path><circle cx="7" cy="17" r="2"></circle><circle cx="17" cy="17" r="2"></circle><path d="M9 17h6"></path><path d="M3 11h18"></path>'
   };
   function iconSvg(name, size, strokeW){
     var inner = LUCIDE[name] || "";
@@ -1159,8 +1324,17 @@
   }
   function setIcon(elId, name, size){ var el = document.getElementById(elId); if(el) el.innerHTML = iconSvg(name, size||16); }
 
-  setIcon("notifBellIcon","bell",15);
-  setIcon("notifCloseIcon","x",14);
+  setIcon("kpiIconTotal","layout-grid",17);
+  setIcon("kpiIconActive","play",16);
+  setIcon("kpiIconOverdue","clock",17);
+  setIcon("kpiIconNoEngineer","user",17);
+  setIcon("kpiIconCrit","alert-triangle",17);
+  setIcon("kpiIconAvgDays","bar-chart-2",17);
+  setIcon("notifBellIcon","mail",15);
+  setIcon("notifChevron","chevron-down",13);
+  setIcon("headerSectionChevron","chevron-down",13);
+  setIcon("userChevron","chevron-down",13);
+  setIcon("notifOpenAllIcon","arrow-right",13);
   setIcon("iconCalendar","calendar",12);
   setIcon("iconSend","send",12);
   setIcon("iconCheckBtn","send",13);
@@ -1500,6 +1674,7 @@
     openDetailTaskId = null;
     openDetailGlobalId = null;
     openDetailEngId = null;
+    engEditDraft = null;
     document.getElementById("detailPanel").classList.remove("wide");
     document.getElementById("detailPanel").classList.remove("open");
     document.getElementById("detailScrim").classList.remove("show");
@@ -1608,6 +1783,10 @@
   var ENG_STAGE_LABELS = {
     scanning:"Сканирование", development:"Разработка", prototype:"Тестовый образец",
     measurement:"Замер", documentation:"Оформление"
+  };
+  var ENG_STAGE_ICON = {
+    scanning:"search", development:"tool", prototype:"flask",
+    measurement:"ruler", documentation:"file-check"
   };
   var ENG_PRIORITY_LABELS = { critical:"Критично", high:"Высокий", normal:"Средний", low:"Низкий", none:"Не указан" };
   var ENG_PRIORITY_ORDER = { critical:0, high:1, normal:2, low:3, none:4 };
@@ -1826,14 +2005,14 @@
 
   function engStageLine(p){
     if(!p.stage){
-      return '<div class="eng-card-stage unknown">Этап не подтверждён' +
-        (p.planned_stage ? ' · по плану: '+escapeHtml(ENG_STAGE_LABELS[p.planned_stage] || p.planned_stage) : '') + '</div>';
+      return '<span class="eng-card-days unknown"><span class="icon">'+iconSvg("clock",12)+'</span>Этап не подтверждён' +
+        (p.planned_stage ? ' · по плану: '+escapeHtml(ENG_STAGE_LABELS[p.planned_stage] || p.planned_stage) : '') + '</span>';
     }
     if(p.days_in_stage === null || p.days_in_stage === undefined){
-      return '<div class="eng-card-stage unknown">Длительность неизвестна' +
-        (p.days_since_stage_detected != null ? ' · определён '+p.days_since_stage_detected+' '+ruDaysWord(p.days_since_stage_detected)+' назад' : '') + '</div>';
+      return '<span class="eng-card-days unknown"><span class="icon">'+iconSvg("clock",12)+'</span>Длительность неизвестна' +
+        (p.days_since_stage_detected != null ? ' · определён '+p.days_since_stage_detected+' '+ruDaysWord(p.days_since_stage_detected)+' назад' : '') + '</span>';
     }
-    return '<div class="eng-card-stage">На стадии: <b>'+p.days_in_stage+'</b> '+ruDaysWord(p.days_in_stage)+'</div>';
+    return '<span class="eng-card-days"><span class="icon">'+iconSvg("clock",12)+'</span>'+p.days_in_stage+' '+ruDaysWord(p.days_in_stage)+'</span>';
   }
 
   // Stage-source indicator: how the current (confirmed-on-board) stage was determined.
@@ -1861,32 +2040,63 @@
     return '<div class="eng-card-next">Далее: <b>'+escapeHtml(n.label)+'</b></div>';
   }
 
-  function engCardHtml(p, opts){
-    opts = opts || {};
+  // Vehicle thumbnail vs. engineering attachment (redesign spec §12.3): the project's own uploaded
+  // photo (an attachment - assembly/engineering photos, nothing to do with stock vehicle imagery)
+  // is shown when present, exactly as before. No vehicle-model catalog exists to source a separate
+  // "clean car photo" from, and none is scraped, hotlinked or generated here - when there is no
+  // attachment yet, the card shows a plain, compact car pictogram instead of guessing or leaving a
+  // large empty area.
+  function engCardThumbHtml(p){
+    var photo = (p.images || []).filter(function(i){ return i.is_primary; })[0] || (p.images || [])[0];
+    if(photo) return '<div class="eng-card-thumb has-photo" style="background-image:url(\''+encodeURI(photo.view_url||photo.url)+'\')"></div>';
+    return '<div class="eng-card-thumb"><span class="icon">'+iconSvg("car",18)+'</span></div>';
+  }
+  function engCardHtml(p){
     var overdue = engIsOverdue(p);
     var dueStr = formatDue(p.deadline);
-    var photo = (p.images || []).filter(function(i){ return i.is_primary; })[0] || (p.images || [])[0];
-    var img = photo
-      ? '<div class="eng-card-img has-photo" style="background-image:url(\''+encodeURI(photo.view_url||photo.url)+'\')"></div>'
-      : '';
     return (
       '<div class="eng-card '+p.prio+'" data-action="open-eng-project" data-id="'+p.id+'" draggable="'+(isViewer()?'false':'true')+'">' +
-        img +
+        '<div class="eng-card-top">' +
+          engCardThumbHtml(p) +
+          '<div class="eng-card-heading"><div class="eng-card-make">'+escapeHtml(p.make)+'</div><div class="eng-card-model">'+escapeHtml(p.model)+'</div></div>' +
+        '</div>' +
         '<div class="eng-card-body">' +
-          '<div class="eng-card-make">'+escapeHtml(p.make)+'</div>' +
-          '<div class="eng-card-model">'+escapeHtml(p.model)+'</div>' +
-          '<div class="eng-card-product">'+escapeHtml(p.product)+'</div>' +
-          (p.article_number ? '<div class="eng-card-article">арт. '+escapeHtml(p.article_number)+'</div>' : '') +
-          '<div class="eng-card-stage-row">'+engStageLine(p)+engStageSourceBadge(p)+'</div>' +
+          '<div class="eng-card-product">'+escapeHtml(p.product)+(p.article_number ? ' <span class="eng-card-article">· арт. '+escapeHtml(p.article_number)+'</span>' : '')+'</div>' +
+          '<div class="eng-card-stage-row">'+engStageSourceBadge(p)+'</div>' +
           engNextActionLine(p) +
+          '<div class="eng-card-foot">' +
+            '<span class="eng-priority-pill '+p.prio+'"><span class="dot"></span>'+ENG_PRIORITY_LABELS[p.prio]+'</span>' +
+            engStageLine(p) +
+          '</div>' +
           '<div class="eng-card-foot">' +
             (p.engineer ? '<span class="eng-card-engineer">'+escapeHtml(p.engineer)+'</span>'
                         : '<span class="eng-card-engineer none">Не назначен</span>') +
-            '<span class="eng-priority-pill '+p.prio+'"><span class="dot"></span>'+ENG_PRIORITY_LABELS[p.prio]+'</span>' +
           '</div>' +
           (dueStr ? '<div class="eng-card-due'+(overdue?' overdue':'')+'">'+(overdue?'просрочено, ':'')+escapeHtml(dueStr)+'</div>' : '') +
-          (opts.suggest && p.planned_stage ? '<div class="eng-suggest"><button type="button" class="eng-mini-btn" data-action="confirm-stage" data-id="'+p.id+'" data-stage="'+escapeHtml(p.planned_stage)+'">Подтвердить «'+escapeHtml(ENG_STAGE_LABELS[p.planned_stage]||p.planned_stage)+'»</button></div>' : '') +
         '</div>' +
+      '</div>'
+    );
+  }
+  // Compact horizontal card for "Этап не подтверждён" (redesign spec §10.2) - same project data
+  // and the same confirm-stage action as before, laid out as a single row instead of a vertical
+  // Kanban tile. The whole row opens the project; the confirm button stops that click from
+  // bubbling via the shared #engView delegated handler's own confirm-stage branch.
+  function engUnconfirmedCardHtml(p){
+    var reason = p.planned_stage ? ('По плану: '+escapeHtml(ENG_STAGE_LABELS[p.planned_stage]||p.planned_stage)) : "Следующий шаг требует уточнения";
+    return (
+      '<div class="eng-unconfirmed-card" data-action="open-eng-project" data-id="'+p.id+'">' +
+        engCardThumbHtml(p) +
+        '<div class="eng-unconfirmed-main">' +
+          '<div class="eng-unconfirmed-title">'+escapeHtml(p.make)+' '+escapeHtml(p.model)+'</div>' +
+          '<div class="eng-unconfirmed-product">'+escapeHtml(p.product)+'</div>' +
+        '</div>' +
+        '<div class="eng-unconfirmed-meta">' +
+          '<span class="eng-card-source unconfirmed">Этап не подтверждён</span>' +
+          '<span class="eng-unconfirmed-reason">'+reason+'</span>' +
+        '</div>' +
+        (p.engineer ? '<span class="eng-card-engineer">'+escapeHtml(p.engineer)+'</span>' : '<span class="eng-card-engineer none">Не назначен</span>') +
+        '<span class="eng-priority-pill '+p.prio+'"><span class="dot"></span>'+ENG_PRIORITY_LABELS[p.prio]+'</span>' +
+        (p.planned_stage ? '<button type="button" class="eng-mini-btn" data-action="confirm-stage" data-id="'+p.id+'" data-stage="'+escapeHtml(p.planned_stage)+'">Подтвердить «'+escapeHtml(ENG_STAGE_LABELS[p.planned_stage]||p.planned_stage)+'»</button>' : '') +
       '</div>'
     );
   }
@@ -1946,11 +2156,11 @@
       un.style.display = "";
       un.className = "eng-unconfirmed" + (engUnconfirmedCollapsed ? " collapsed" : "");
       un.innerHTML =
-        '<div class="eng-unconfirmed-head"><span><b>Этап не подтверждён</b> · '+unconfirmed.length+' '+ruProjectsWord(unconfirmed.length)+
+        '<div class="eng-unconfirmed-head"><span class="eng-unconfirmed-head-title"><span class="icon">'+iconSvg("alert-triangle",14)+'</span><b>Этап не подтверждён</b> · '+unconfirmed.length+' '+ruProjectsWord(unconfirmed.length)+
         ' · перетащите карточку в колонку или подтвердите предложенный этап</span><span style="display:flex;gap:6px;">' +
         (withSuggestion ? '<button type="button" class="eng-mini-btn" data-action="confirm-all-suggested">Подтвердить предложенные ('+withSuggestion+')</button>' : '') +
         '<button type="button" class="eng-mini-btn" data-action="toggle-unconfirmed">'+(engUnconfirmedCollapsed?'Показать':'Свернуть')+'</button></span></div>' +
-        '<div class="eng-unconfirmed-body">'+engSortProjects(unconfirmed).map(function(p){ return engCardHtml(p, { suggest:true }); }).join("")+'</div>';
+        '<div class="eng-unconfirmed-body">'+engSortProjects(unconfirmed).map(engUnconfirmedCardHtml).join("")+'</div>';
     } else {
       un.style.display = "none";
       un.innerHTML = "";
@@ -1979,7 +2189,7 @@
       return (
         '<div class="eng-col" data-stage="'+stage+'">' +
           '<div class="eng-col-head">' +
-            '<div class="eng-col-name">'+ENG_STAGE_LABELS[stage]+'</div>' +
+            '<div class="eng-col-title"><span class="eng-col-icon">'+iconSvg(ENG_STAGE_ICON[stage]||"circle",15)+'</span><span class="eng-col-name">'+ENG_STAGE_LABELS[stage]+'</span></div>' +
             '<div class="eng-col-meta"><span>'+inStage.length+' '+ruProjectsWord(inStage.length)+'</span>' +
               (critInStage ? '<span class="eng-col-crit-badge">'+critInStage+' крит.</span>' : '') +
             '</div>' +
@@ -2097,20 +2307,15 @@
     return (flagsHtml || reviewsHtml) ? '<div class="eng-sec"><div class="eng-sec-head"><span>Внимание</span></div>'+(flagsHtml || '<div class="eng-empty">Нет активных флагов</div>')+'</div>'+reviewsHtml : "";
   }
 
-  function engInfoSection(p){
-    var prioOrig = p.priority_original;
+  // ---- "Общее" tab: project meta-fields, unchanged content, split out of what used to be one
+  // big engInfoSection() so each piece can be placed in its own tab (§ redesign Phase 5) without
+  // touching the markup, fields or data each piece renders.
+  function engInfoMetaHtml(p){
     var src = [p.source_file, p.source_sheet ? "лист «"+p.source_sheet+"»" : null,
       (p.source_rows && p.source_rows.length) ? "строки "+p.source_rows.join(", ") : (p.source_row ? "строка "+p.source_row : null)]
       .filter(Boolean).join(" · ");
-    var stageOpts = '<option value="">— не подтверждён —</option>' + ENG_STAGES.map(function(s){
-      return '<option value="'+s+'"'+(p.stage===s?' selected':'')+'>'+escapeHtml(ENG_STAGE_LABELS[s])+'</option>'; }).join("");
-    var prioOpts = ["", "critical", "high", "normal", "low"].map(function(k){
-      return '<option value="'+k+'"'+((p.priority||"")===k?' selected':'')+'>'+(k?ENG_PRIORITY_LABELS[k]:"Не указан")+'</option>'; }).join("");
     var durStr = !p.stage ? "—" : (p.days_in_stage === null || p.days_in_stage === undefined ? "Длительность неизвестна"
       : p.days_in_stage+" "+ruDaysWord(p.days_in_stage)+" (с "+fmtTs(p.stage_entered_at)+")");
-    var comments = (p.comments || []).map(function(c){
-      return '<div class="eng-comment">'+escapeHtml(c.text)+'<div class="meta">'+fmtTs(c.at)+' · '+escapeHtml(ENG_SOURCE_LABELS[c.source]||c.source||"")+(c.author?' · '+escapeHtml(c.author):'')+'</div></div>';
-    }).join("") || '<div class="eng-empty">Комментариев нет</div>';
     var ex = p.extra_attributes || {};
     return (
       '<div class="task-meta">' +
@@ -2134,29 +2339,41 @@
         '<div class="meta-row"><span class="k">Статус работ</span><span class="v'+(p.work_status?'':' ghost')+'">'+escapeHtml(p.work_status?(ENG_WORK_STATUS_LABELS[p.work_status]||p.work_status):"не определён")+'</span></div>' +
         (ex.plan_comment ? '<div class="meta-row"><span class="k">Комментарий плана</span><span class="v">'+escapeHtml(ex.plan_comment)+'</span></div>' : '') +
         '<div class="meta-row"><span class="k">Источник</span><span class="v'+(src?'':' ghost')+'">'+escapeHtml(src||"вручную")+'</span></div>' +
-      '</div>' +
-      engAttentionReviewHtml(p) +
-      // Критическое требование (роль ko_viewer): "Создание, редактирование, удаление проектов и
-      // задач" forbidden - no edit form, no stage-confirm control, no add-comment input for a
-      // manager. The server already refuses these mutations regardless (adminOnlyForMutations in
-      // server/routes/projects.js); this just avoids showing a control that would 403.
-      (isViewer() ? '' :
-      '<div class="eng-sec"><div class="eng-sec-head"><span>Редактирование</span></div>' +
-        '<div class="eng-form-row"><span style="width:110px;">Этап</span><select class="eng-input" id="engEditStage">'+stageOpts+'</select>' +
-          '<button type="button" class="btn" data-action="eng-save-stage">Подтвердить этап</button></div>' +
-        '<div class="eng-form-row"><span style="width:110px;">Ответственный</span><input class="eng-input" id="engEditEngineer" value="'+escapeHtml(p.assigned_engineer||"")+'" placeholder="Не назначен"></div>' +
-        '<div class="eng-form-row"><span style="width:110px;">Приоритет</span><select class="eng-input" id="engEditPriority">'+prioOpts+'</select>' +
-          (prioOrig !== null && prioOrig !== undefined && prioOrig !== "" ? '<span>исходное значение в плане: <b>'+escapeHtml(Array.isArray(prioOrig)?prioOrig.join(", "):String(prioOrig))+'</b></span>' : '') + '</div>' +
-        '<div class="eng-form-row"><span style="width:110px;">Артикул</span><input class="eng-input" id="engEditArticle" value="'+escapeHtml(p.article_number||"")+'"></div>' +
-        '<div class="eng-form-row" style="display:block;"><div style="margin-bottom:4px;">Описание</div><textarea class="eng-input" id="engEditDescription">'+escapeHtml(p.description||"")+'</textarea></div>' +
-        '<button type="button" class="btn primary" data-action="eng-save-fields">Сохранить</button>' +
-        ' <span style="font-size:11px;color:var(--ink-faint);">Ручные изменения сохраняются при следующих импортах плана.</span>' +
-      '</div>') +
-      '<div class="eng-sec"><div class="eng-sec-head"><span>Комментарии</span></div>'+comments+
-        (isViewer() ? '' :
-        '<div class="eng-form-row" style="margin-top:8px;"><input class="eng-input" id="engNewComment" style="flex:1;" placeholder="Инженерный комментарий…"><button type="button" class="btn" data-action="eng-add-comment">Добавить</button></div>') +
       '</div>'
     );
+  }
+  // Критическое требование (роль ko_viewer): "Создание, редактирование, удаление проектов и
+  // задач" forbidden - no edit form, no stage-confirm control for a manager. The server already
+  // refuses these mutations regardless (adminOnlyForMutations in server/routes/projects.js); this
+  // just avoids showing a control that would 403. Caller (engGeneralTabHtml) skips this entirely
+  // for isViewer().
+  function engEditFormHtml(p){
+    var prioOrig = p.priority_original;
+    var stageOpts = '<option value="">— не подтверждён —</option>' + ENG_STAGES.map(function(s){
+      return '<option value="'+s+'"'+(p.stage===s?' selected':'')+'>'+escapeHtml(ENG_STAGE_LABELS[s])+'</option>'; }).join("");
+    var prioOpts = ["", "critical", "high", "normal", "low"].map(function(k){
+      return '<option value="'+k+'"'+((p.priority||"")===k?' selected':'')+'>'+(k?ENG_PRIORITY_LABELS[k]:"Не указан")+'</option>'; }).join("");
+    return (
+      '<div class="eng-form-row"><span style="width:110px;">Этап</span><select class="eng-input" id="engEditStage">'+stageOpts+'</select>' +
+        '<button type="button" class="btn" data-action="eng-save-stage">Подтвердить этап</button></div>' +
+      '<div class="eng-form-row"><span style="width:110px;">Ответственный</span><input class="eng-input" id="engEditEngineer" value="'+escapeHtml(p.assigned_engineer||"")+'" placeholder="Не назначен"></div>' +
+      '<div class="eng-form-row"><span style="width:110px;">Приоритет</span><select class="eng-input" id="engEditPriority">'+prioOpts+'</select>' +
+        (prioOrig !== null && prioOrig !== undefined && prioOrig !== "" ? '<span>исходное значение в плане: <b>'+escapeHtml(Array.isArray(prioOrig)?prioOrig.join(", "):String(prioOrig))+'</b></span>' : '') + '</div>' +
+      '<div class="eng-form-row"><span style="width:110px;">Артикул</span><input class="eng-input" id="engEditArticle" value="'+escapeHtml(p.article_number||"")+'"></div>' +
+      '<div class="eng-form-row" style="display:block;"><div style="margin-bottom:4px;">Описание</div><textarea class="eng-input" id="engEditDescription">'+escapeHtml(p.description||"")+'</textarea></div>' +
+      '<button type="button" class="btn primary" data-action="eng-save-fields">Сохранить</button>' +
+      ' <span style="font-size:11px;color:var(--ink-faint);">Ручные изменения сохраняются при следующих импортах плана.</span>'
+    );
+  }
+  // ---- "Комментарии" tab: the project's own comment log (server/projectsModel.js's `comments`
+  // array, POST /api/projects/:id/comments) - the only comment system this app has; nothing
+  // invented here.
+  function engCommentsSectionHtml(p){
+    var comments = (p.comments || []).map(function(c){
+      return '<div class="eng-comment">'+escapeHtml(c.text)+'<div class="meta">'+fmtTs(c.at)+' · '+escapeHtml(ENG_SOURCE_LABELS[c.source]||c.source||"")+(c.author?' · '+escapeHtml(c.author):'')+'</div></div>';
+    }).join("") || '<div class="eng-empty">Комментариев нет</div>';
+    return comments + (isViewer() ? '' :
+      '<div class="eng-form-row" style="margin-top:8px;"><input class="eng-input" id="engNewComment" style="flex:1;" placeholder="Инженерный комментарий…"><button type="button" class="btn" data-action="eng-add-comment">Добавить</button></div>');
   }
 
   // ---- длительность на каждой стадии (server/projectsModel.js's buildStageHistory - computed
@@ -2280,6 +2497,76 @@
     return gal + (att ? '<div class="eng-sec-head" style="margin-top:12px;"><span>Файлы</span></div>'+att : '') + uploadForm;
   }
 
+  // ---- project detail panel: four real tabs (Общее/Фото/История/Комментарии), redesign Phase 5.
+  // Same data, same functions, same edit/upload/comment actions as before - only how they're split
+  // across the panel changed. Switching tabs never re-fetches the project (renderEngDetailTabBody
+  // reads engDetailCache, already in memory) and never touches anything outside #engDetailTabBody,
+  // so the Kanban board behind the panel is untouched either way.
+  var ENG_DETAIL_TABS = [
+    { id:"general", label:"Общее" }, { id:"photos", label:"Фото" },
+    { id:"history", label:"История" }, { id:"comments", label:"Комментарии" }
+  ];
+  var engDetailTab = "general";
+  // Critical requirement: "при переключении вкладок не терять несохранённые изменения" - the
+  // "Общее" tab's edit form is the only one with free-typed, unsaved input (uploads/comments are
+  // submitted immediately). Its live values are snapshotted into engEditDraft before switching
+  // away and re-applied when the user comes back to "Общее", instead of trusting the last-rendered
+  // server copy. Cleared on a successful save, and whenever a (possibly different) project is
+  // opened or the panel closes, so it can never leak between projects.
+  var engEditDraft = null;
+  function captureEngEditDraft(){
+    var stageEl = document.getElementById("engEditStage");
+    if(engDetailTab !== "general" || !openDetailEngId || !stageEl) return;
+    engEditDraft = {
+      projectId: openDetailEngId, stage: stageEl.value,
+      engineer: document.getElementById("engEditEngineer").value,
+      priority: document.getElementById("engEditPriority").value,
+      article: document.getElementById("engEditArticle").value,
+      description: document.getElementById("engEditDescription").value
+    };
+  }
+  function applyEngEditDraft(){
+    var stageEl = document.getElementById("engEditStage");
+    if(!engEditDraft || engEditDraft.projectId !== openDetailEngId || !stageEl) return;
+    stageEl.value = engEditDraft.stage;
+    document.getElementById("engEditEngineer").value = engEditDraft.engineer;
+    document.getElementById("engEditPriority").value = engEditDraft.priority;
+    document.getElementById("engEditArticle").value = engEditDraft.article;
+    document.getElementById("engEditDescription").value = engEditDraft.description;
+  }
+  function engGeneralTabHtml(p){
+    return (
+      '<div class="eng-sec"><div class="eng-sec-head"><span>Информация о проекте</span></div>'+engInfoMetaHtml(p)+'</div>' +
+      engAttentionReviewHtml(p) +
+      (isViewer() ? '' : '<div class="eng-sec"><div class="eng-sec-head"><span>Редактирование</span></div>'+engEditFormHtml(p)+'</div>') +
+      '<div class="eng-sec"><div class="eng-sec-head"><span>Трудозатраты</span></div>'+engWorkloadSection(p)+'</div>'
+    );
+  }
+  function engHistoryTabHtml(p){
+    return (
+      '<div class="eng-sec"><div class="eng-sec-head"><span>Длительность по стадиям</span></div>'+engStageHistorySection(p)+'</div>' +
+      '<div class="eng-sec"><div class="eng-sec-head"><span>История проекта</span></div>'+engHistorySection(p)+'</div>'
+    );
+  }
+  function renderEngDetailTabBody(p){
+    var el = document.getElementById("engDetailTabBody");
+    if(!el || !p) return;
+    if(engDetailTab === "general"){ el.innerHTML = engGeneralTabHtml(p); applyEngEditDraft(); }
+    else if(engDetailTab === "photos") el.innerHTML = '<div class="eng-sec"><div class="eng-sec-head"><span>Фотографии и файлы</span></div>'+engPhotosSection(p)+'</div>';
+    else if(engDetailTab === "history") el.innerHTML = engHistoryTabHtml(p);
+    else if(engDetailTab === "comments") el.innerHTML = engCommentsSectionHtml(p);
+  }
+  function setEngDetailTab(tab){
+    captureEngEditDraft();
+    engDetailTab = tab;
+    Array.prototype.forEach.call(document.querySelectorAll(".eng-detail-tab"), function(b){
+      var active = b.getAttribute("data-eng-tab") === tab;
+      b.classList.toggle("active", active);
+      b.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    renderEngDetailTabBody(engDetailCache);
+  }
+
   var engDetailCache = null;
   function renderEngDetail(p){
     engDetailCache = p;
@@ -2287,17 +2574,18 @@
     document.getElementById("treeDetailEyebrow").textContent = p.stage ? (ENG_STAGE_LABELS[p.stage] || "Проект")
       : (ENG_CATEGORY_LABELS[p.record_category] || "Проект");
     var title = [p.make, p.model].filter(Boolean).join(" ") || p.project_name;
+    var tabsHtml = '<div class="eng-detail-tabs" role="tablist">' + ENG_DETAIL_TABS.map(function(t){
+      return '<button type="button" class="eng-detail-tab'+(engDetailTab===t.id?' active':'')+'" role="tab" ' +
+        'aria-selected="'+(engDetailTab===t.id?'true':'false')+'" data-eng-tab="'+t.id+'">'+t.label+'</button>';
+    }).join("") + '</div>';
     var html =
       '<div class="task-head"><div class="task-title">'+escapeHtml(title)+'</div>' +
         '<span class="eng-priority-pill '+p.prio+'"><span class="dot"></span>'+ENG_PRIORITY_LABELS[p.prio]+'</span></div>' +
       '<div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px;">'+escapeHtml(p.product||p.project_name||"")+
         (p.article_number?' · арт. '+escapeHtml(p.article_number):'')+' · '+(p.engineer?escapeHtml(p.engineer):'<i>Не назначен</i>')+'</div>' +
-      '<div class="eng-sec"><div class="eng-sec-head"><span>Информация о проекте</span></div>'+engInfoSection(p)+'</div>' +
-      '<div class="eng-sec"><div class="eng-sec-head"><span>Длительность по стадиям</span></div>'+engStageHistorySection(p)+'</div>' +
-      '<div class="eng-sec"><div class="eng-sec-head"><span>Трудозатраты</span></div>'+engWorkloadSection(p)+'</div>' +
-      '<div class="eng-sec"><div class="eng-sec-head"><span>История проекта</span></div>'+engHistorySection(p)+'</div>' +
-      '<div class="eng-sec"><div class="eng-sec-head"><span>Фотографии и файлы</span></div>'+engPhotosSection(p)+'</div>';
+      tabsHtml + '<div class="eng-detail-tab-body" id="engDetailTabBody"></div>';
     document.getElementById("treeDetailBody").innerHTML = html;
+    renderEngDetailTabBody(p);
   }
 
   function refreshEngDetail(){
@@ -2308,8 +2596,10 @@
     return apiFetch("/api/projects/"+encodeURIComponent(openDetailEngId)).then(renderEngDetail).catch(function(){});
   }
 
-  function openEngDetail(id){
+  function openEngDetail(id, initialTab){
     openDetailEngId = id;
+    engDetailTab = initialTab || "general";    // critical requirement: opening a (possibly different) project
+    engEditDraft = null;         // always starts clean - never shows another project's draft/tab
     var p = engFind(id);
     if(p) renderEngDetail(p);
     document.getElementById("detailPanel").classList.add("wide");
@@ -2318,6 +2608,8 @@
   }
 
   document.getElementById("treeDetailBody").addEventListener("click", function(e){
+    var tabBtn = e.target.closest("[data-eng-tab]");
+    if(tabBtn){ setEngDetailTab(tabBtn.getAttribute("data-eng-tab")); return; }
     var p = engDetailCache;
     if(!p || !openDetailEngId) return;
     var t = e.target.closest("[data-action]");
@@ -2325,7 +2617,7 @@
     var act = t.getAttribute("data-action");
     if(act === "eng-save-stage"){
       var st = document.getElementById("engEditStage").value || null;
-      engMoveStage(p.id, st).then(refreshEngDetail);
+      engMoveStage(p.id, st).then(function(){ engEditDraft = null; return refreshEngDetail(); });
     } else if(act === "eng-save-fields"){
       var changes = {};
       var eng = document.getElementById("engEditEngineer").value.trim();
@@ -2338,7 +2630,7 @@
       if(desc !== (p.description||"")) changes.description = desc;
       if(!Object.keys(changes).length) return;
       apiFetch("/api/projects/"+encodeURIComponent(p.id), { method:"PATCH", body:{ changes: changes, version: p.version } })
-        .then(function(){ document.activeElement && document.activeElement.blur(); return loadEngProjects(); }).then(refreshEngDetail)
+        .then(function(){ engEditDraft = null; document.activeElement && document.activeElement.blur(); return loadEngProjects(); }).then(refreshEngDetail)
         .catch(function(err){ showSyncNote("Не сохранено: "+err.message); });
     } else if(act === "eng-add-comment"){
       var txt = document.getElementById("engNewComment").value.trim();
@@ -2476,7 +2768,7 @@
       var unresolved = !pl.resolved_project_id && ["new_task","needs_clarification"].indexOf(pl.kind) === -1;
       var applyLabel = (pl.kind === "project_match" || pl.kind === "needs_clarification") ? "Принять к сведению" : "Применить";
       return '<tr id="ko-row-'+escapeHtml(r.id)+'"><td>'+escapeHtml(KO_KIND[pl.kind]||pl.kind)+'<div style="font-size:11px;color:var(--ink-faint);">уверенность: '+escapeHtml(KO_CONF[pl.confidence]||pl.confidence||"—")+'</div></td>' +
-        '<td>'+escapeHtml(koProjectLabel(pl))+(unresolved ? '<div style="font-size:11px;color:var(--danger,#b42318);">'+escapeHtml(pl.resolution_note||"проект не определён")+'</div>' : '')+'</td>' +
+        '<td>'+escapeHtml(koProjectLabel(pl))+(unresolved ? '<div style="font-size:11px;color:var(--crit-ink);">'+escapeHtml(pl.resolution_note||"проект не определён")+'</div>' : '')+'</td>' +
         '<td style="max-width:420px;"><div>'+escapeHtml(pl.summary||"")+'</div>'+(koChangeLabel(pl)?'<div style="font-weight:600;margin-top:3px;">'+escapeHtml(koChangeLabel(pl))+'</div>':'') +
         '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:3px;">'+escapeHtml(pl.rationale||"")+'</div>'+ev+(ph?'<div>'+ph+'</div>':'')+'</td>' +
         '<td><button type="button" class="eng-mini-btn" data-action="ko-apply" data-id="'+escapeHtml(r.id)+'"'+(unresolved?' disabled title="Проект не определён однозначно"':'')+'>'+applyLabel+'</button> ' +
@@ -3811,6 +4103,7 @@
     else if(tab === "eng") renderEngBoard();
     else if(tab === "users") renderUsersView();
     else { renderIntegrationsView(); renderTaskImport(); }
+    setHeaderSectionLabel();
   }
   document.getElementById("tabBoardBtn").addEventListener("click", function(){ setTab("board"); });
   document.getElementById("tabGlobalBtn").addEventListener("click", function(){ setTab("global"); });
@@ -4124,6 +4417,7 @@
       currentRole = (who && who.role) || "admin";
       currentCsrfToken = (who && who.csrf_token) || null;
       applyRoleGating();
+      renderUserChip(who);
     }).catch(function(){ currentRole = "admin"; currentCsrfToken = null; });
   }
 
@@ -4137,7 +4431,7 @@
     if(!engDeepLinkId) return;
     var id = engDeepLinkId; engDeepLinkId = null;
     setTab("eng");
-    if(engFind(id)) openEngDetail(id);
+    if(engFind(id)) openEngDetail(id, "history");    // digest links are about a project's history/changes
   }
 
   var POLL_INTERVAL_MS = 20000;
@@ -4155,14 +4449,19 @@
   // nothing in it that could reset a scroll position or redraw a card.
   var notifState = { notifications: [], unread_count: 0, pending_count: 0 };
   var notifPanelOpen = false;
-  var NOTIF_STATUS_LABEL = { pending: "Ожидает", applied: "Принято", rejected: "Отклонено" };
+  var NOTIF_STATUS_LABEL = { pending: "Ожидает решения", applied: "Принято", rejected: "Отклонено" };
+  var NOTIF_STATUS_ICON = { pending: "clock", applied: "check-circle", rejected: "x" };
   function notifStatusOf(n){
     if(!n.resolved) return "pending";
     return n.resolution === "rejected" ? "rejected" : "applied";
   }
+  function ruNewWord(n){
+    var n10 = n % 10, n100 = n % 100;
+    return (n10 === 1 && n100 !== 11) ? "новое" : "новых";
+  }
   function notifPanelHtml(){
     if(!notifState.notifications.length){
-      return '<div class="notif-empty">Уведомлений нет.</div>';
+      return '<div class="notif-empty">Сообщений нет.</div>';
     }
     return notifState.notifications.map(function(n){
       var pl = n.payload || {};
@@ -4171,29 +4470,39 @@
       var project = koProjectLabel(pl);
       var when = fmtTz(n.created_at, "Asia/Yekaterinburg");
       return '<button type="button" class="notif-item'+(n.read?"":" unread")+'" data-action="open-notif" data-notif-id="'+escapeHtml(n.notification_id)+'" data-proposal-id="'+escapeHtml(n.id)+'">' +
-        '<div class="notif-item-row"><span class="notif-item-project">'+escapeHtml(project)+'</span><span class="notif-item-time">'+escapeHtml(when)+' ЕКБ</span></div>' +
-        '<div class="notif-item-kind">'+escapeHtml(kindLabel)+'</div>' +
-        '<div class="notif-item-summary">'+escapeHtml(pl.summary||"")+'</div>' +
-        '<span class="notif-item-status '+status+'">'+NOTIF_STATUS_LABEL[status]+'</span>' +
+        '<span class="notif-item-icon '+status+'"><span class="icon" data-notif-icon="'+status+'"></span></span>' +
+        '<span class="notif-item-body">' +
+          '<span class="notif-item-row"><span class="notif-item-line">'+escapeHtml(kindLabel)+': '+escapeHtml(project)+'</span><span class="notif-item-time">'+escapeHtml(when)+'</span></span>' +
+          '<span class="notif-item-sub '+status+'">'+escapeHtml(NOTIF_STATUS_LABEL[status])+(pl.summary ? ' · '+escapeHtml(pl.summary) : '')+'</span>' +
+        '</span>' +
       '</button>';
     }).join("");
   }
   function renderNotifBell(){
+    var badgeWrap = document.getElementById("notifBadgeWrap");
     var badge = document.getElementById("notifBadge");
+    var suffix = document.getElementById("notifBadgeSuffix");
     var bellBtn = document.getElementById("notifBellBtn");
     if(notifState.unread_count > 0){
-      badge.style.display = "";
+      badgeWrap.style.display = "";
       badge.textContent = notifState.unread_count > 99 ? "99+" : String(notifState.unread_count);
+      suffix.textContent = " "+ruNewWord(notifState.unread_count);
       bellBtn.classList.add("has-unread");
     } else {
-      badge.style.display = "none";
+      badgeWrap.style.display = "none";
       bellBtn.classList.remove("has-unread");
     }
     document.getElementById("notifPanelCounts").textContent =
       "Непрочитанных: "+notifState.unread_count+" · Ожидают решения: "+notifState.pending_count;
     var markAllBtn = document.getElementById("notifMarkAllBtn");
+    document.getElementById("notifPanelActions").style.display = notifState.unread_count === 0 ? "none" : "";
     markAllBtn.disabled = notifState.unread_count === 0;
-    if(notifPanelOpen) document.getElementById("notifPanelList").innerHTML = notifPanelHtml();
+    if(notifPanelOpen){
+      document.getElementById("notifPanelList").innerHTML = notifPanelHtml();
+      Array.prototype.forEach.call(document.querySelectorAll("[data-notif-icon]"), function(el){
+        el.innerHTML = iconSvg(NOTIF_STATUS_ICON[el.getAttribute("data-notif-icon")] || "mail", 14);
+      });
+    }
   }
   function loadKoNotifications(){
     if(currentRole !== "admin") return Promise.resolve();
@@ -4239,7 +4548,6 @@
     e.stopPropagation();
     if(notifPanelOpen) closeNotifPanel(); else openNotifPanel();
   });
-  document.getElementById("notifPanelCloseBtn").addEventListener("click", function(e){ e.stopPropagation(); closeNotifPanel(); });
   document.getElementById("notifMarkAllBtn").addEventListener("click", function(e){
     e.stopPropagation();
     apiFetch("/api/ko/notifications/read-all", { method: "POST", body: {} }).then(loadKoNotifications).catch(function(){});
@@ -4249,11 +4557,100 @@
     if(!btn) return;
     openKoNotification(btn.getAttribute("data-notif-id"), btn.getAttribute("data-proposal-id"));
   });
+  // "Открыть все сообщения" - the full, unmodified "Предложения агента КО" list (real data,
+  // nothing new to build: every message here already is a КО proposal).
+  document.getElementById("notifOpenAllLink").addEventListener("click", function(e){
+    e.preventDefault(); e.stopPropagation();
+    closeNotifPanel();
+    setTab("eng");
+    setEngSubview("ko");
+  });
   document.addEventListener("click", function(e){
     if(notifPanelOpen && !e.target.closest("#notifBellWrap")) closeNotifPanel();
   });
+  document.addEventListener("keydown", function(e){
+    if(e.key !== "Escape") return;
+    if(notifPanelOpen) closeNotifPanel();
+    closeHeaderSectionMenu();
+    closeUserMenu();
+  });
   var NOTIF_POLL_INTERVAL_MS = 20000;
   setInterval(loadKoNotifications, NOTIF_POLL_INTERVAL_MS);
+
+  // ---- header section breadcrumb (mirrors the sidebar's own tabs - no new navigation, just a
+  // second, closer-to-hand way to reach the same five real sections) ----
+  var HEADER_SECTIONS = [
+    { tab: "board", label: "Доска" },
+    { tab: "global", label: "Глобально" },
+    { tab: "eng", label: "Конструкторский отдел" },
+    { tab: "integrations", label: "Интеграции" },
+    { tab: "users", label: "Пользователи", adminOnly: true }
+  ];
+  var headerSectionMenuOpen = false;
+  function renderHeaderSectionMenu(){
+    document.getElementById("headerSectionMenu").innerHTML = HEADER_SECTIONS
+      .filter(function(s){ return !s.adminOnly || currentRole === "admin"; })
+      .filter(function(s){ return !isViewer() || s.tab === "eng"; })
+      .map(function(s){ return '<button type="button" class="header-section-item'+(s.tab===activeTab?" active":"")+'" data-tab="'+s.tab+'">'+s.label+'</button>'; }).join("");
+  }
+  function setHeaderSectionLabel(){
+    var cur = HEADER_SECTIONS.filter(function(s){ return s.tab === activeTab; })[0];
+    document.getElementById("headerSectionLabel").textContent = cur ? cur.label : "Доска";
+  }
+  function openHeaderSectionMenu(){
+    headerSectionMenuOpen = true;
+    renderHeaderSectionMenu();
+    document.getElementById("headerSectionMenu").classList.add("open");
+    document.getElementById("headerSectionBtn").setAttribute("aria-expanded", "true");
+  }
+  function closeHeaderSectionMenu(){
+    headerSectionMenuOpen = false;
+    document.getElementById("headerSectionMenu").classList.remove("open");
+    document.getElementById("headerSectionBtn").setAttribute("aria-expanded", "false");
+  }
+  document.getElementById("headerSectionBtn").addEventListener("click", function(e){
+    e.stopPropagation();
+    if(headerSectionMenuOpen) closeHeaderSectionMenu(); else openHeaderSectionMenu();
+  });
+  document.getElementById("headerSectionMenu").addEventListener("click", function(e){
+    var btn = e.target.closest("[data-tab]");
+    if(!btn) return;
+    closeHeaderSectionMenu();
+    setTab(btn.getAttribute("data-tab"));
+    setHeaderSectionLabel();
+  });
+  document.addEventListener("click", function(e){
+    if(headerSectionMenuOpen && !e.target.closest("#headerSectionWrap")) closeHeaderSectionMenu();
+  });
+
+  // ---- user profile chip (real session identity from /api/whoami - never a placeholder name) ----
+  var userMenuOpen = false;
+  function openUserMenu(){ userMenuOpen = true; document.getElementById("userMenu").classList.add("open"); document.getElementById("userChipBtn").setAttribute("aria-expanded","true"); }
+  function closeUserMenu(){ userMenuOpen = false; document.getElementById("userMenu").classList.remove("open"); document.getElementById("userChipBtn").setAttribute("aria-expanded","false"); }
+  document.getElementById("userChipBtn").addEventListener("click", function(e){
+    e.stopPropagation();
+    if(userMenuOpen) closeUserMenu(); else openUserMenu();
+  });
+  document.addEventListener("click", function(e){
+    if(userMenuOpen && !e.target.closest("#userChipWrap")) closeUserMenu();
+  });
+  document.getElementById("userLogoutBtn").addEventListener("click", function(){
+    apiFetch("/api/logout", { method: "POST", body: {} }).catch(function(){}).then(function(){ location.href = "/login.html"; });
+  });
+  function avatarInitials(name){
+    var parts = String(name||"").trim().split(/\s+/).filter(Boolean);
+    if(!parts.length) return "?";
+    return parts.length === 1 ? parts[0].slice(0,2).toUpperCase() : (parts[0][0]+parts[1][0]).toUpperCase();
+  }
+  function renderUserChip(who){
+    var wrap = document.getElementById("userChipWrap");
+    if(!who || !who.auth_required || !who.authenticated){ wrap.style.display = "none"; return; }
+    var displayName = who.full_name || who.username || "";
+    wrap.style.display = "";
+    document.getElementById("userAvatar").textContent = avatarInitials(displayName);
+    document.getElementById("userNameLabel").textContent = displayName;
+    document.getElementById("userRoleLabel").textContent = ROLE_LABELS[who.role] || who.role || "";
+  }
 
   document.getElementById("refreshBtn").addEventListener("click", function(){
     var syncEl = document.getElementById("syncStatus");

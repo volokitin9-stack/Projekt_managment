@@ -106,10 +106,20 @@ router.get("/:id/files/:fileId/view", (req, res) => {
   fs.createReadStream(absolutePath).pipe(res);
 });
 
+// Критическое требование (роль ko_viewer): this raw route had no role check at all - any
+// authenticated session got the unredacted technical history rows (the same plan-import
+// diagnostic fields redactTechnicalForRole/presentHistoryEvents above exist specifically to keep
+// out of a non-administrator's hands). The administrator keeps the exact same raw array as
+// before; a non-administrator now gets the same readable, technical-field-free journal the
+// "История" tab already shows via GET /:id - never the raw rows, never a flat 403 (viewing is
+// allowed for this role everywhere else on this router).
 router.get("/:id/history", (req, res) => {
   const project = projectsModel.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: "Not found" });
-  res.json(project.history);
+  const isAdmin = req.authRole === "admin";
+  if (isAdmin) return res.json(project.history);
+  res.json(historyLabels.presentHistoryEvents(project.history,
+    { admin: false, stageLabels: stageLabelMap(), activities: project.activities || [] }));
 });
 
 // PATCH /api/projects/:id — manual edit of the editable fields (needs the version you read).
