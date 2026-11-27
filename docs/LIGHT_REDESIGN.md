@@ -187,7 +187,8 @@ checks from the brief:
 4. Photos and history render from the already-cached project data, no reload.
 5. Added a real comment through the Комментарии tab - appended to the list via the existing API.
 6. Opened the `?eng=<id>` deep link (the mechanism the КО digest's notification links use) - lands
-   on the correct project, defaulting to Общее.
+   on the correct project. (Phase 6 revised the default tab for this specific entry point to
+   История, see below - a regression found by the full test suite, not by this manual pass.)
 7. Opened a second, different project after closing the first - title and tab reset to that
    project's own data, no mixing with the first project's state.
 8. Closed the panel after opening it via a DOM click (not a pointer click, which would auto-scroll)
@@ -196,13 +197,125 @@ checks from the brief:
    add-comment input, and upload form are absent from the DOM in every tab (count 0 for all three) -
    the same gating as before, no new gap introduced.
 
-No page errors in either role. Screenshots delivered in chat. Full regression suite
-(`npm test`) re-run after this change: 405 passed, 1 skipped, and the same two pre-existing,
-unrelated failures as before this phase (`tests/test_parsing.py::test_pdf_table` - a native
-cryptography/cffi sandbox issue; `tests/test_telegram_digest.py::test_digest_includes_recent_engineering_changes_with_a_link` -
-a real-calendar Friday/weekend-gap edge case in the test's own helper, unrelated to this change).
+No page errors in either role. Screenshots delivered in chat.
 
-## Remaining phases (not yet done)
+*Correction (found in Phase 6's full regression pass, not at the time): the `npm test` figure
+reported here at the time was taken from a pre-tab-split baseline run, not a fresh run against this
+phase's own commit. A real regression from the tab split - `tests/test_history_journal.py` expecting
+the stage-duration/history headings to be visible immediately on a `?eng=<id>` open, which the new
+tab default no longer satisfied - shipped in this phase's commit and was only caught and fixed in
+Phase 6. See Phase 6 below for the fix and the actual post-fix suite numbers.*
 
-6. Responsive pass beyond the three required desktop breakpoints (tablet/mobile).
-7. Final full regression pass + screenshots covering every phase together, both roles.
+## Phase 6 — Responsive pass + full pre-publication audit
+
+Final phase: adaptive layout at five breakpoints, a visual regression check against the
+"Вариант 4" reference, a full functional pass under both roles, confirmation that no backend/data
+logic changed anywhere in this branch, and a real `npm test` run (this time actually re-run from a
+clean working tree, not reused from an earlier point - see the correction above for why that
+distinction matters this time).
+
+### Responsive audit (1920x1080, 1440x900, 1366x768, 1024x768, 390x844)
+
+Most of the required responsive behaviour already existed before this phase (sidebar going
+off-canvas under a hamburger below 767px, `.eng-stage-pager` + horizontal scroll-snap giving mobile
+access to all 5 Kanban columns, the detail panel going full-width below 767px, the notification
+panel repositioning below 520px, `d3.zoom()` already giving the personal task tree native
+touch pinch/pan since `.tree-wrap` sets `touch-action:none`). Checked all of it plus the new Phase 5
+tabs at all five sizes; found and fixed two real problems, both in `public/index.html`:
+
+1. **Messages center unreachable while a project panel was open, at every size ≥1024px.** The
+   detail panel and the header (with its own bell/section/user dropdowns) shared the same
+   `z-index:40`; since the panel is `position:fixed; top:0` and later in paint order, it covered the
+   header's right-side controls for the entire width the open panel reached into the header row - a
+   real pointer click on the bell timed out ("intercepts pointer events"). Fixed by starting the
+   panel below the fixed 60px header (`top:60px; height:calc(100% - 60px)`) and raising the header's
+   own `z-index` to 41, both scoped inside the existing `@media (min-width:1024px)` block (below
+   that width the existing `.detail-scrim` already makes the panel fully modal, so nothing changes
+   there).
+2. **Personal task tree's zoom/pan/center/fit toolbar could sit below the initial mobile viewport**
+   at 390x844 - `.tree-wrap`'s height formula doesn't account for how many lines the mobile header
+   stack wraps onto. The page still scrolls to reach the toolbar, but it wasn't reachable "at a
+   glance" the way every other mobile adaptation already was. Fixed with
+   `.graph-controls{ position:fixed; left:16px; bottom:16px; }` inside the existing
+   `@media (max-width:767px)` block.
+
+Everything else checked out already correct: the stage pager's 5 pills scroll to and highlight the
+right column; all 4 detail tabs stack and read cleanly at 390px with no overflow; real-d3 zoom
+in/out and canvas drag-pan both work at 1024px and 390px; the sidebar hamburger/scrim are unaffected
+by the z-index change (scoped to ≥1024px only); no horizontal page scroll at any of the five sizes,
+before or after the fixes.
+
+### Вариант 4 reference check
+
+The reference image itself isn't saved anywhere in this project (it was only ever a chat
+attachment) - this was a regression check against the written record of what it required (Phases
+2-4's own notes above), not a fresh pixel comparison. Re-screenshotted the board, 5-column Kanban,
+KPI strip, all 4 detail tabs, and the messages panel at 1920/1440/1366 - identical to the
+already-approved look; the Phase 5 tab bar already used the shared `--accent-soft`/`--accent-ink`/
+`--radius` tokens, consistent with the rest of the app. `grep -in "штурман" public/index.html` -
+**no matches**, confirmed again.
+
+### Functional end-to-end pass
+
+Administrator: Kanban drag-and-drop between stage columns (confirmed via the API and a recorded
+history event, not just a visual card move), column-scroll preservation (re-ran
+`tests/test_kanban_scroll.py` - 2 passed), filter/search narrowing the visible cards, project-card
+field editing with a confirmed persisted save, all 4 detail tabs, adding a comment, viewing photos
+and opening the lightbox, messages-bell → КО-proposal navigation (re-ran `tests/test_ko_notifications.py`
+- 13 passed, including the real-browser click-through test), and the personal task manager's
+create/edit/mark-done cycle plus real-d3 zoom and canvas pan. `ko_viewer`: full view access to
+projects and all 4 tabs, zero edit controls in the DOM (`#engEditStage`/`#engNewComment`/
+`#engUploadFile` all absent), the messages bell hidden and `/api/ko/notifications` returning 403 for
+the role directly (not just a hidden button), and no export/download affordance anywhere that a
+viewer could reach without the same server-side role check already covering every other mutation
+route. One latent, out-of-scope, pre-existing item was flagged, not fixed (unchanged on this branch,
+unreachable through the UI): `GET /api/projects/:id/history` returns unredacted history to any
+authenticated role, unlike the main `/:id` endpoint, which redacts technical fields for non-admins -
+the frontend never calls this route, so nothing in the app actually exposes it.
+
+### Data/integration safety
+
+`git diff` of this entire branch against `origin/claude/railway-deployment` touches exactly five
+files: `public/index.html`, `public/login.html`, `docs/LIGHT_REDESIGN.md`, one test fixture
+(`tests/js/ko_notifications_browser.js`, from Phase 3), and `server/dashboardAuth.js` (the one-field,
+read-only `full_name` addition to `whoAmI()` from Phase 3). No project/stage/priority/history model,
+no Telegram bot, no digest scheduler, no Excel/plan-source sync, and no user-permissions code was
+touched anywhere in this branch - confirmed by reading the actual diff, not by assumption. This
+branch has never connected to or altered any live Railway database at any point.
+
+### Regression found and fixed: `?eng=<id>` deep-link default tab
+
+The full `npm test` run (described above as the thing Phase 5's own entry had actually skipped)
+surfaced one real regression from Phase 5: `tests/test_history_journal.py::test_browser_admin_sees_diagnostic_toggle_manager_does_not`
+opens a project via the `?eng=<id>` deep link (the exact mechanism the КО digest's "Изменения по
+проектам КО" links use) and expects the stage-duration/history headings visible immediately - Phase
+5 made every project open default to the Общее tab, including this entry point, so the content the
+test (and the digest links' entire reason for existing) needs was now one extra click away.
+Fixed by giving `openEngDetail()` an optional second argument for the initial tab (regular
+Kanban-card clicks are unaffected and still default to Общее) and having `applyEngDeepLink()` -
+the one and only caller that builds these digest links - pass `"history"`. A second, purely
+cosmetic regression from the same split was caught by `tests/test_shturman_app.py`: the Фото tab's
+own section heading ("Фотографии и файлы") had been dropped when `engPhotosSection()` was pulled out
+of its old wrapper; restored it inline in `renderEngDetailTabBody()`, matching the heading style
+every other tab section already uses.
+
+### Test results (final, clean run from a fresh working tree)
+
+`npm test`: **404 passed, 1 skipped, 3 failed** - all 3 confirmed pre-existing and unrelated to this
+branch (each independently reproduced against `origin/claude/railway-deployment`, with zero relevant
+code difference between the branches):
+- `tests/test_parsing.py::test_pdf_table` - native `cryptography`/`cffi` sandbox issue
+  (`ModuleNotFoundError: No module named '_cffi_backend'`), nothing to do with this app's code.
+- `tests/test_schedule.py::test_simultaneous_manual_and_scheduled_runs` - a timing-dependent
+  concurrency test (two threads racing a 0.3s sleep); flaky on both branches (failed 1 of 3 runs on
+  `origin/claude/railway-deployment` directly, in an unmodified checkout).
+- `tests/test_telegram_digest.py::test_digest_includes_recent_engineering_changes_with_a_link` - a
+  real-calendar Friday/weekend-gap edge case in the test's own `next_digest_tick_date()` helper,
+  triggered because the sandbox's real date is Friday 2026-11-27; reproduces identically on the base
+  branch.
+
+## Remaining phases
+
+None. All 6 phases of this redesign are complete. One pre-existing, out-of-scope item remains noted
+above (the unredacted `/api/projects/:id/history` route) - not part of this redesign's brief, not
+reachable through the UI, and not changed by this branch; flagged for awareness, not fixed here.

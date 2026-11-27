@@ -852,6 +852,10 @@
   @media (min-width:1024px){
     .tree-wrap.panel-open-width{ width:calc(100% - 390px); }
     .detail-scrim{ display:none !important; }
+    /* Panel sits beside the page here (no scrim), but shared z-index with the fixed header let
+       its head bar cover the header's right-side controls (messages bell etc). */
+    .detail-panel{ top:60px; height:calc(100% - 60px); }
+    .app-header{ z-index:41; }
   }
   @media (max-width:1023px){
     .integrations-panel{ grid-template-columns:repeat(2,1fr); }
@@ -881,6 +885,9 @@
     .eng-subtabs{ margin:10px 14px 0; max-width:calc(100% - 28px); }
     .eng-unconfirmed{ margin:10px 14px 0; }
     .eng-list-wrap{ padding:12px 14px 16px; }
+    /* tree-wrap's height formula assumes the desktop header stack, so on mobile the canvas (and
+       its toolbar) can run past the initial viewport - pin the toolbar so it's reachable without scrolling first. */
+    .graph-controls{ position:fixed; left:16px; bottom:16px; z-index:15; }
   }
   .eng-stage-pager{ display:none; gap:4px; padding:0 14px; margin-top:8px; overflow-x:auto; }
   .eng-stage-pager button{
@@ -2545,7 +2552,7 @@
     var el = document.getElementById("engDetailTabBody");
     if(!el || !p) return;
     if(engDetailTab === "general"){ el.innerHTML = engGeneralTabHtml(p); applyEngEditDraft(); }
-    else if(engDetailTab === "photos") el.innerHTML = engPhotosSection(p);
+    else if(engDetailTab === "photos") el.innerHTML = '<div class="eng-sec"><div class="eng-sec-head"><span>Фотографии и файлы</span></div>'+engPhotosSection(p)+'</div>';
     else if(engDetailTab === "history") el.innerHTML = engHistoryTabHtml(p);
     else if(engDetailTab === "comments") el.innerHTML = engCommentsSectionHtml(p);
   }
@@ -2589,9 +2596,9 @@
     return apiFetch("/api/projects/"+encodeURIComponent(openDetailEngId)).then(renderEngDetail).catch(function(){});
   }
 
-  function openEngDetail(id){
+  function openEngDetail(id, initialTab){
     openDetailEngId = id;
-    engDetailTab = "general";    // critical requirement: opening a (possibly different) project
+    engDetailTab = initialTab || "general";    // critical requirement: opening a (possibly different) project
     engEditDraft = null;         // always starts clean - never shows another project's draft/tab
     var p = engFind(id);
     if(p) renderEngDetail(p);
@@ -4424,7 +4431,7 @@
     if(!engDeepLinkId) return;
     var id = engDeepLinkId; engDeepLinkId = null;
     setTab("eng");
-    if(engFind(id)) openEngDetail(id);
+    if(engFind(id)) openEngDetail(id, "history");    // digest links are about a project's history/changes
   }
 
   var POLL_INTERVAL_MS = 20000;
