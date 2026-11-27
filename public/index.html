@@ -804,6 +804,20 @@
   .eng-sec{ border-top:1px dashed var(--line); padding-top:12px; margin-top:14px; }
   .eng-sec-head{ display:flex; justify-content:space-between; align-items:center; font-size:10.5px; text-transform:uppercase;
     letter-spacing:.04em; color:var(--ink-soft); font-weight:600; margin-bottom:8px; }
+
+  /* ---- project detail panel: Общее / Фото / История / Комментарии tabs ---- */
+  .eng-detail-tabs{
+    display:flex; gap:3px; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:9px; padding:3px; margin-top:12px;
+  }
+  .eng-detail-tab{
+    flex:1 1 0; background:none; border:none; padding:7px 6px; border-radius:7px;
+    font-size:12px; font-weight:600; color:var(--ink-soft); cursor:pointer; transition:all .15s ease;
+  }
+  .eng-detail-tab:hover{ color:var(--ink); }
+  .eng-detail-tab.active{ background:var(--accent-soft); color:var(--accent-ink); }
+  .eng-detail-tab-body{ margin-top:4px; }
+  .eng-detail-tab-body .eng-sec:first-child{ border-top:none; margin-top:10px; padding-top:0; }
   .eng-sums{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
   .eng-sums .kpi-tile{ flex:1 1 110px; padding:7px 10px; }
   .eng-sums .kpi-value{ font-size:16px; }
@@ -1653,6 +1667,7 @@
     openDetailTaskId = null;
     openDetailGlobalId = null;
     openDetailEngId = null;
+    engEditDraft = null;
     document.getElementById("detailPanel").classList.remove("wide");
     document.getElementById("detailPanel").classList.remove("open");
     document.getElementById("detailScrim").classList.remove("show");
@@ -2285,20 +2300,15 @@
     return (flagsHtml || reviewsHtml) ? '<div class="eng-sec"><div class="eng-sec-head"><span>Внимание</span></div>'+(flagsHtml || '<div class="eng-empty">Нет активных флагов</div>')+'</div>'+reviewsHtml : "";
   }
 
-  function engInfoSection(p){
-    var prioOrig = p.priority_original;
+  // ---- "Общее" tab: project meta-fields, unchanged content, split out of what used to be one
+  // big engInfoSection() so each piece can be placed in its own tab (§ redesign Phase 5) without
+  // touching the markup, fields or data each piece renders.
+  function engInfoMetaHtml(p){
     var src = [p.source_file, p.source_sheet ? "лист «"+p.source_sheet+"»" : null,
       (p.source_rows && p.source_rows.length) ? "строки "+p.source_rows.join(", ") : (p.source_row ? "строка "+p.source_row : null)]
       .filter(Boolean).join(" · ");
-    var stageOpts = '<option value="">— не подтверждён —</option>' + ENG_STAGES.map(function(s){
-      return '<option value="'+s+'"'+(p.stage===s?' selected':'')+'>'+escapeHtml(ENG_STAGE_LABELS[s])+'</option>'; }).join("");
-    var prioOpts = ["", "critical", "high", "normal", "low"].map(function(k){
-      return '<option value="'+k+'"'+((p.priority||"")===k?' selected':'')+'>'+(k?ENG_PRIORITY_LABELS[k]:"Не указан")+'</option>'; }).join("");
     var durStr = !p.stage ? "—" : (p.days_in_stage === null || p.days_in_stage === undefined ? "Длительность неизвестна"
       : p.days_in_stage+" "+ruDaysWord(p.days_in_stage)+" (с "+fmtTs(p.stage_entered_at)+")");
-    var comments = (p.comments || []).map(function(c){
-      return '<div class="eng-comment">'+escapeHtml(c.text)+'<div class="meta">'+fmtTs(c.at)+' · '+escapeHtml(ENG_SOURCE_LABELS[c.source]||c.source||"")+(c.author?' · '+escapeHtml(c.author):'')+'</div></div>';
-    }).join("") || '<div class="eng-empty">Комментариев нет</div>';
     var ex = p.extra_attributes || {};
     return (
       '<div class="task-meta">' +
@@ -2322,29 +2332,41 @@
         '<div class="meta-row"><span class="k">Статус работ</span><span class="v'+(p.work_status?'':' ghost')+'">'+escapeHtml(p.work_status?(ENG_WORK_STATUS_LABELS[p.work_status]||p.work_status):"не определён")+'</span></div>' +
         (ex.plan_comment ? '<div class="meta-row"><span class="k">Комментарий плана</span><span class="v">'+escapeHtml(ex.plan_comment)+'</span></div>' : '') +
         '<div class="meta-row"><span class="k">Источник</span><span class="v'+(src?'':' ghost')+'">'+escapeHtml(src||"вручную")+'</span></div>' +
-      '</div>' +
-      engAttentionReviewHtml(p) +
-      // Критическое требование (роль ko_viewer): "Создание, редактирование, удаление проектов и
-      // задач" forbidden - no edit form, no stage-confirm control, no add-comment input for a
-      // manager. The server already refuses these mutations regardless (adminOnlyForMutations in
-      // server/routes/projects.js); this just avoids showing a control that would 403.
-      (isViewer() ? '' :
-      '<div class="eng-sec"><div class="eng-sec-head"><span>Редактирование</span></div>' +
-        '<div class="eng-form-row"><span style="width:110px;">Этап</span><select class="eng-input" id="engEditStage">'+stageOpts+'</select>' +
-          '<button type="button" class="btn" data-action="eng-save-stage">Подтвердить этап</button></div>' +
-        '<div class="eng-form-row"><span style="width:110px;">Ответственный</span><input class="eng-input" id="engEditEngineer" value="'+escapeHtml(p.assigned_engineer||"")+'" placeholder="Не назначен"></div>' +
-        '<div class="eng-form-row"><span style="width:110px;">Приоритет</span><select class="eng-input" id="engEditPriority">'+prioOpts+'</select>' +
-          (prioOrig !== null && prioOrig !== undefined && prioOrig !== "" ? '<span>исходное значение в плане: <b>'+escapeHtml(Array.isArray(prioOrig)?prioOrig.join(", "):String(prioOrig))+'</b></span>' : '') + '</div>' +
-        '<div class="eng-form-row"><span style="width:110px;">Артикул</span><input class="eng-input" id="engEditArticle" value="'+escapeHtml(p.article_number||"")+'"></div>' +
-        '<div class="eng-form-row" style="display:block;"><div style="margin-bottom:4px;">Описание</div><textarea class="eng-input" id="engEditDescription">'+escapeHtml(p.description||"")+'</textarea></div>' +
-        '<button type="button" class="btn primary" data-action="eng-save-fields">Сохранить</button>' +
-        ' <span style="font-size:11px;color:var(--ink-faint);">Ручные изменения сохраняются при следующих импортах плана.</span>' +
-      '</div>') +
-      '<div class="eng-sec"><div class="eng-sec-head"><span>Комментарии</span></div>'+comments+
-        (isViewer() ? '' :
-        '<div class="eng-form-row" style="margin-top:8px;"><input class="eng-input" id="engNewComment" style="flex:1;" placeholder="Инженерный комментарий…"><button type="button" class="btn" data-action="eng-add-comment">Добавить</button></div>') +
       '</div>'
     );
+  }
+  // Критическое требование (роль ko_viewer): "Создание, редактирование, удаление проектов и
+  // задач" forbidden - no edit form, no stage-confirm control for a manager. The server already
+  // refuses these mutations regardless (adminOnlyForMutations in server/routes/projects.js); this
+  // just avoids showing a control that would 403. Caller (engGeneralTabHtml) skips this entirely
+  // for isViewer().
+  function engEditFormHtml(p){
+    var prioOrig = p.priority_original;
+    var stageOpts = '<option value="">— не подтверждён —</option>' + ENG_STAGES.map(function(s){
+      return '<option value="'+s+'"'+(p.stage===s?' selected':'')+'>'+escapeHtml(ENG_STAGE_LABELS[s])+'</option>'; }).join("");
+    var prioOpts = ["", "critical", "high", "normal", "low"].map(function(k){
+      return '<option value="'+k+'"'+((p.priority||"")===k?' selected':'')+'>'+(k?ENG_PRIORITY_LABELS[k]:"Не указан")+'</option>'; }).join("");
+    return (
+      '<div class="eng-form-row"><span style="width:110px;">Этап</span><select class="eng-input" id="engEditStage">'+stageOpts+'</select>' +
+        '<button type="button" class="btn" data-action="eng-save-stage">Подтвердить этап</button></div>' +
+      '<div class="eng-form-row"><span style="width:110px;">Ответственный</span><input class="eng-input" id="engEditEngineer" value="'+escapeHtml(p.assigned_engineer||"")+'" placeholder="Не назначен"></div>' +
+      '<div class="eng-form-row"><span style="width:110px;">Приоритет</span><select class="eng-input" id="engEditPriority">'+prioOpts+'</select>' +
+        (prioOrig !== null && prioOrig !== undefined && prioOrig !== "" ? '<span>исходное значение в плане: <b>'+escapeHtml(Array.isArray(prioOrig)?prioOrig.join(", "):String(prioOrig))+'</b></span>' : '') + '</div>' +
+      '<div class="eng-form-row"><span style="width:110px;">Артикул</span><input class="eng-input" id="engEditArticle" value="'+escapeHtml(p.article_number||"")+'"></div>' +
+      '<div class="eng-form-row" style="display:block;"><div style="margin-bottom:4px;">Описание</div><textarea class="eng-input" id="engEditDescription">'+escapeHtml(p.description||"")+'</textarea></div>' +
+      '<button type="button" class="btn primary" data-action="eng-save-fields">Сохранить</button>' +
+      ' <span style="font-size:11px;color:var(--ink-faint);">Ручные изменения сохраняются при следующих импортах плана.</span>'
+    );
+  }
+  // ---- "Комментарии" tab: the project's own comment log (server/projectsModel.js's `comments`
+  // array, POST /api/projects/:id/comments) - the only comment system this app has; nothing
+  // invented here.
+  function engCommentsSectionHtml(p){
+    var comments = (p.comments || []).map(function(c){
+      return '<div class="eng-comment">'+escapeHtml(c.text)+'<div class="meta">'+fmtTs(c.at)+' · '+escapeHtml(ENG_SOURCE_LABELS[c.source]||c.source||"")+(c.author?' · '+escapeHtml(c.author):'')+'</div></div>';
+    }).join("") || '<div class="eng-empty">Комментариев нет</div>';
+    return comments + (isViewer() ? '' :
+      '<div class="eng-form-row" style="margin-top:8px;"><input class="eng-input" id="engNewComment" style="flex:1;" placeholder="Инженерный комментарий…"><button type="button" class="btn" data-action="eng-add-comment">Добавить</button></div>');
   }
 
   // ---- длительность на каждой стадии (server/projectsModel.js's buildStageHistory - computed
@@ -2468,6 +2490,76 @@
     return gal + (att ? '<div class="eng-sec-head" style="margin-top:12px;"><span>Файлы</span></div>'+att : '') + uploadForm;
   }
 
+  // ---- project detail panel: four real tabs (Общее/Фото/История/Комментарии), redesign Phase 5.
+  // Same data, same functions, same edit/upload/comment actions as before - only how they're split
+  // across the panel changed. Switching tabs never re-fetches the project (renderEngDetailTabBody
+  // reads engDetailCache, already in memory) and never touches anything outside #engDetailTabBody,
+  // so the Kanban board behind the panel is untouched either way.
+  var ENG_DETAIL_TABS = [
+    { id:"general", label:"Общее" }, { id:"photos", label:"Фото" },
+    { id:"history", label:"История" }, { id:"comments", label:"Комментарии" }
+  ];
+  var engDetailTab = "general";
+  // Critical requirement: "при переключении вкладок не терять несохранённые изменения" - the
+  // "Общее" tab's edit form is the only one with free-typed, unsaved input (uploads/comments are
+  // submitted immediately). Its live values are snapshotted into engEditDraft before switching
+  // away and re-applied when the user comes back to "Общее", instead of trusting the last-rendered
+  // server copy. Cleared on a successful save, and whenever a (possibly different) project is
+  // opened or the panel closes, so it can never leak between projects.
+  var engEditDraft = null;
+  function captureEngEditDraft(){
+    var stageEl = document.getElementById("engEditStage");
+    if(engDetailTab !== "general" || !openDetailEngId || !stageEl) return;
+    engEditDraft = {
+      projectId: openDetailEngId, stage: stageEl.value,
+      engineer: document.getElementById("engEditEngineer").value,
+      priority: document.getElementById("engEditPriority").value,
+      article: document.getElementById("engEditArticle").value,
+      description: document.getElementById("engEditDescription").value
+    };
+  }
+  function applyEngEditDraft(){
+    var stageEl = document.getElementById("engEditStage");
+    if(!engEditDraft || engEditDraft.projectId !== openDetailEngId || !stageEl) return;
+    stageEl.value = engEditDraft.stage;
+    document.getElementById("engEditEngineer").value = engEditDraft.engineer;
+    document.getElementById("engEditPriority").value = engEditDraft.priority;
+    document.getElementById("engEditArticle").value = engEditDraft.article;
+    document.getElementById("engEditDescription").value = engEditDraft.description;
+  }
+  function engGeneralTabHtml(p){
+    return (
+      '<div class="eng-sec"><div class="eng-sec-head"><span>Информация о проекте</span></div>'+engInfoMetaHtml(p)+'</div>' +
+      engAttentionReviewHtml(p) +
+      (isViewer() ? '' : '<div class="eng-sec"><div class="eng-sec-head"><span>Редактирование</span></div>'+engEditFormHtml(p)+'</div>') +
+      '<div class="eng-sec"><div class="eng-sec-head"><span>Трудозатраты</span></div>'+engWorkloadSection(p)+'</div>'
+    );
+  }
+  function engHistoryTabHtml(p){
+    return (
+      '<div class="eng-sec"><div class="eng-sec-head"><span>Длительность по стадиям</span></div>'+engStageHistorySection(p)+'</div>' +
+      '<div class="eng-sec"><div class="eng-sec-head"><span>История проекта</span></div>'+engHistorySection(p)+'</div>'
+    );
+  }
+  function renderEngDetailTabBody(p){
+    var el = document.getElementById("engDetailTabBody");
+    if(!el || !p) return;
+    if(engDetailTab === "general"){ el.innerHTML = engGeneralTabHtml(p); applyEngEditDraft(); }
+    else if(engDetailTab === "photos") el.innerHTML = engPhotosSection(p);
+    else if(engDetailTab === "history") el.innerHTML = engHistoryTabHtml(p);
+    else if(engDetailTab === "comments") el.innerHTML = engCommentsSectionHtml(p);
+  }
+  function setEngDetailTab(tab){
+    captureEngEditDraft();
+    engDetailTab = tab;
+    Array.prototype.forEach.call(document.querySelectorAll(".eng-detail-tab"), function(b){
+      var active = b.getAttribute("data-eng-tab") === tab;
+      b.classList.toggle("active", active);
+      b.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    renderEngDetailTabBody(engDetailCache);
+  }
+
   var engDetailCache = null;
   function renderEngDetail(p){
     engDetailCache = p;
@@ -2475,17 +2567,18 @@
     document.getElementById("treeDetailEyebrow").textContent = p.stage ? (ENG_STAGE_LABELS[p.stage] || "Проект")
       : (ENG_CATEGORY_LABELS[p.record_category] || "Проект");
     var title = [p.make, p.model].filter(Boolean).join(" ") || p.project_name;
+    var tabsHtml = '<div class="eng-detail-tabs" role="tablist">' + ENG_DETAIL_TABS.map(function(t){
+      return '<button type="button" class="eng-detail-tab'+(engDetailTab===t.id?' active':'')+'" role="tab" ' +
+        'aria-selected="'+(engDetailTab===t.id?'true':'false')+'" data-eng-tab="'+t.id+'">'+t.label+'</button>';
+    }).join("") + '</div>';
     var html =
       '<div class="task-head"><div class="task-title">'+escapeHtml(title)+'</div>' +
         '<span class="eng-priority-pill '+p.prio+'"><span class="dot"></span>'+ENG_PRIORITY_LABELS[p.prio]+'</span></div>' +
       '<div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px;">'+escapeHtml(p.product||p.project_name||"")+
         (p.article_number?' · арт. '+escapeHtml(p.article_number):'')+' · '+(p.engineer?escapeHtml(p.engineer):'<i>Не назначен</i>')+'</div>' +
-      '<div class="eng-sec"><div class="eng-sec-head"><span>Информация о проекте</span></div>'+engInfoSection(p)+'</div>' +
-      '<div class="eng-sec"><div class="eng-sec-head"><span>Длительность по стадиям</span></div>'+engStageHistorySection(p)+'</div>' +
-      '<div class="eng-sec"><div class="eng-sec-head"><span>Трудозатраты</span></div>'+engWorkloadSection(p)+'</div>' +
-      '<div class="eng-sec"><div class="eng-sec-head"><span>История проекта</span></div>'+engHistorySection(p)+'</div>' +
-      '<div class="eng-sec"><div class="eng-sec-head"><span>Фотографии и файлы</span></div>'+engPhotosSection(p)+'</div>';
+      tabsHtml + '<div class="eng-detail-tab-body" id="engDetailTabBody"></div>';
     document.getElementById("treeDetailBody").innerHTML = html;
+    renderEngDetailTabBody(p);
   }
 
   function refreshEngDetail(){
@@ -2498,6 +2591,8 @@
 
   function openEngDetail(id){
     openDetailEngId = id;
+    engDetailTab = "general";    // critical requirement: opening a (possibly different) project
+    engEditDraft = null;         // always starts clean - never shows another project's draft/tab
     var p = engFind(id);
     if(p) renderEngDetail(p);
     document.getElementById("detailPanel").classList.add("wide");
@@ -2506,6 +2601,8 @@
   }
 
   document.getElementById("treeDetailBody").addEventListener("click", function(e){
+    var tabBtn = e.target.closest("[data-eng-tab]");
+    if(tabBtn){ setEngDetailTab(tabBtn.getAttribute("data-eng-tab")); return; }
     var p = engDetailCache;
     if(!p || !openDetailEngId) return;
     var t = e.target.closest("[data-action]");
@@ -2513,7 +2610,7 @@
     var act = t.getAttribute("data-action");
     if(act === "eng-save-stage"){
       var st = document.getElementById("engEditStage").value || null;
-      engMoveStage(p.id, st).then(refreshEngDetail);
+      engMoveStage(p.id, st).then(function(){ engEditDraft = null; return refreshEngDetail(); });
     } else if(act === "eng-save-fields"){
       var changes = {};
       var eng = document.getElementById("engEditEngineer").value.trim();
@@ -2526,7 +2623,7 @@
       if(desc !== (p.description||"")) changes.description = desc;
       if(!Object.keys(changes).length) return;
       apiFetch("/api/projects/"+encodeURIComponent(p.id), { method:"PATCH", body:{ changes: changes, version: p.version } })
-        .then(function(){ document.activeElement && document.activeElement.blur(); return loadEngProjects(); }).then(refreshEngDetail)
+        .then(function(){ engEditDraft = null; document.activeElement && document.activeElement.blur(); return loadEngProjects(); }).then(refreshEngDetail)
         .catch(function(err){ showSyncNote("Не сохранено: "+err.message); });
     } else if(act === "eng-add-comment"){
       var txt = document.getElementById("engNewComment").value.trim();

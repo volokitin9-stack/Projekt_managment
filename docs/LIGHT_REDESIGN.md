@@ -151,9 +151,58 @@ egress proxy blocks the CDN this page normally loads it from - production behavi
 No "Штурман" branding anywhere (unchanged from before - the app has said "Доска проектов"
 throughout this whole redesign).
 
+## Phase 5 — Project detail panel: real tabs (Общее/Фото/История/Комментарии)
+
+Converted the engineering project detail panel (`#treeDetailBody`) from one long stacked page into
+four real tabs, closing the last open structural item from the Phase 1 audit. No field, control,
+API endpoint, or business rule was removed or changed - this phase only reorganizes existing markup
+behind a tab bar:
+
+- The old monolithic `engInfoSection(p)` was split into three focused render functions
+  (`engInfoMetaHtml`, `engEditFormHtml`, `engCommentsSectionHtml`) with byte-identical markup to
+  before, just extracted so each can be placed in its own tab.
+- **Общее**: project info block, attention/review banner, the edit form (stage confirm,
+  ответственный, приоритет, артикул, description - still hidden for `ko_viewer` via the existing
+  `isViewer()` check, unchanged), and the workload/hours section (плановые и фактические часы).
+- **Фото**: unchanged `engPhotosSection` - all attachments, previews, and actions as before.
+- **История**: stage-duration history (`engStageHistorySection` - repeat visits, confirmed dates)
+  plus the full project change log (`engHistorySection`).
+- **Комментарии**: the existing comment list and add-comment form, reusing the same
+  `POST /api/projects/:id/comments` endpoint. No new comment system was built - the project already
+  had one, so per the brief it was reused as-is rather than inventing a second one.
+- **Unsaved-edit preservation**: switching tabs does not refetch the project or reset the edit form.
+  A small in-memory draft (`engEditDraft`, keyed to the open project id) captures the Общее tab's
+  input values before switching away and re-applies them on return; it's cleared on save and on
+  closing/opening a project, so it never leaks between projects.
+- `openEngDetail()` now always resets to the Общее tab and clears any draft before rendering, so
+  opening a different project (from the Kanban or from a `?eng=<id>` deep link) never shows a stale
+  tab or another project's unsaved text.
+
+**Verified with a real browser** (admin and `ko_viewer`, headless Chromium), covering all eight
+checks from the brief:
+1. Opening a project card renders the panel with all four tabs present.
+2. Switching through Фото → История → Комментарии → Общее re-renders each tab's content correctly.
+3. Existing edit controls still work: typed an unsaved description, switched away and back - the
+   draft was preserved; saved the stage/field edit form - still functions and clears the draft.
+4. Photos and history render from the already-cached project data, no reload.
+5. Added a real comment through the Комментарии tab - appended to the list via the existing API.
+6. Opened the `?eng=<id>` deep link (the mechanism the КО digest's notification links use) - lands
+   on the correct project, defaulting to Общее.
+7. Opened a second, different project after closing the first - title and tab reset to that
+   project's own data, no mixing with the first project's state.
+8. Closed the panel after opening it via a DOM click (not a pointer click, which would auto-scroll)
+   - the Kanban column's scroll position was byte-identical before and after (40px in both cases).
+9. `ko_viewer` sees and can navigate all four tabs (viewing stays allowed) but the edit form,
+   add-comment input, and upload form are absent from the DOM in every tab (count 0 for all three) -
+   the same gating as before, no new gap introduced.
+
+No page errors in either role. Screenshots delivered in chat. Full regression suite
+(`npm test`) re-run after this change: 405 passed, 1 skipped, and the same two pre-existing,
+unrelated failures as before this phase (`tests/test_parsing.py::test_pdf_table` - a native
+cryptography/cffi sandbox issue; `tests/test_telegram_digest.py::test_digest_includes_recent_engineering_changes_with_a_link` -
+a real-calendar Friday/weekend-gap edge case in the test's own helper, unrelated to this change).
+
 ## Remaining phases (not yet done)
 
-5. Project detail panel: real tabs (Общее/Фото/История/Комментарии) - see open question 1 above.
-   The only still-open structural item from the original audit.
 6. Responsive pass beyond the three required desktop breakpoints (tablet/mobile).
-7. Full regression pass + final screenshots under both roles, all tabs.
+7. Final full regression pass + screenshots covering every phase together, both roles.
